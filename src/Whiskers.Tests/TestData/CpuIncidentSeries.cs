@@ -6,7 +6,7 @@ namespace Whiskers.Tests.TestData;
 /// The 2026-08-26 incident as a replayable series (Plan-0004 WP0).
 ///
 /// <para><b>This is reconstructed, not recorded.</b> The real series lives in the database of the running
-/// instance on Badwolf and was deliberately not exported: reading a production database and putting a week of
+/// production instance and was deliberately not exported: reading a production database and putting a week of
 /// real infrastructure telemetry into a public repository are both decisions that were not mine to make. The
 /// numbers below are the ones the incident report states, and nothing else — every constant carries the line
 /// it came from.</para>
@@ -19,34 +19,34 @@ namespace Whiskers.Tests.TestData;
 ///
 /// <para>Source: <c>docs/reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md</c>.</para>
 /// </summary>
-public static class BurgCloudIncidentSeries
+public static class CpuIncidentSeries
 {
     // --- documented facts, one constant per stated value -------------------------------------------------
 
-    /// <summary>"BurgCloud (Hetzner, 2 Kerne, Debian 12) — Docker 29.5.2, 10 Container" (report line 3).</summary>
+    /// <summary>"host-b (Hetzner, 2 Kerne, Debian 12) — Docker 29.5.2, 10 Container" (report line 5).</summary>
     public const int CoreCount = 2;
 
-    public const string ServerId = "burgcloud";
-    public const string ServerName = "BurgCloud";
+    public const string ServerId = "host-b";
+    public const string ServerName = "Host-B";
 
-    /// <summary>"20.08.2026 14:02 UTC bis 26.08.2026 15:07 UTC (6 Tage)" (report line 4).</summary>
+    /// <summary>"20.08.2026 14:02 UTC bis 26.08.2026 15:07 UTC (6 Tage)" (report line 6).</summary>
     public static readonly DateTime IncidentStart = new(2026, 8, 20, 14, 2, 0, DateTimeKind.Utc);
     public static readonly DateTime IncidentEnd = new(2026, 8, 26, 15, 7, 0, DateTimeKind.Utc);
 
-    /// <summary>"die Last am 20.08. innerhalb von zwei Minuten von 12 % auf 98 % sprang" (report line 87).</summary>
+    /// <summary>"die Last am 20.08. innerhalb von zwei Minuten von 12 % auf 98 % sprang" (report lines 88–89).</summary>
     public const double CpuBeforePercent = 12.0;
     public static readonly TimeSpan RampDuration = TimeSpan.FromMinutes(2);
 
-    /// <summary>"Server-CPU (Whiskers) | 98,3 % | 9,0 %" — during and after (report line 31).</summary>
+    /// <summary>"Server-CPU (Whiskers) | 98,3 % | 9,0 %" — during and after (report line 33).</summary>
     public const double CpuDuringPercent = 98.3;
     public const double CpuAfterPercent = 9.0;
 
-    /// <summary>The containers were not the cause: dockerd burned 184% of 200% (report line 28), so what the
+    /// <summary>The containers were not the cause: dockerd burned 184% of 200% (report line 30), so what the
     /// containers themselves accounted for stayed at its ordinary level throughout. Expressed in Docker's
     /// scale, where one busy core is 100 — on this 2-core host that is 12% of the machine.</summary>
     public const double ContainerCpuSumDockerScale = 24.0;
 
-    /// <summary>"rund 1.600-mal am Tag nach ServerMetrics geschrieben" (report line 20) — one sample roughly
+    /// <summary>"rund 1.600-mal am Tag nach ServerMetrics geschrieben" (report line 23) — one sample roughly
     /// every 54 seconds. Rounded to a minute here; the difference cannot change any verdict at these scales,
     /// and a round number is easier to reason about when a test fails.</summary>
     public static readonly TimeSpan SampleInterval = TimeSpan.FromMinutes(1);

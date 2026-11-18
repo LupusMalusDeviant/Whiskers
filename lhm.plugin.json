@@ -278,12 +278,12 @@
     },
     {
       "name": "list_dns_records",
-      "description": "List the DNS records of a zone (e.g. 'lupusmalus.dev') at the configured DNS provider. Names are relative to the zone ('@' = the zone itself). Optionally filter by name and/or type. Read-only.",
+      "description": "List the DNS records of a zone (e.g. 'example.com') at the configured DNS provider. Names are relative to the zone ('@' = the zone itself). Optionally filter by name and/or type. Read-only.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "zone": {
-            "description": "Zone / domain, e.g. lupusmalus.dev",
+            "description": "Zone / domain, e.g. example.com",
             "type": "string"
           },
           "name": {
@@ -427,7 +427,7 @@
         "type": "object",
         "properties": {
           "zone": {
-            "description": "Zone / domain, e.g. lupusmalus.dev",
+            "description": "Zone / domain, e.g. example.com",
             "type": "string"
           },
           "name": {
@@ -559,7 +559,7 @@
         "type": "object",
         "properties": {
           "serverId": {
-            "description": "Server id, e.g. 'local' or 'burgcloud'.",
+            "description": "Server id, e.g. 'local' or 'web-01'.",
             "type": "string"
           },
           "container": {
@@ -828,7 +828,7 @@
         "type": "object",
         "properties": {
           "zone": {
-            "description": "Zone / domain, e.g. lupusmalus.dev",
+            "description": "Zone / domain, e.g. example.com",
             "type": "string"
           },
           "name": {
@@ -1091,7 +1091,7 @@
         "type": "object",
         "properties": {
           "prompt": {
-            "description": "The task for the agent, in natural language (e.g. 'restart the unhealthy containers on Badwolf').",
+            "description": "The task for the agent, in natural language (e.g. 'restart the unhealthy containers on web-01').",
             "type": "string"
           }
         },
@@ -1216,7 +1216,7 @@
         "type": "object",
         "properties": {
           "serverId": {
-            "description": "Server id, e.g. 'local' or 'infomaniak'.",
+            "description": "Server id, e.g. 'local' or 'web-02'.",
             "type": "string"
           },
           "container": {

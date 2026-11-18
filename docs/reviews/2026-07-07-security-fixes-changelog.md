@@ -1,3 +1,5 @@
+> Historical document, kept for reference; names anonymised.
+
 # Changelog — Security-Review-Fixes (2026-07-07)
 
 Umsetzung aller kritischen und hohen sowie der meisten mittleren/niedrigen Findings und Optimierungen aus dem internen Full-Repo-Review (2026-07-06).

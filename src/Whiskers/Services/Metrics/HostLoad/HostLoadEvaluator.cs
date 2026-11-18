@@ -92,7 +92,7 @@ public sealed class HostLoadThresholds
 /// <summary>
 /// The rules that would have caught the 2026-08-26 incident (Plan-0004 WP1/WP2/WP5).
 ///
-/// <para>Whiskers recorded roughly 8,900 measurements of BurgCloud over six days, practically every one of
+/// <para>Whiskers recorded roughly 8,900 measurements of one two-core host over six days, practically every one of
 /// them above 98%, and evaluated none of them — because <c>EvaluateAlertsAsync</c> judges containers, and
 /// <c>dockerd</c> runs in no container. The load fell through the gap between "per container" and "disk".</para>
 ///

@@ -282,7 +282,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                                 // A target that has NEVER been scanned successfully has no previous result to
                                 // keep, so the old branch stored nothing at all — and a target that is absent
                                 // reads, in every view, exactly like one with no findings. Found on
-                                // 2026-08-28: two running containers on infomaniak had been invisible since
+                                // 2026-08-28: two running containers on web-02 had been invisible since
                                 // their image layers went bad, and the only trace was a warning that the log
                                 // rotated away within the hour. Store the failure instead, so the target
                                 // exists and says why it is empty.

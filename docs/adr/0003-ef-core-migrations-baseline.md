@@ -17,7 +17,7 @@ Diese Duplizierung driftet: der DDL-Block hatte `AlertHistory` nie enthalten (MI
 
 **EF Core Migrations vollständig übernehmen** (`MigrateAsync` statt `EnsureCreated` + Hand-DDL). Neue Schemaänderungen entstehen künftig ausschließlich per `dotnet ef migrations add`. Ein `MetricsDbContextFactory` (`IDesignTimeDbContextFactory`) hält die Tooling-Zeit vom App-Host fern.
 
-Die Herausforderung ist der Übergang von Bestands-DBs (Badwolf), die per `EnsureCreated` entstanden sind und **kein `__EFMigrationsHistory`** besitzen. Ein naives `MigrateAsync` würde dort `InitialCreate` gegen bereits existierende Tabellen laufen lassen → `table already exists` → Crash-Loop bei jedem Start.
+Die Herausforderung ist der Übergang von Bestands-DBs (die produktive Instanz), die per `EnsureCreated` entstanden sind und **kein `__EFMigrationsHistory`** besitzen. Ein naives `MigrateAsync` würde dort `InitialCreate` gegen bereits existierende Tabellen laufen lassen → `table already exists` → Crash-Loop bei jedem Start.
 
 Deshalb baselined `DatabaseInitializer.InitializeAsync` solche DBs, statt sie neu zu migrieren:
 

@@ -60,7 +60,7 @@ public sealed class ActionOutcomeTests : IDisposable
         // WP2.4, the plan's central rule. Nothing has recorded a latency for this server, so there is nothing
         // to judge against — and "we could not tell" must never be filed as "it worked".
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
         await MakeDueAsync();
 
         var judged = Assert.Single(await service.EvaluateDueAsync(DateTime.UtcNow));
@@ -75,8 +75,8 @@ public sealed class ActionOutcomeTests : IDisposable
         // The other side: the rule has to be able to say yes, or "not measurable" is just a way of never
         // committing to anything.
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
-        _metrics.RecordApiCall("badwolf", TimeSpan.FromMilliseconds(120));
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
+        _metrics.RecordApiCall("host-a", TimeSpan.FromMilliseconds(120));
         await MakeDueAsync();
 
         var judged = Assert.Single(await service.EvaluateDueAsync(DateTime.UtcNow));
@@ -91,8 +91,8 @@ public sealed class ActionOutcomeTests : IDisposable
         // The verdict the whole package exists for. Whiskers throttled itself, the daemon is still crawling —
         // so the load was never ours, and the throttle is a blind spot imposed for nothing.
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
-        _metrics.RecordApiCall("badwolf", TimeSpan.FromSeconds(6));
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
+        _metrics.RecordApiCall("host-a", TimeSpan.FromSeconds(6));
         await MakeDueAsync();
 
         var judged = Assert.Single(await service.EvaluateDueAsync(DateTime.UtcNow));
@@ -107,17 +107,17 @@ public sealed class ActionOutcomeTests : IDisposable
         // A reading from before the action describes the world it was meant to change. Getting this backwards
         // would make every emergency stop look successful the moment it was taken.
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.EmergencyStop, "badwolf", "badwolf", "Badwolf");
+        await service.RecordAsync(AutomaticActionKind.EmergencyStop, "host-a", "host-a", "Host-A");
 
         using (var db = Db())
         {
             db.ServerMetrics.Add(new ServerMetricEntity
             {
-                ServerId = "badwolf", Timestamp = DateTime.UtcNow.AddMinutes(-30), CpuPercent = 20  // before
+                ServerId = "host-a", Timestamp = DateTime.UtcNow.AddMinutes(-30), CpuPercent = 20  // before
             });
             db.ServerMetrics.Add(new ServerMetricEntity
             {
-                ServerId = "badwolf", Timestamp = DateTime.UtcNow.AddSeconds(5), CpuPercent = 98    // after
+                ServerId = "host-a", Timestamp = DateTime.UtcNow.AddSeconds(5), CpuPercent = 98    // after
             });
             await db.SaveChangesAsync();
         }
@@ -170,8 +170,8 @@ public sealed class ActionOutcomeTests : IDisposable
         // from nothing, so any reading describes the new process rather than the action. An action recorded
         // before the process started is exactly that situation.
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
-        _metrics.RecordApiCall("badwolf", TimeSpan.FromMilliseconds(50));   // would otherwise pass easily
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
+        _metrics.RecordApiCall("host-a", TimeSpan.FromMilliseconds(50));   // would otherwise pass easily
 
         using (var db = Db())
         {
@@ -195,8 +195,8 @@ public sealed class ActionOutcomeTests : IDisposable
         // here, the evaluation itself. The "start time" then landed after every action and EVERY outcome came
         // back not-measurable: a checker that never checks, wearing the costume of diligence.
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
-        _metrics.RecordApiCall("badwolf", TimeSpan.FromMilliseconds(50));
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
+        _metrics.RecordApiCall("host-a", TimeSpan.FromMilliseconds(50));
         await MakeDueAsync();
 
         var judged = Assert.Single(await service.EvaluateDueAsync(DateTime.UtcNow));
@@ -219,7 +219,7 @@ public sealed class ActionOutcomeTests : IDisposable
     public async Task A_window_that_has_not_elapsed_is_left_alone()
     {
         var service = Service();
-        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "badwolf", "badwolf", "Badwolf");
+        await service.RecordAsync(AutomaticActionKind.SelfThrottle, "host-a", "host-a", "Host-A");
 
         Assert.Empty(await service.EvaluateDueAsync(DateTime.UtcNow));
         Assert.Equal(ActionVerdict.Pending, Db().ActionOutcomes.Single().Verdict);
@@ -280,7 +280,7 @@ public sealed class ActionOutcomeTests : IDisposable
         // about nothing in particular.
         var service = Service();
         var correlation = await service.RecordAsync(
-            AutomaticActionKind.LogScanLockout, "badwolf", "c1", "ghostunnel", reason: "3 timeouts in a row");
+            AutomaticActionKind.LogScanLockout, "host-a", "c1", "ghostunnel", reason: "3 timeouts in a row");
 
         var row = Db().ActionOutcomes.Single();
 

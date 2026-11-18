@@ -94,9 +94,9 @@ public sealed class NotificationPipelineTests : IDisposable
         await Service().SendAsync(new NotificationEvent
         {
             EventType = "server_unreachable",
-            ServerId = "rabenhof",
-            ServerName = "Rabenhof",
-            ImageInfo = "Rabenhof — Connection failed"
+            ServerId = "host-d",
+            ServerName = "Host-D",
+            ImageInfo = "Host-D — Connection failed"
         });
 
         Assert.Single(_channel.Sent);
@@ -111,13 +111,13 @@ public sealed class NotificationPipelineTests : IDisposable
         {
             ContainerName = "web",
             ContainerId = "abc123",
-            ServerId = "rabenhof",
-            ServerName = "Rabenhof",
+            ServerId = "host-d",
+            ServerName = "Host-D",
             EventType = "unhealthy"
         });
 
         var row = Assert.Single(History());
-        Assert.Equal("rabenhof", row.ServerId);      // the column that makes the history fleet-aware
+        Assert.Equal("host-d", row.ServerId);      // the column that makes the history fleet-aware
         Assert.Equal("web", row.ContainerName);
         Assert.Equal("unhealthy", row.AlertType);
         Assert.Contains("Container unhealthy", row.Message);
@@ -128,8 +128,8 @@ public sealed class NotificationPipelineTests : IDisposable
     public async Task A_recovery_closes_the_outage_it_ends()
     {
         var svc = Service();
-        await svc.SendAsync(new NotificationEvent { EventType = "server_unreachable", ServerId = "rabenhof", ServerName = "Rabenhof" });
-        await svc.SendAsync(new NotificationEvent { EventType = "server_recovered", ServerId = "rabenhof", ServerName = "Rabenhof" });
+        await svc.SendAsync(new NotificationEvent { EventType = "server_unreachable", ServerId = "host-d", ServerName = "Host-D" });
+        await svc.SendAsync(new NotificationEvent { EventType = "server_recovered", ServerId = "host-d", ServerName = "Host-D" });
 
         var rows = History();
         Assert.True(rows.Single(r => r.AlertType == "server_unreachable").Resolved);
@@ -139,8 +139,8 @@ public sealed class NotificationPipelineTests : IDisposable
     public async Task A_recovery_does_not_close_another_servers_outage()
     {
         var svc = Service();
-        await svc.SendAsync(new NotificationEvent { EventType = "server_unreachable", ServerId = "rabenhof" });
-        await svc.SendAsync(new NotificationEvent { EventType = "server_recovered", ServerId = "burgcloud" });
+        await svc.SendAsync(new NotificationEvent { EventType = "server_unreachable", ServerId = "host-d" });
+        await svc.SendAsync(new NotificationEvent { EventType = "server_recovered", ServerId = "host-b" });
 
         Assert.False(History().Single(r => r.AlertType == "server_unreachable").Resolved);
     }

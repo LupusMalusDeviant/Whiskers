@@ -90,7 +90,7 @@ public class TailscaleVpnProvider : IVpnProvider
 
         // 1) Ensure the daemon is running — unless the HOST already runs Tailscale. In a host-network container
         //    a second tailscaled fights the host daemon for tailscale0 and makes it restart, which dropped every
-        //    mesh connection for one to two minutes on each Whiskers restart (Badwolf, 2026-10).
+        //    mesh connection for one to two minutes on each Whiskers restart (production host, 2026-10).
         var status = await _runner.RunAsync("tailscale", [SocketArg, "status", "--json"], ct, 5000);
         var daemonResponds = DaemonResponds(status);
         var decision = DecideDaemon(daemonResponds, _hostInterfacePresent(),

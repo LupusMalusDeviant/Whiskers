@@ -20,9 +20,9 @@ namespace Whiskers.Tests;
 /// </summary>
 public class SelfStatusToolTests
 {
-    private static readonly ServerConfig Badwolf = new()
+    private static readonly ServerConfig HostA = new()
     {
-        Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
+        Id = "host-a", Name = "Host-A", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
     };
 
     /// <summary>An authenticated caller in AUTH_DISABLED mode, which maps to admin — the tool is read-level,
@@ -40,7 +40,7 @@ public class SelfStatusToolTests
 
     private static string Report(ISelfMetrics metrics, ILoopSuspensionService? suspension = null)
     {
-        var servers = new FakeServerConfig(Badwolf);
+        var servers = new FakeServerConfig(HostA);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
 
         return SelfStatusTools.GetWhiskersSelfStatus(
@@ -60,12 +60,12 @@ public class SelfStatusToolTests
     {
         // The acceptance criterion. A loop with a one-minute cadence whose last success was two hours ago.
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
-        metrics.Restore("logmonitor", "badwolf", DateTime.UtcNow.AddHours(-2), TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.Restore("logmonitor", "host-a", DateTime.UtcNow.AddHours(-2), TimeSpan.FromMinutes(1));
 
         // Restore only fills gaps, so age it the way a real stall would: a fresh instance, restored old.
         var stalled = new SelfMetrics();
-        stalled.Restore("logmonitor", "badwolf", DateTime.UtcNow.AddHours(-2), TimeSpan.FromMinutes(1));
+        stalled.Restore("logmonitor", "host-a", DateTime.UtcNow.AddHours(-2), TimeSpan.FromMinutes(1));
 
         var text = Report(stalled);
 
@@ -80,7 +80,7 @@ public class SelfStatusToolTests
         // The other half of the answer, and the reason the wording matters: an agent that reads "no findings"
         // needs to know whether that is good news or no news.
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
 
         var text = Report(metrics);
 
@@ -94,7 +94,7 @@ public class SelfStatusToolTests
         // A Kubernetes host under a Docker loop is not broken — but leaving it out entirely would make
         // "not covered" and "nothing found" look identical.
         var metrics = new SelfMetrics();
-        metrics.RecordSkip("logmonitor", "badwolf", "kubernetes");
+        metrics.RecordSkip("logmonitor", "host-a", "kubernetes");
 
         var text = Report(metrics);
 
@@ -108,8 +108,8 @@ public class SelfStatusToolTests
         // No cadence, no basis for a verdict. Inventing a threshold here would make the tool a source of
         // noise, and a noisy self-check is one people stop reading.
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("mystery", "badwolf", TimeSpan.FromMilliseconds(50), success: true);
-        metrics.Restore("mystery", "badwolf", DateTime.UtcNow.AddDays(-3), null);
+        metrics.RecordCycle("mystery", "host-a", TimeSpan.FromMilliseconds(50), success: true);
+        metrics.Restore("mystery", "host-a", DateTime.UtcNow.AddDays(-3), null);
 
         var text = Report(metrics);
 
@@ -122,11 +122,11 @@ public class SelfStatusToolTests
     {
         // Otherwise the loops look fine and the server looks quiet, and nobody connects the two.
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
 
         var suspension = new LoopSuspensionService(
-            new FakeNotifications(), new FakeServerConfig(Badwolf), NullLogger<LoopSuspensionService>.Instance, new NoOutcomes());
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "investigating");
+            new FakeNotifications(), new FakeServerConfig(HostA), NullLogger<LoopSuspensionService>.Instance, new NoOutcomes());
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "investigating");
 
         Assert.Contains("background checks PAUSED", Report(metrics, suspension));
     }

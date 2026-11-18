@@ -27,7 +27,7 @@ public class TrivyScanner : ITrivyScanner
     /// <summary>
     /// Output cap for a Trivy run, raised well above the executor's default 1 MB.
     ///
-    /// <para>Trivy's JSON for a large image runs to several megabytes — the Authentik server image measures
+    /// <para>Trivy's JSON for a large image runs to several megabytes — an identity-provider server image measures
     /// 3.4 MB — and the default cap cut it mid-document. The scan then failed with
     /// "'0xE2' is an invalid start of a value", which is the first byte of the executor's truncation marker
     /// and reads as a parser bug. The image quietly stopped being scanned for months.</para>
@@ -81,7 +81,7 @@ public class TrivyScanner : ITrivyScanner
         // a named volume so subsequent scans are fast.
         // Mount the host Docker socket so Trivy's "docker" image source can scan
         // locally-built images that exist only in the daemon with no registry to pull from
-        // (e.g. compose-built app images like `rabenhof-web`, `whiskers-web`). Without it
+        // (e.g. compose-built app images like `shop-web`, `whiskers-web`). Without it
         // Trivy fails those with a FATAL "unable to find the specified image". Registry
         // images continue to resolve exactly as before.
         string Command(bool fromRegistry) =>

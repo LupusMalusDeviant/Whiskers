@@ -9,7 +9,7 @@
 #   status                      print the last run's status file
 #
 # The server's key is forced to "borg serve --append-only" on the Storage Box side, so this
-# script can add archives but never delete or prune them. Pruning runs from Badwolf
+# script can add archives but never delete or prune them. Pruning runs from the control host
 # (borg-fleet-prune) with a separate, unrestricted admin key.
 #
 # Tools (no Python — contract 0017 part I):
@@ -75,7 +75,7 @@ EOF
         borg init --encryption=repokey-blake2 --append-only
         echo "REPO=created"
     fi
-    # Recovery material for Badwolf's escrow: the repokey export (useless without the passphrase).
+    # Recovery material for the control host's escrow: the repokey export (useless without the passphrase).
     # Only ever read back by borg-enroll over the local Whiskers MCP endpoint, whose call log
     # records arguments but not output.
     echo "PASSPHRASE=$(cat "$PASSFILE")"

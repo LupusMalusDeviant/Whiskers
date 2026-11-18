@@ -56,8 +56,8 @@ public sealed class LogMonitorLoadInvariantTests : IDisposable
     private static FakeDocker WedgedHost()
     {
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-proxy", Name = "socket-proxy", Image = "img:1", ServerId = "local", ServerName = "Badwolf" },
-            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" })
+            new ContainerInfo { Id = "c-proxy", Name = "socket-proxy", Image = "img:1", ServerId = "local", ServerName = "Host-A" },
+            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Host-A" })
         {
             FetchDelay = WedgedHostDelay
         };
@@ -67,7 +67,7 @@ public sealed class LogMonitorLoadInvariantTests : IDisposable
     private LogMonitorService Monitor(FakeDocker docker) =>
         new(_sp.GetRequiredService<IServiceScopeFactory>(),
             docker,
-            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }),
             new FakeNotifications(),
             NullLogger<LogMonitorService>.Instance,
             TestBudget.Create(), new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(),

@@ -151,14 +151,14 @@ public class BackgroundServiceFailureTests
 
         // The caller gives up while its call runs: nothing about the server.
         using (var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(50)))
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => docker.ExecuteAsync<int>("badwolf",
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => docker.ExecuteAsync<int>("host-a",
                 async _ => { await Task.Delay(Timeout.Infinite, caller.Token); return 0; }, callerToken: caller.Token));
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
 
         // A deadline at the host does count.
-        await Assert.ThrowsAsync<TimeoutException>(() => docker.ExecuteAsync<int>("badwolf",
+        await Assert.ThrowsAsync<TimeoutException>(() => docker.ExecuteAsync<int>("host-a",
             _ => throw new TimeoutException("the daemon did not answer")));
-        Assert.Equal(1, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, circuit.Snapshot("host-a").ConsecutiveFailures);
     }
 
     [Fact]
@@ -167,16 +167,16 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, _) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
 
         using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        var queued = docker.ExecuteAsync("badwolf", _ => Task.FromResult(1), callerToken: caller.Token);
+        var queued = docker.ExecuteAsync("host-a", _ => Task.FromResult(1), callerToken: caller.Token);
 
         var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.IsNotType<BudgetSaturatedException>(ex);
         release.SetResult();
         await Task.WhenAll(busy);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
     }
 
     [Fact]
@@ -185,14 +185,14 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, budget) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
 
         using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        await Assert.ThrowsAsync<BudgetSaturatedException>(() => docker.ExecuteAsync("badwolf", _ => Task.FromResult(1),
+        await Assert.ThrowsAsync<BudgetSaturatedException>(() => docker.ExecuteAsync("host-a", _ => Task.FromResult(1),
             deadline: deadline.Token).WaitAsync(TimeSpan.FromSeconds(10)));
 
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
         release.SetResult();
         await Task.WhenAll(busy);
     }
@@ -208,13 +208,13 @@ public class BackgroundServiceFailureTests
         var busy = new List<Task<int>>();
         var calls = 0;
 
-        var call = docker.ExecuteAsync<int>("badwolf", _ =>
+        var call = docker.ExecuteAsync<int>("host-a", _ =>
         {
             if (Interlocked.Increment(ref calls) > 1)
                 throw new TimeoutException("the retry's deadline, spent in the queue");
             // Every slot is taken (and one more caller waits) before the first attempt fails: the retry has to queue.
             busy.AddRange(Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-                .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })));
+                .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })));
             throw new IOException("the tunnel dropped");
         });
         await Task.Delay(300);
@@ -223,8 +223,8 @@ public class BackgroundServiceFailureTests
         var ex = await Assert.ThrowsAsync<BudgetSaturatedException>(() => call.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.IsType<TimeoutException>(ex.InnerException);
         Assert.Equal(2, calls);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures);
         await Task.WhenAll(busy);
     }
 
@@ -236,10 +236,10 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, budget) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
         var calls = 0;
 
-        var call = docker.ExecuteAsync<int>("badwolf", _ =>
+        var call = docker.ExecuteAsync<int>("host-a", _ =>
         {
             Interlocked.Increment(ref calls);
             throw new TimeoutException("the deadline, spent in the queue");
@@ -250,8 +250,8 @@ public class BackgroundServiceFailureTests
         var ex = await Assert.ThrowsAsync<BudgetSaturatedException>(() => call.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.IsType<TimeoutException>(ex.InnerException);
         Assert.Equal(1, calls);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures);
         await Task.WhenAll(busy);
     }
 
@@ -263,7 +263,7 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, budget) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
         var ops = Operations(docker, TimeSpan.FromMilliseconds(200));
 
         var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
@@ -271,12 +271,12 @@ public class BackgroundServiceFailureTests
         // The server's timeout ran out in Whiskers' own queue: the server was never asked (review round 4), not held
         // against it, counted as the queue's doing.
         var failure = Assert.Single(listing.FailedServers);
-        Assert.Equal("badwolf", failure.ServerId);
+        Assert.Equal("host-a", failure.ServerId);
         Assert.True(failure.NotAsked);
         Assert.StartsWith("Not asked", failure.Error);
         Assert.Empty(listing.RespondedServerIds);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures);
         release.SetResult();
         await Task.WhenAll(busy);
     }
@@ -289,7 +289,7 @@ public class BackgroundServiceFailureTests
         var (docker, _, _) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
         var ops = Operations(docker, TimeSpan.FromMilliseconds(100));
         var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
 
@@ -305,7 +305,7 @@ public class BackgroundServiceFailureTests
         await Task.WhenAll(busy);
 
         // Control: the same server failing for real does trip the tracker.
-        var real = new FleetContainerListing { FailedServers = [new FleetServerFailure("badwolf", "Badwolf", "Timed out after 8s")] };
+        var real = new FleetContainerListing { FailedServers = [new FleetServerFailure("host-a", "Host-A", "Timed out after 8s")] };
         Assert.Empty(tracker.Evaluate(real));
         Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(real)).EventType);
     }
@@ -322,8 +322,8 @@ public class BackgroundServiceFailureTests
         var failure = Assert.Single(listing.FailedServers);
         Assert.False(failure.NotAsked, failure.Error);
         Assert.StartsWith("Timed out", failure.Error);
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures); // the budget still saw its own queue
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures); // the budget still saw its own queue
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
 
         var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
         Assert.Empty(tracker.Evaluate(listing));
@@ -343,8 +343,8 @@ public class BackgroundServiceFailureTests
         var failure = Assert.Single(listing.FailedServers);
         Assert.False(failure.NotAsked, failure.Error);
         Assert.StartsWith("Timed out", failure.Error);
-        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);
-        Assert.Equal(1, circuit.Snapshot("badwolf").ConsecutiveFailures); // the server's timeout, held against it
+        Assert.Equal(0, budget.Snapshot("host-a").SaturationFailures);
+        Assert.Equal(1, circuit.Snapshot("host-a").ConsecutiveFailures); // the server's timeout, held against it
     }
 
     /// <summary>
@@ -367,7 +367,7 @@ public class BackgroundServiceFailureTests
             var slots = new ServerBudgetSettings().InteractiveConcurrency;
             var holding = 0;
             var busy = Enumerable.Range(0, slots)
-                .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ =>
+                .Select(_ => docker.ExecuteGuardedAsync("host-a", async _ =>
                 {
                     Interlocked.Increment(ref holding);
                     await release.Task;
@@ -389,7 +389,7 @@ public class BackgroundServiceFailureTests
             clock.Advance(ran);
             var listing = await listingTask.WaitAsync(TimeSpan.FromSeconds(10));
             // The budget measured exactly the wait the test set (the held slots waited for nothing).
-            Assert.Equal((long)waited.TotalMilliseconds, budget.Snapshot("badwolf").MaxWaitMilliseconds);
+            Assert.Equal((long)waited.TotalMilliseconds, budget.Snapshot("host-a").MaxWaitMilliseconds);
             return (listing, circuit, budget);
         }
         finally
@@ -425,15 +425,15 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, budget) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
         var ops = Operations(docker, TimeSpan.FromMinutes(5));
 
         using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => ops.ListAllContainersDetailedAsync(true, caller.Token).WaitAsync(TimeSpan.FromSeconds(10)));
 
-        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);   // not the queue's doing
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures); // not the server's
+        Assert.Equal(0, budget.Snapshot("host-a").SaturationFailures);   // not the queue's doing
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures); // not the server's
         release.SetResult();
         await Task.WhenAll(busy);
     }
@@ -446,31 +446,31 @@ public class BackgroundServiceFailureTests
         var (docker, circuit, budget) = Connection();
         var release = new TaskCompletionSource();
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+            .Select(_ => docker.ExecuteAsync("host-a", async _ => { await release.Task; return 0; })).ToList();
         var ops = Operations(docker, TimeSpan.FromMinutes(5));
 
         // The stop while queued: a cancellation, not the queue's, not the server's.
         using (var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
         {
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => ops.ListContainersAsync(true, "badwolf", stop.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+                () => ops.ListContainersAsync(true, "host-a", stop.Token).WaitAsync(TimeSpan.FromSeconds(10)));
         }
         using (var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
         using (var fetchTimeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token))
         {
-            var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ops.GetContainerLogsAsync("c1", 10, "badwolf",
+            var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ops.GetContainerLogsAsync("c1", 10, "host-a",
                 null, deadline: fetchTimeout.Token, callerToken: stop.Token).WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.IsNotType<BudgetSaturatedException>(ex);
         }
-        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(0, budget.Snapshot("host-a").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
 
         // The fetch timeout running out in the queue: the queue's doing, still not the server's.
         using (var fetchTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
-            await Assert.ThrowsAsync<BudgetSaturatedException>(() => ops.GetContainerLogsAsync("c1", 10, "badwolf", null,
+            await Assert.ThrowsAsync<BudgetSaturatedException>(() => ops.GetContainerLogsAsync("c1", 10, "host-a", null,
                 deadline: fetchTimeout.Token, callerToken: CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
-        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("host-a").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("host-a").ConsecutiveFailures);
 
         release.SetResult();
         await Task.WhenAll(busy);
@@ -580,14 +580,14 @@ public class BackgroundServiceFailureTests
         }
     }
 
-    private static readonly ServerConfig Badwolf = new()
+    private static readonly ServerConfig HostA = new()
     {
-        Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
+        Id = "host-a", Name = "Host-A", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
     };
 
     private static Whiskers.Services.Docker.Operations.ContainerOperations Operations(
         Whiskers.Services.Docker.DockerConnectionManager docker, TimeSpan perServer, TimeProvider? clock = null) =>
-        new(docker, new FakeServerConfig(Badwolf), NullLogger<Whiskers.Services.Docker.DockerService>.Instance,
+        new(docker, new FakeServerConfig(HostA), NullLogger<Whiskers.Services.Docker.DockerService>.Instance,
             new MemoryCache(new MemoryCacheOptions()), new Whiskers.Services.Observability.SelfMetrics.SelfMetrics())
         {
             PerServerTimeout = perServer,
@@ -597,7 +597,7 @@ public class BackgroundServiceFailureTests
     private static (Whiskers.Services.Docker.DockerConnectionManager Docker, ServerCircuitBreaker Circuit, ServerBudget Budget) Connection(
         Func<CancellationToken, Task>? sentRequest = null, TimeProvider? time = null)
     {
-        var servers = new FakeServerConfig(Badwolf);
+        var servers = new FakeServerConfig(HostA);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
         var budget = new ServerBudget(settings, NullLogger<ServerBudget>.Instance, time);
         var circuit = new ServerCircuitBreaker(settings, new ServiceCollection().BuildServiceProvider(),
@@ -788,7 +788,7 @@ public class BackgroundServiceFailureTests
         services.AddOptions<MetricsSettings>().Bind(config.GetSection("Metrics"));
         services.AddOptions<MetricAlertSettings>();
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
-            new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }));
+            new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }));
         using var sp = services.BuildServiceProvider();
         var logs = new NotificationDeliveryTests.ListLoggerProvider();
         using var loggers = new Microsoft.Extensions.Logging.LoggerFactory([logs]);

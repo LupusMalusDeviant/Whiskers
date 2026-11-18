@@ -1,7 +1,7 @@
 # Module: dns
 
 DNS zone records at an external provider — Infomaniak today — through three MCP tools, so the operator can
-say "point holler.app.lupusmalus.dev at 1.2.3.4" instead of clicking through the provider's Manager. No page,
+say "point holler.app.example.com at 203.0.113.4" instead of clicking through the provider's Manager. No page,
 no nav entry; the only UI is the *Settings → DNS (Infomaniak)* panel that holds the token.
 
 | | |
@@ -22,13 +22,13 @@ no nav entry; the only UI is the *Settings → DNS (Infomaniak)* panel that hold
 encrypted in the vault (R1-29; saving one needs a usable `VAULT_KEY`); the `Dns` section of
 `/app/data/app-settings.json` only names its vault key (`ApiTokenRef`). It applies live via `IOptionsMonitor`, and
 is never shown again — the panel only reports "hinterlegt (…last4)". A plaintext token from before R1-29 is moved into the vault at the
-first start with a usable vault. Equivalent environment configuration (not stored by Whiskers): `Dns__ApiToken`, `Dns__AllowedZones__0=lupusmalus.dev`, `Dns__DefaultTtl=300`.
+first start with a usable vault. Equivalent environment configuration (not stored by Whiskers): `Dns__ApiToken`, `Dns__AllowedZones__0=example.com`, `Dns__DefaultTtl=300`.
 
 Without a token every tool answers a one-line hint and calls nothing.
 
 ## Tool behaviour
 
-- **Names are zone-relative.** `holler.app` in zone `lupusmalus.dev` is `holler.app.lupusmalus.dev`; `@`, an
+- **Names are zone-relative.** `holler.app` in zone `example.com` is `holler.app.example.com`; `@`, an
   empty name, or the zone itself all mean the apex. An FQDN ending in the zone is accepted and trimmed.
 - **Types:** A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Values are validated per type before any call.
   MX/SRV/CAA (structured extras) and NS/SOA (the zone's skeleton) are deliberately out of reach.

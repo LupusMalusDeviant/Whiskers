@@ -22,7 +22,7 @@ public class RollingBaselineTests
     private static List<HostLoadFinding> Replay(BaselineSettings? settings = null)
     {
         var baseline = new RollingBaseline(settings);
-        return BurgCloudIncidentSeries.Build()
+        return CpuIncidentSeries.Build()
             .SelectMany(s => baseline.Observe(
                 s.AtUtc, s.ServerId, s.ServerName, "host_cpu", s.HostCpuPercent, AbsoluteCpuThreshold))
             .ToList();
@@ -39,10 +39,10 @@ public class RollingBaselineTests
             .FirstOrDefault();
 
         Assert.NotNull(anomaly);
-        Assert.True(anomaly!.AtUtc >= BurgCloudIncidentSeries.IncidentStart,
+        Assert.True(anomaly!.AtUtc >= CpuIncidentSeries.IncidentStart,
             $"reported at {anomaly.AtUtc:O}, before the incident even began");
-        Assert.True(anomaly.AtUtc - BurgCloudIncidentSeries.IncidentStart < TimeSpan.FromHours(1),
-            $"took {(anomaly.AtUtc - BurgCloudIncidentSeries.IncidentStart).TotalMinutes:F0} minutes to notice a 12→98 jump");
+        Assert.True(anomaly.AtUtc - CpuIncidentSeries.IncidentStart < TimeSpan.FromHours(1),
+            $"took {(anomaly.AtUtc - CpuIncidentSeries.IncidentStart).TotalMinutes:F0} minutes to notice a 12→98 jump");
         Assert.Contains("standard deviations from this server's own normal", anomaly.Summary);
     }
 
@@ -61,9 +61,9 @@ public class RollingBaselineTests
         Assert.Contains("long enough to look normal", drift.Summary);
 
         // The plan asks for it around 23 August — three days into a six-day incident.
-        Assert.True(drift.AtUtc > BurgCloudIncidentSeries.IncidentStart,
+        Assert.True(drift.AtUtc > CpuIncidentSeries.IncidentStart,
             "the drift cannot precede the load that caused it");
-        Assert.True(drift.AtUtc < BurgCloudIncidentSeries.IncidentEnd,
+        Assert.True(drift.AtUtc < CpuIncidentSeries.IncidentEnd,
             $"drift reported at {drift.AtUtc:O}, after the incident was already over — too late to be useful");
     }
 
@@ -73,7 +73,7 @@ public class RollingBaselineTests
         // Sharper than the bound above: a warning that lands on day five of a six-day incident is a
         // post-mortem, not an alert.
         var drift = Replay().First(f => f.Kind == "host_cpu_baseline_drifted" && f.What == FindingKind.Raised);
-        var into = drift.AtUtc - BurgCloudIncidentSeries.IncidentStart;
+        var into = drift.AtUtc - CpuIncidentSeries.IncidentStart;
 
         // Measured: 19.7 hours. The plan estimated 23 August — three days in — so this is better than asked
         // for, and the bound is set just above the measured value rather than at the plan's estimate. A
@@ -90,7 +90,7 @@ public class RollingBaselineTests
         // but the drift guard is deliberately exempt, and this test must not accidentally forbid it.
         var baseline = new RollingBaseline(new BaselineSettings { LearningPeriod = TimeSpan.FromDays(30) });
 
-        var findings = BurgCloudIncidentSeries.Build()
+        var findings = CpuIncidentSeries.Build()
             .SelectMany(s => baseline.Observe(
                 s.AtUtc, s.ServerId, s.ServerName, "host_cpu", s.HostCpuPercent, AbsoluteCpuThreshold))
             .ToList();
@@ -106,7 +106,7 @@ public class RollingBaselineTests
         // worst possible moment to stay silent.
         var baseline = new RollingBaseline(new BaselineSettings { LearningPeriod = TimeSpan.FromDays(30) });
 
-        var findings = BurgCloudIncidentSeries.Build()
+        var findings = CpuIncidentSeries.Build()
             .SelectMany(s => baseline.Observe(
                 s.AtUtc, s.ServerId, s.ServerName, "host_cpu", s.HostCpuPercent, AbsoluteCpuThreshold))
             .ToList();
@@ -126,7 +126,7 @@ public class RollingBaselineTests
         var cleared = cpu.First(f => f.What == FindingKind.Cleared && f.AtUtc > raised.AtUtc);
 
         Assert.True(cleared.AtUtc - raised.AtUtc < TimeSpan.FromHours(2));
-        Assert.True(cleared.AtUtc < BurgCloudIncidentSeries.IncidentEnd,
+        Assert.True(cleared.AtUtc < CpuIncidentSeries.IncidentEnd,
             "the anomaly went quiet while the incident was still running — which is exactly why the drift guard exists");
     }
 

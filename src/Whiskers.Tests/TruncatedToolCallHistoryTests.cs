@@ -73,11 +73,11 @@ public sealed class TruncatedToolCallHistoryTests
     [Fact]
     public void Well_formed_arguments_are_sent_unchanged()
     {
-        var request = HistoryWith("{\"serverId\":\"badwolf\",\"all\":true}");
+        var request = HistoryWith("{\"serverId\":\"host-a\",\"all\":true}");
 
-        Assert.Equal("{\"serverId\":\"badwolf\",\"all\":true}",
+        Assert.Equal("{\"serverId\":\"host-a\",\"all\":true}",
             AnthropicRequestMapper.BuildBody(request, stream: true)["messages"]![1]!["content"]![0]!["input"]!.ToJsonString());
-        Assert.Equal("{\"serverId\":\"badwolf\",\"all\":true}",
+        Assert.Equal("{\"serverId\":\"host-a\",\"all\":true}",
             OpenAiRequestMapper.BuildBody(request, stream: true)["messages"]![1]!["tool_calls"]![0]!["function"]!["arguments"]!.GetValue<string>());
     }
 }

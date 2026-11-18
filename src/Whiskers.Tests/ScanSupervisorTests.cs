@@ -28,7 +28,7 @@ public class ScanSupervisorTests
         var sent = new FakeNotifications();
         var supervisor = new ScanSupervisor(
             metrics, sent,
-            new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true }),
             NullLogger<ScanSupervisor>.Instance,
             floor ?? NoFloor);
 
@@ -45,7 +45,7 @@ public class ScanSupervisorTests
         var (supervisor, metrics, sent) = Build();
 
         for (var i = 0; i < 5; i++)
-            metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
+            metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
 
         await supervisor.CheckAsync();
 
@@ -58,7 +58,7 @@ public class ScanSupervisorTests
         // The other half. Reporting a loop on its first failed cycle would turn every restart into an
         // incident, and an alarm that fires on every deploy is one people mute.
         var (supervisor, metrics, sent) = Build();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
 
         await supervisor.CheckAsync();
 
@@ -69,7 +69,7 @@ public class ScanSupervisorTests
     public async Task A_loop_that_has_stopped_is_reported_once_and_its_return_is_reported_too()
     {
         var (supervisor, metrics, sent) = Build();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
 
         // Nothing has gone wrong yet.
         await supervisor.CheckAsync();
@@ -81,7 +81,7 @@ public class ScanSupervisorTests
 
         var alarm = Assert.Single(sent.Events);
         Assert.Equal("monitoring_stalled", alarm.EventType);
-        Assert.Equal("badwolf", alarm.ServerId);
+        Assert.Equal("host-a", alarm.ServerId);
 
         // A lasting stall is one alert, not one per check — an alert channel that repeats gets muted, and a
         // muted channel is the same blindness by another route.
@@ -91,7 +91,7 @@ public class ScanSupervisorTests
 
         // And when it runs again, that has to be said too: otherwise the operator is left believing the
         // server is still unmonitored.
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
         await supervisor.CheckAsync();
 
         Assert.Equal(
@@ -106,7 +106,7 @@ public class ScanSupervisorTests
 
         for (var i = 0; i < 5; i++)
         {
-            metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
+            metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
             await supervisor.CheckAsync();
             await Task.Delay(TinyInterval);
         }
@@ -120,7 +120,7 @@ public class ScanSupervisorTests
         // Failures are not stalls. A loop that reports failures is alive and its own guards are handling
         // them; this supervisor exists for the case where nothing is reported at all.
         var (supervisor, metrics, sent) = Build();
-        metrics.RecordCycle("health", "badwolf", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
+        metrics.RecordCycle("health", "host-a", TimeSpan.FromMilliseconds(1), success: false, interval: TinyInterval);
 
         await supervisor.CheckAsync();
 
@@ -133,7 +133,7 @@ public class ScanSupervisorTests
         // "This loop does not cover that server" is already stated by the skip. Reporting it as a stall too
         // would bury the real cases under noise from every Kubernetes host in the fleet.
         var (supervisor, metrics, sent) = Build();
-        metrics.RecordSkip("cve", "badwolf", "Kubernetes server — this loop only speaks to Docker hosts");
+        metrics.RecordSkip("cve", "host-a", "Kubernetes server — this loop only speaks to Docker hosts");
 
         await Task.Delay(TinyInterval * 5);
         await supervisor.CheckAsync();
@@ -148,7 +148,7 @@ public class ScanSupervisorTests
         // loop runs every minute, another every six hours. Silence is the honest answer; a guessed threshold
         // would turn this supervisor into a noise source and get it ignored.
         var (supervisor, metrics, sent) = Build();
-        metrics.RecordCycle("mystery", "badwolf", TimeSpan.FromMilliseconds(1), success: true);
+        metrics.RecordCycle("mystery", "host-a", TimeSpan.FromMilliseconds(1), success: true);
 
         await Task.Delay(TinyInterval * 5);
         await supervisor.CheckAsync();
@@ -161,7 +161,7 @@ public class ScanSupervisorTests
     {
         // With the real 5-minute floor, a loop running every 30 ms cannot raise an alarm after 150 ms.
         var (supervisor, metrics, sent) = Build(floor: TimeSpan.FromMinutes(5));
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1), success: true, interval: TinyInterval);
 
         await Task.Delay(TinyInterval * 5);
         await supervisor.CheckAsync();

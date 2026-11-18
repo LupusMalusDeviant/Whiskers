@@ -69,10 +69,10 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         _readings.Set(Read(Queries(smart: SmartFailed)));
         _user.Role = AppRole.Viewer;
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
-        Assert.NotNull(cut.Find("#disk-health-badwolf"));
-        Assert.Contains("DiskHealth_State_DegradedOrFailing", cut.Find("#disk-health-overall-badwolf").TextContent);
+        Assert.NotNull(cut.Find("#disk-health-host-a"));
+        Assert.Contains("DiskHealth_State_DegradedOrFailing", cut.Find("#disk-health-overall-host-a").TextContent);
         Assert.Equal(4, cut.FindAll(".sw-disk-health-items tr").Count);
         Assert.Contains("/dev/sda", cut.Markup);
         Assert.Contains("SMART overall-health failed", cut.Markup);
@@ -90,7 +90,7 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         _readings.Set(Read(Queries(md: hostile)));
         _user.Role = AppRole.Viewer;
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
         Assert.Empty(cut.FindAll("img"));
         Assert.Contains("&lt;img", cut.Markup);
@@ -101,9 +101,9 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
     {
         _readings.Set(HealthyReading());
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
-        Assert.Empty(cut.FindAll("#disk-health-badwolf"));
+        Assert.Empty(cut.FindAll("#disk-health-host-a"));
         Assert.True(string.IsNullOrWhiteSpace(cut.Markup));
     }
 
@@ -113,7 +113,7 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         await SwitchOn();
         _readings.Set(Read(DiskHealthQueries.WithoutEndpoint()));
 
-        Assert.Contains("DiskHealth_Block_Unsupported", Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf")).Markup);
+        Assert.Contains("DiskHealth_Block_Unsupported", Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a")).Markup);
         Assert.Contains("DiskHealth_Block_NotReadYet", Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "other")).Markup);
     }
 
@@ -167,9 +167,9 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         _readings.Set(HealthyReading() with { ReadUtc = old });
         _user.Role = AppRole.Viewer;
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
-        Assert.Contains("DiskHealth_State_Unknown", cut.Find("#disk-health-overall-badwolf").TextContent);
+        Assert.Contains("DiskHealth_State_Unknown", cut.Find("#disk-health-overall-host-a").TextContent);
         Assert.Contains("DiskHealth_Block_Stale", cut.Markup);
     }
 
@@ -194,11 +194,11 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         await SwitchOn();
         _readings.Set(Read(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)")));
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
         Assert.Contains("DiskHealth_Block_NotReadYetFailed", cut.Markup);
         Assert.DoesNotContain("DiskHealth_Block_Unsupported", cut.Markup);
-        Assert.Empty(cut.FindAll("#disk-health-overall-badwolf"));
+        Assert.Empty(cut.FindAll("#disk-health-overall-host-a"));
     }
 
     [Fact]
@@ -207,10 +207,10 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         await SwitchOn();
         _readings.Set(HealthyReading() with { ReadUtc = DateTime.UtcNow.AddMinutes(-2) });
 
-        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "host-a"));
 
-        Assert.Contains("DiskHealth_State_Healthy", cut.Find("#disk-health-overall-badwolf").TextContent);
-        Assert.Contains("DiskHealth_Block_ReadAgo", cut.Find("#disk-health-read-badwolf").TextContent);
+        Assert.Contains("DiskHealth_State_Healthy", cut.Find("#disk-health-overall-host-a").TextContent);
+        Assert.Contains("DiskHealth_Block_ReadAgo", cut.Find("#disk-health-read-host-a").TextContent);
         Assert.DoesNotContain("DiskHealth_Block_Stale", cut.Markup);
     }
 

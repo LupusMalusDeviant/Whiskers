@@ -20,8 +20,8 @@ public class LoopSuspensionTrafficTests
 {
     private static readonly ServerConfig Local = new()
     {
-        Id = "badwolf",
-        Name = "Badwolf",
+        Id = "host-a",
+        Name = "Host-A",
         IsDefault = true,
         Enabled = true,
         ConnectionType = ConnectionType.Local
@@ -54,12 +54,12 @@ public class LoopSuspensionTrafficTests
         // The assertion that matters: the switch has to ANSWER, not merely be present. If this test ever goes
         // green with the gate removed, the emergency stop is decoration.
         var (docker, suspension, budget) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "flattening the host");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "flattening the host");
 
         using (budget.BackgroundScope())
         {
-            var refused = await Assert.ThrowsAsync<ServerSuspendedException>(() => docker.GetClientAsync("badwolf"));
-            Assert.Equal("badwolf", refused.ServerId);
+            var refused = await Assert.ThrowsAsync<ServerSuspendedException>(() => docker.GetClientAsync("host-a"));
+            Assert.Equal("host-a", refused.ServerId);
         }
     }
 
@@ -69,11 +69,11 @@ public class LoopSuspensionTrafficTests
         // Pausing must not blind the person who pressed the button — they paused it in order to look at it.
         // Whatever else happens here (there is no Docker socket in a test run), it must not be the pause.
         var (docker, suspension, _) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "flattening the host");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "flattening the host");
 
         try
         {
-            await docker.GetClientAsync("badwolf");
+            await docker.GetClientAsync("host-a");
         }
         catch (ServerSuspendedException)
         {
@@ -91,13 +91,13 @@ public class LoopSuspensionTrafficTests
         // Without this, every pause needs a person to remember it — and the ones that get forgotten are
         // exactly the servers nobody is watching.
         var (docker, suspension, budget) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMilliseconds(-1), "over already");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMilliseconds(-1), "over already");
 
         using (budget.BackgroundScope())
         {
             try
             {
-                await docker.GetClientAsync("badwolf");
+                await docker.GetClientAsync("host-a");
             }
             catch (ServerSuspendedException)
             {

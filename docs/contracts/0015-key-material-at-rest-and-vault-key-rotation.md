@@ -343,7 +343,7 @@ Part A — keys at rest
 4. [Claude-prüfbar, **mTLS layer** for the client keys] `KeyMaterialMigration` at start; `KeyMaterialMigrationTests`,
    `KeyMaterialAtRestTests`; readiness lines.
 5. [Claude-prüfbar] `SshKeyLeaseImageTests` in the image runtime suite (runs in CI on amd64 and arm64).
-6. [braucht Nutzer] Deploy Part A: check in the start log that every key of Badwolf's data directory was sealed, that all
+6. [braucht Nutzer] Deploy Part A: check in the start log that every key of the production instance's data directory was sealed, that all
    mTLS hosts still answer (server pages green, readiness "mTLS-Proxy läuft") and that an SSH host's terminal opens.
 
 Part B — rotation
@@ -353,9 +353,9 @@ Part B — rotation
    switch; `VaultKeyRotationTests`, `PostgresVaultRotationTests`.
 9. [Claude-prüfbar] Readiness, backup list marks (D9), documentation, gate records, required-test manifests; full test
    run with the lock.
-10. [braucht Nutzer] A real rotation on a test instance (not Badwolf first): new key file, restart, check the audit trail
+10. [braucht Nutzer] A real rotation on a test instance (not the production instance first): new key file, restart, check the audit trail
     verifies, the hosts answer, a new self-backup restores; then replace the key file and restart once more. Only then on
-    Badwolf, with the old key kept in the password manager until a self-backup under the new key has been restored once.
+    the production instance, with the old key kept in the password manager until a self-backup under the new key has been restored once.
 
 ## Decisions of the maintainer (10 November 2026)
 

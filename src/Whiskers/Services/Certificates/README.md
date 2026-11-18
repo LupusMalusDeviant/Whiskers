@@ -26,10 +26,10 @@ The private key of a proxy is generated **on the host** and never leaves it:
    that it does not ask to be a CA. The host is the very thing the certificate vouches for. A host that could
    pick its own SANs could get a certificate for another host's IP and impersonate that proxy. "Exactly" counts
    every SAN, not only DNS names and IPs: a URI or e-mail SAN is refused (contract 0017 E2).
-3. step-ca on Badwolf signs it for one year (leaf + intermediate). The host's answer itself never reaches Badwolf
+3. step-ca on the Whiskers host signs it for one year (leaf + intermediate). The host's answer itself never reaches the Whiskers host
    (contract 0017 E1): `ValidateCsrAnswer` refuses an answer with any non-base64 character, an answer holding more
    than one PEM block, and a request followed by extra data; it returns the DER of the one CSR block it verified.
-   `SignCsr` takes those DER bytes, writes the PEM file itself and base64-encodes it, so the script on Badwolf holds
+   `SignCsr` takes those DER bytes, writes the PEM file itself and base64-encodes it, so the script on the Whiskers host holds
    no byte of host output. The client-credential path (`MtlsClientCredentialStore`) hands it the DER of the CSR it
    made in-process.
 4. Whiskers checks the result: same key as the CSR, the expected identity (the same exact SAN count), and a chain

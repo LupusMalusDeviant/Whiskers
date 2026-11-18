@@ -12,7 +12,7 @@ namespace Whiskers.Tests;
 /// because the alternative is storing nothing at all, and a target that is absent reads exactly like a target
 /// with no findings.</para>
 ///
-/// <para>That second half was missing. Two running containers on infomaniak sat in exactly that state: their
+/// <para>That second half was missing. Two running containers on host-f sat in exactly that state: their
 /// local image layers were damaged, Trivy could not export them, neither had ever been scanned successfully
 /// there, and so they appeared in no list at all. The staleness metric could not help — what is not there
 /// cannot age. Only a person counting containers by hand would have noticed, and that is how it was found.</para>
@@ -23,11 +23,11 @@ public class CveScanOutcomeTests
     {
         var r = new CveScanResult
         {
-            ServerId = "infomaniak", Source = CveSource.Container,
+            ServerId = "host-f", Source = CveSource.Container,
             ContainerId = "c1", ContainerName = "ghostunnel", Error = error
         };
         foreach (var id in cveIds)
-            r.Findings.Add(new CveFinding { ServerId = "infomaniak", CveId = id, Package = "openssl" });
+            r.Findings.Add(new CveFinding { ServerId = "host-f", CveId = id, Package = "openssl" });
         return r;
     }
 

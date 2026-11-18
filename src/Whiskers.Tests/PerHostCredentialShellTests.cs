@@ -32,9 +32,9 @@ public sealed class PerHostCredentialShellTests : IDisposable
     public void Apply_edits_only_the_allow_cn_items_arms_the_guard_first_and_recreates_detached()
     {
         var script = MtlsCertificateRenewalTests.Decode(MtlsAllowListCommands.Apply(Target,
-            ["serverwatch-client", "whiskers-client-rabenhof-g1"], "r1"));
+            ["serverwatch-client", "whiskers-client-host-d-g1"], "r1"));
 
-        Assert.Contains("cns='serverwatch-client whiskers-client-rabenhof-g1'", script);
+        Assert.Contains("cns='serverwatch-client whiskers-client-host-d-g1'", script);
         // Only this run's marker; never the markers of other runs (review r1 MINOR 3).
         Assert.Contains("rm -f /opt/dockerproxy/.allow-ok-r1\n", script.Replace("\r\n", "\n"));
         Assert.DoesNotContain(".allow-ok-*", script);
@@ -178,7 +178,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var (guardCode, _, _) = RunScript(GuardScript(), timeoutMs: 30_000);
         Assert.Equal(0, guardCode);
         Assert.Contains("--allow-cn=serverwatch-client", File.ReadAllText(Compose()));
-        Assert.DoesNotContain("whiskers-client-rabenhof-g1", File.ReadAllText(Compose()));
+        Assert.DoesNotContain("whiskers-client-host-d-g1", File.ReadAllText(Compose()));
         Assert.Contains("whiskers-allow-guard-recreate-r1", File.ReadAllText(State("log")));
     }
 
@@ -203,13 +203,13 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var compose = File.ReadAllText(Compose());
         if (marker)
         {
-            Assert.Contains("whiskers-client-rabenhof-g1", compose);
+            Assert.Contains("whiskers-client-host-d-g1", compose);
             Assert.False(File.Exists(Marker()));
             Assert.DoesNotContain("recreate-r1", File.ReadAllText(State("log")));
         }
         else
         {
-            Assert.DoesNotContain("whiskers-client-rabenhof-g1", compose);
+            Assert.DoesNotContain("whiskers-client-host-d-g1", compose);
             Assert.Contains("restored the previous allow-list", File.ReadAllText(State("log")));
         }
     }
@@ -262,11 +262,11 @@ public sealed class PerHostCredentialShellTests : IDisposable
         File.WriteAllText(Marker(), "");                                  // a stale marker of this run
         File.WriteAllText(Path.Combine(_dir, ".allow-ok-r9"), "");        // another run's marker
 
-        var (code, stdout, stderr) = RunScript(ApplyScript(["serverwatch-client", "whiskers-client-rabenhof-g1"]));
+        var (code, stdout, stderr) = RunScript(ApplyScript(["serverwatch-client", "whiskers-client-host-d-g1"]));
 
         Assert.True(code == 0, stderr);
         Assert.Contains("applied", stdout);
-        Assert.Equal(OnboardingCompose("serverwatch-client", "whiskers-client-rabenhof-g1"), File.ReadAllText(Compose()));
+        Assert.Equal(OnboardingCompose("serverwatch-client", "whiskers-client-host-d-g1"), File.ReadAllText(Compose()));
         Assert.Equal(before, File.ReadAllText(Compose() + ".prev"));
         Assert.False(File.Exists(Marker()));
         Assert.True(File.Exists(Path.Combine(_dir, ".allow-ok-r9")));
@@ -286,7 +286,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var odd = OnboardingCompose("serverwatch-client").Replace("- --allow-cn=serverwatch-client", "- --allow-cn=serverwatch-client # keep", StringComparison.Ordinal);
         File.WriteAllText(Compose(), odd);
 
-        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"]));
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-host-d-g1"]));
 
         Assert.NotEqual(0, code);
         Assert.Contains("unexpected --allow-cn lines", stderr);
@@ -307,7 +307,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var awk = DeploymentScripts.FindOnPath("awk")!;
         Stub("awk", awk + " \"$@\" | sed -e 's/--unsafe-target/--unsafe-target-x/'");
 
-        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"]));
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-host-d-g1"]));
 
         Assert.NotEqual(0, code);
         Assert.Contains("the patch would change more than --allow-cn", stderr);
@@ -325,7 +325,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var prev = File.ReadAllText(Compose() + ".prev");
         File.WriteAllText(State("units"), "whiskers-allow-guard-r1.timer loaded active waiting\n");
 
-        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"], "r2"));
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-host-d-g1"], "r2"));
 
         Assert.NotEqual(0, code);
         Assert.Contains("while a guard is armed", stderr);
@@ -352,12 +352,12 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_dir, "state"));
         Directory.CreateDirectory(Path.Combine(_dir, "bin"));
         File.WriteAllText(Compose() + ".prev", OnboardingCompose("serverwatch-client"));
-        File.WriteAllText(Compose(), OnboardingCompose("serverwatch-client", "whiskers-client-rabenhof-g1"));
+        File.WriteAllText(Compose(), OnboardingCompose("serverwatch-client", "whiskers-client-host-d-g1"));
         File.WriteAllText(State("load"), load);
         File.WriteAllText(State("sub"), sub);
         File.WriteAllText(State("log"), "");
         File.WriteAllText(State("units"), "");
-        File.WriteAllText(State("args"), "--allow-cn=serverwatch-client\n--allow-cn=whiskers-client-rabenhof-g1\n");
+        File.WriteAllText(State("args"), "--allow-cn=serverwatch-client\n--allow-cn=whiskers-client-host-d-g1\n");
         var sleep = DeploymentScripts.FindOnPath("sleep")!;
         Stub("systemctl", $$"""
             echo "systemctl $*" >> "$STUB/log"

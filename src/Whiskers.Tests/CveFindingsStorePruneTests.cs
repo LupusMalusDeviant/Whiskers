@@ -110,11 +110,11 @@ public class CveFindingsStorePruneTests
         // servers.json is hand-edited. A server surviving or vanishing must not turn on the capitalisation
         // somebody happened to type.
         var store = NewStore();
-        store.Set(Result("BurgCloud", "c1", CveSource.Container));
+        store.Set(Result("Host-B", "c1", CveSource.Container));
 
         Assert.Equal(0, store.PruneRemovedServers(
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "burgcloud" }));
-        Assert.NotNull(store.Get("BurgCloud", "c1"));
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "host-b" }));
+        Assert.NotNull(store.Get("Host-B", "c1"));
     }
 
     [Fact]

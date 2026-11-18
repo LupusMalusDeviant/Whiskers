@@ -7,17 +7,17 @@ namespace Whiskers.Tests;
 /// Who else a change touches (GAP-7, 2026-08-28).
 ///
 /// <para>The package exists because the same prediction was made by hand twice on 2026-08-27 and was wrong
-/// both times. Adding a compose override to Authentik was supposed to recreate two services; it recreated all
+/// both times. Adding a compose override to the identity provider was supposed to recreate two services; it recreated all
 /// three and restarted the database. The identical thing then happened to the docker-proxy stack. The rule
 /// nobody had written down: a change to the project's <em>configuration</em> changes the config hash for every
 /// service in it, so <c>compose up -d</c> recreates the lot.</para>
 /// </summary>
 public class BlastRadiusAssessorTests
 {
-    private static ContainerInfo C(string name, string project = "authentik", string service = "",
+    private static ContainerInfo C(string name, string project = "idp", string service = "",
         string dependsOn = "", int publishedPort = 0)
     {
-        var c = new ContainerInfo { Id = name, Name = name, ServerId = "infomaniak" };
+        var c = new ContainerInfo { Id = name, Name = name, ServerId = "host-f" };
         if (project.Length > 0) c.Labels["com.docker.compose.project"] = project;
         c.Labels["com.docker.compose.service"] = service.Length > 0 ? service : name;
         if (dependsOn.Length > 0) c.Labels["com.docker.compose.depends_on"] = dependsOn;
@@ -89,7 +89,7 @@ public class BlastRadiusAssessorTests
     [Fact]
     public void Cutting_the_control_plane_is_flagged_because_the_command_dies_with_it()
     {
-        // EH-6, and it happened for real: recreating ghostunnel on infomaniak severed the mTLS path the
+        // EH-6, and it happened for real: recreating ghostunnel on host-f severed the mTLS path the
         // command was travelling through. It only survived because it had been detached first.
         var tunnel = C("ghostunnel", project: "dockerproxy", service: "ghostunnel", publishedPort: 2376);
         var proxy = C("socket-proxy", project: "dockerproxy", service: "socket-proxy");
@@ -130,7 +130,7 @@ public class BlastRadiusAssessorTests
     [Fact]
     public void A_local_server_is_never_reported_as_self_severing()
     {
-        // Badwolf is reached without a tunnel. A proxy container there is just another container.
+        // Host-A is reached without a tunnel. A proxy container there is just another container.
         var tunnel = C("ghostunnel", project: "dockerproxy", service: "ghostunnel", publishedPort: 2376);
 
         var radius = BlastRadiusAssessor.Assess(tunnel, [tunnel],

@@ -4,7 +4,7 @@
   "title": "Whiskers — Zero-Trust MCP Control Plane",
   "description": "Zero-trust control plane for Docker & Kubernetes: mTLS mesh, scoped keys, guardrails, approvals.",
   "version": "1.0.0",
-  "websiteUrl": "https://whiskers.app.lupusmalus.dev",
+  "websiteUrl": "https://github.com/LupusMalusDeviant/Whiskers",
   "repository": {
     "url": "https://github.com/LupusMalusDeviant/Whiskers",
     "source": "github",

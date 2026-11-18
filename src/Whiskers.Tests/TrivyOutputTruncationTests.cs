@@ -11,7 +11,7 @@ namespace Whiskers.Tests;
 /// <para>Trivy's JSON for a large image runs to several megabytes; the host executor capped command output at
 /// 1 MB and appended "… (Ausgabe gekürzt)" to what was left. The scanner then handed that to a JSON reader,
 /// which reported "'0xE2' is an invalid start of a value" — the first byte of the ellipsis. Every cycle, for
-/// months, the Authentik image logged a parser error and silently kept its stale CVE results.</para>
+/// months, the identity-provider image logged a parser error and silently kept its stale CVE results.</para>
 ///
 /// <para>These tests are about the confusion rather than the parser: a document that was cut off must be
 /// reported as cut off, because that is a limit to raise, and a document that is genuinely malformed must
@@ -152,8 +152,8 @@ public class TrivyOutputTruncationTests
             OutputTruncated = true
         }, out _);
 
-        var result = await scanner.ScanContainerImageAsync("local", "c1", "authentik-worker-1",
-            "ghcr.io/goauthentik/server:2026.5.3");
+        var result = await scanner.ScanContainerImageAsync("local", "c1", "idp-worker-1",
+            "ghcr.io/example/idp-server:2026.5.3");
 
         Assert.Empty(result.Findings);
         Assert.Contains("cut off", result.Error);

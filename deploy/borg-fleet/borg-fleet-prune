@@ -1,5 +1,5 @@
 #!/bin/bash
-# borg-fleet-prune — weekly retention for every enrolled repo (runs on Badwolf, admin key).
+# borg-fleet-prune — weekly retention for every enrolled repo (runs on the control host, admin key).
 #
 # The backed-up servers can only append (forced `borg serve --append-only` + append_only=1 in
 # the repo config). Retention therefore needs the unrestricted admin key: for each repo this

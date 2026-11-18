@@ -25,7 +25,7 @@ public class AgentTools
         IAgentService agentService,
         IAgentPrincipalResolver principalResolver,
         IGuardrailStore guardrailStore,
-        [Description("The task for the agent, in natural language (e.g. 'restart the unhealthy containers on Badwolf').")] string prompt,
+        [Description("The task for the agent, in natural language (e.g. 'restart the unhealthy containers on web-01').")] string prompt,
         CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "instruct_agent");

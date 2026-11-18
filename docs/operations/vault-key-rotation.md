@@ -7,7 +7,7 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
 
 ## Before you start
 
-- **Test first.** Rotate a test instance before production. Do not start with Badwolf.
+- **Test first.** Rotate a test instance before production. Do not start with the production instance.
 - **Keep the old key.** Store it in the password manager. Keep it there until a self-backup taken **after** the
   rotation has been restored once. Older self-backups stay sealed with the old key (see below).
 - **One process.** Run one Whiskers process on the data directory, as always (INV-45). The rotation runs at start,

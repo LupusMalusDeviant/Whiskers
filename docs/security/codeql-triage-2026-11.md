@@ -1,3 +1,5 @@
+> Historical document, kept for reference; names anonymised.
+
 # CodeQL-Triage vor 1.0 (November 2026)
 
 Stand: `main` 4d7acc13, 62 offene Alarme der Code-Scanning-Analyse (`security.yml`, Job `codeql`, Suite

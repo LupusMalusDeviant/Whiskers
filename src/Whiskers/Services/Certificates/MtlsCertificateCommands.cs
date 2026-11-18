@@ -38,7 +38,7 @@ public static class MtlsCertificateCommands
         rm -f server.csr.new
         """);
 
-    /// <summary>On Badwolf: has step-ca sign the CSR (leaf + intermediate, one year) and prints the bundle base64.
+    /// <summary>On the Whiskers host: has step-ca sign the CSR (leaf + intermediate, one year) and prints the bundle base64.
     /// The CSR is checked by Whiskers before this runs; step's leaf template copies subject and SANs from it.
     /// <paramref name="csrDer"/> is the DER of the request (contract 0017 E1): Whiskers writes the PEM file step reads
     /// from it and base64-encodes that itself, so no byte of host output reaches this script.</summary>
@@ -58,7 +58,7 @@ public static class MtlsCertificateCommands
             """);
     }
 
-    /// <summary>On Badwolf: root + intermediate, the chain ghostunnel must present to the leaf-only .NET client.</summary>
+    /// <summary>On the Whiskers host: root + intermediate, the chain ghostunnel must present to the leaf-only .NET client.</summary>
     public static string ReadCaBundle() =>
         "cat /opt/step-ca/certs/root_ca.crt /opt/step-ca/certs/intermediate_ca.crt | base64 -w0";
 

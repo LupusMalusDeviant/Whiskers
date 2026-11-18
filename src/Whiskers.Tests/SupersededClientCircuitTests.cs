@@ -12,7 +12,7 @@ using Whiskers.Services.Observability;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// A client Whiskers disposes and replaces on purpose must not count against the host (2026-11-10, Infomaniak).
+/// A client Whiskers disposes and replaces on purpose must not count against the host (2026-11-10, host-f).
 ///
 /// <para>The mTLS switch check calls <see cref="DockerConnectionManager.InvalidateClient"/> to rebuild the
 /// connection with the new credential. Every call still running on the old client then fails with an
@@ -23,8 +23,8 @@ public class SupersededClientCircuitTests
 {
     private static readonly ServerConfig Local = new()
     {
-        Id = "badwolf",
-        Name = "Badwolf",
+        Id = "host-a",
+        Name = "Host-A",
         IsDefault = true,
         Enabled = true,
         ConnectionType = ConnectionType.Local
@@ -107,9 +107,9 @@ public class SupersededClientCircuitTests
 
         for (var i = 0; i < Threshold + 2; i++)
             await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-                docker.ExecuteGuardedAsync<bool>("badwolf", _ => throw Disposed()));
+                docker.ExecuteGuardedAsync<bool>("host-a", _ => throw Disposed()));
 
-        var snapshot = circuit.Snapshot("badwolf");
+        var snapshot = circuit.Snapshot("host-a");
         Assert.Equal(ServerCircuitState.Closed, snapshot.State);
         Assert.Equal(0, snapshot.ConsecutiveFailures);
     }
@@ -121,9 +121,9 @@ public class SupersededClientCircuitTests
 
         for (var i = 0; i < Threshold; i++)
             await Assert.ThrowsAsync<HttpRequestException>(() =>
-                docker.ExecuteGuardedAsync<bool>("badwolf", _ => throw new HttpRequestException("Connection refused")));
+                docker.ExecuteGuardedAsync<bool>("host-a", _ => throw new HttpRequestException("Connection refused")));
 
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
     }
 
     [Fact]
@@ -135,9 +135,9 @@ public class SupersededClientCircuitTests
 
         for (var i = 0; i < Threshold + 2; i++)
             await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-                docker.ExecuteAsync<bool>("badwolf", _ => throw Disposed()));
+                docker.ExecuteAsync<bool>("host-a", _ => throw Disposed()));
 
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
     }
 
     [Fact]
@@ -147,8 +147,8 @@ public class SupersededClientCircuitTests
 
         for (var i = 0; i < Threshold; i++)
             await Assert.ThrowsAsync<HttpRequestException>(() =>
-                docker.ExecuteAsync<bool>("badwolf", _ => throw new HttpRequestException("Connection refused")));
+                docker.ExecuteAsync<bool>("host-a", _ => throw new HttpRequestException("Connection refused")));
 
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
     }
 }

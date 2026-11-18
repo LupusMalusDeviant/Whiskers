@@ -40,7 +40,7 @@ public class ServerBudgetSettings
     public int CircuitCooldownSeconds { get; set; } = 60;
 
     /// <summary>Per-server overrides, keyed by server id — a beefy host can take more, a Raspberry Pi less.
-    /// Format: <c>ServerBudget:PerServer:badwolf:BackgroundConcurrency</c>.</summary>
+    /// Format: <c>ServerBudget:PerServer:web-01:BackgroundConcurrency</c>.</summary>
     public Dictionary<string, ServerBudgetOverride> PerServer { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Effective limits for one server. Values below 1 are lifted to 1 rather than rejected: a

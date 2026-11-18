@@ -53,7 +53,7 @@ public sealed class ResumeWithoutStormTests : IDisposable
             docker,
             new FakeServerConfig(new ServerConfig
             {
-                Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true
+                Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true
             }),
             new FakeNotifications(),
             NullLogger<LogMonitorService>.Instance,
@@ -66,7 +66,7 @@ public sealed class ResumeWithoutStormTests : IDisposable
 
     private static FakeDocker OneContainer() => new(new ContainerInfo
     {
-        Id = "c1", Name = "burg-web", Image = "img:1", ServerId = "local", ServerName = "Badwolf"
+        Id = "c1", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Host-A"
     });
 
     [Fact]

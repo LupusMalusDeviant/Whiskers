@@ -783,7 +783,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Enrollment, renewal, revocation and migration preserve hostname/chain validation.
 - [x] Existing hosts migrate through an explicit recoverable rollout.
 - [x] Private-key ownership/modes and blast-radius documentation are verified.
-- [ ] The rollout has run on the real fleet (Bifröst first, then the whiskers.site host, then host by host) and the
+- [ ] The rollout has run on the real fleet (the gateway host first, then the public website host, then host by host) and the
       shared credential is retired.
 
 > Implemented per contract 0007 (amendments 1–10). Verified against simulated hosts and, on Linux, the host scripts run

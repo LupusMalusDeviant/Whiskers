@@ -1,8 +1,7 @@
 # Screenshots
 
 Captured against an anonymized demo dataset. How each image is reproduced: [product/screenshots.md](product/screenshots.md);
-the scripted walkthrough: [product/demo-script.md](product/demo-script.md). A live walkthrough of the hero workflow is
-on [whiskers.app.lupusmalus.dev](https://whiskers.app.lupusmalus.dev), and the in-app handbook (*Help*) has screenshots
+the scripted walkthrough: [product/demo-script.md](product/demo-script.md). The in-app handbook (*Help*) has screenshots
 for every area.
 
 **Guardrails.** The policy checked at the tool boundary: a read-only kill switch, the highest level allowed without

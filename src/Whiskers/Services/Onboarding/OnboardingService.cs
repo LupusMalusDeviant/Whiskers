@@ -392,7 +392,7 @@ public class OnboardingService : IOnboardingService
 
             // 7) Issue the per-host server cert: the key is generated ON the host and never leaves it; only
             // the CSR travels to step-ca (on local) and the signed certificate travels back. It used to be the
-            // other way round — key made on Badwolf, shipped base64 through the command channel.
+            // other way round — key made on the Whiskers host, shipped base64 through the command channel.
             step = OnboardingStep.Certificate;
             // Steps 0–4 can take minutes (Tailscale login): continue with the record as it is now, so a change finished
             // meanwhile (an edit) is not overwritten at the switchover (review r4 MINOR 2).

@@ -42,7 +42,7 @@ public sealed record CveFleetMetrics(
 /// <para>The interesting one is <see cref="CveServerMetrics.OldestDataAge"/>. When a scan fails, the monitor
 /// deliberately keeps the previous results rather than reporting a false all-clear — which is right, and which
 /// means a target whose scanner has been broken for months looks exactly like one that was scanned this
-/// morning. That is how the Authentik image went unscanned from July to late August: the findings were still
+/// morning. That is how an identity-provider image went unscanned from July to late August: the findings were still
 /// there, still plausible, and simply never changed. The only visible difference was the age of the data, and
 /// nothing was watching it.</para>
 ///
@@ -90,7 +90,7 @@ public static class CveMetrics
     /// The targets whose last scan failed, worst-sounding first — the ones whose emptiness means "we do not
     /// know", not "nothing found".
     ///
-    /// <para>Found on 2026-08-28: two running containers on infomaniak could not be scanned because their
+    /// <para>Found on 2026-08-28: two running containers on web-02 could not be scanned because their
     /// local image layers were damaged, and because neither had ever been scanned successfully there was no
     /// result to keep — so they were absent from every list rather than present and failing. A missing target
     /// looks exactly like a clean one. Staleness cannot catch this: what is not there cannot age.</para>
