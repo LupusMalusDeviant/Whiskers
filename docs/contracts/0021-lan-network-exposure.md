@@ -524,7 +524,7 @@ had to be read one way; nothing here weakens a rule of §§ 1–3.
     them; without it the new fail-closed rule counts the container as unchecked), the network fixture of
     `TargetResolutionTests` gained `Driver = "bridge"` (an empty driver counts as LAN), and `FakeDocker` records network
     create/connect calls.
-12. **Generated and descriptive files.** `docs/mcp-tool-catalog.md` and `lhm.plugin.json` carry the new tool and
+12. **Generated and descriptive files.** `docs/guide/mcp-tool-catalog.md` and `lhm.plugin.json` carry the new tool and
     parameter descriptions of § 1.6. README "remaining risks": the macvlan/ipvlan line D6 asked for was not there at
     `fcfa43cf`, so only D4's bridge options were added. That README item is marked `claim-free:limit`, so
     `docs/v1/CLAIMS.md` gained its register row (`8beb86d9f1a2`). `ComposePinIntegrationTests` (Docker category) now

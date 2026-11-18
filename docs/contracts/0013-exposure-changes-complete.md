@@ -304,7 +304,7 @@ with it. The message names the container and the ways out: remove it on the cont
   "Tailscale sidecar / cloudflared" go; new lines: images that run a proxy or tunnel behind an unrecognisable
   entrypoint; Tailscale serve state is read from configuration, never from tailscaled at run time. Upgrade note: real
   compose projects, legacy clash, pinned images and updates, `traefik.` default, policy hash.
-- `docs/features.md`, `Services/Deployment/README.md`, `Modules/Deployment/README.md`, `docs/modules/deployment.md`,
+- `docs/guide/features.md`, `Services/Deployment/README.md`, `Modules/Deployment/README.md`, `docs/guide/modules/deployment.md`,
   `Services/Mutations/README.md`, `Services/Guardrails/README.md`, CHANGELOG (behaviour changes: real projects,
   `deploy_app` output and refusals, `bridge`, pinning, AutoPatch/update on pinned containers).
 

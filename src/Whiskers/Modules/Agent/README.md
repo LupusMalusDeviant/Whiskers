@@ -68,5 +68,5 @@ registry still discovers tool methods via reflection, so the agent's own tool *c
 module's tools. That is a call-time concern (a call fails cleanly at the guardrail/permission gate), never a
 boot error, and it does not affect the agent module's own on/off behaviour.
 
-See [`docs/modules/agent.md`](../../../../docs/modules/agent.md) and the module-system chapter in
-[`docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md).
+See [`docs/guide/modules/agent.md`](../../../../docs/guide/modules/agent.md) and the module-system chapter in
+[`docs/architecture/ARCHITECTURE.md`](../../../../docs/architecture/ARCHITECTURE.md).

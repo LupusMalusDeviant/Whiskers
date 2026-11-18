@@ -1,31 +1,49 @@
 # Documentation
 
+The docs are sorted by reader. Start with the [README](../README.md) for the facts, the install and the first sign-in.
+
+## Using Whiskers — [guide/](guide/)
+
 | Document | What |
 |---|---|
-| [../README.md](../README.md) | Facts, install, first sign-in, MCP client, image verification, key settings, accepted limits, compose remaining risks and upgrade note, operations links |
-| [governance.md](governance.md) | Governance model: comparison with a plain Docker/K8s MCP server, the hero workflow, how the policy layer applies per caller |
-| [features.md](features.md) | Features by area, including the compose exposure checks (contract 0006) |
-| [installation.md](installation.md) | Every install path: installer, `docker run`, Compose, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
-| [configuration.md](configuration.md) | All environment variables, runtime details, tech stack |
-| [mcp.md](mcp.md) | MCP server: API keys and scopes, tool groups, prompts, resources |
-| [agent.md](agent.md) | The optional in-process AI agent and its safety model |
-| [security-architecture.md](security-architecture.md) | The three planes per host, security summary, supply chain |
-| [screenshots.md](screenshots.md) | Screenshots of the governance screens and the dashboard |
-| [roadmap.md](roadmap.md) | Planned, not yet implemented |
-| [project-structure.md](project-structure.md) | Source layout and code conventions |
-| [product/README.md](product/README.md) | **Product strategy** — canonical positioning, the one-liner and pitch, target audience, the three product pillars, and the hero workflow ([product/POSITIONING.md](product/POSITIONING.md)) |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The SSH-key-free design, mesh + mTLS, the three planes, PKI, onboarding |
-| [CODEBASE_MAP.md](CODEBASE_MAP.md) | Orientation in the code: projects and areas with their sizes, how a call flows to the host, where state lives, where to start a change, hotspots |
-| [container-hardening.md](container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
-| [operations/](operations/README.md) | **Operator guides**: production checklist (with the accepted limits of 1.0), upgrade and rollback, backup and recovery, troubleshooting, observability, and one guide per feature that needs host-side setup |
-| [contracts/](contracts/) | Accepted interface contracts per work package (and proposed ones awaiting the maintainer) |
-| [v1/](v1/) | The 1.0 product contract, security invariants, technical audit and work packages |
-| [adr/](adr/) | Architecture decision records |
-| [modules/](modules/) | One page per optional module: what it adds, its toggle, its dependencies |
-| [reviews/](reviews/) | The security-fix history and incident reports, including [the 2026-08-26 log-monitor incident](reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md) that drove the self-protection work |
-| [security/](security/) | Static-analysis triage: [the CodeQL triage before 1.0](security/codeql-triage-2026-11.md) (German) — every alert judged, what was fixed, what is left to close |
-| [mcp-tool-catalog.md](mcp-tool-catalog.md) | **Generated** — every MCP tool this build serves, with its permission level and owning module. Regenerated from the code; `McpToolCatalogSnapshotTests` fails the build if it drifts. Do not edit by hand. |
+| [guide/governance.md](guide/governance.md) | Governance model: comparison with a plain Docker/K8s MCP server, the hero workflow, how the policy layer applies per caller |
+| [guide/features.md](guide/features.md) | Features by area, including the compose exposure checks (contract 0006) |
+| [guide/mcp.md](guide/mcp.md) | MCP server: API keys and scopes, tool groups, prompts, resources |
+| [guide/mcp-tool-catalog.md](guide/mcp-tool-catalog.md) | **Generated** — every MCP tool this build serves, with its permission level and owning module. Regenerated from the code; `McpToolCatalogSnapshotTests` fails the build if it drifts. Do not edit by hand. |
+| [guide/agent.md](guide/agent.md) | The optional in-process AI agent and its safety model |
+| [guide/modules/](guide/modules/) | One page per optional module: what it adds, its toggle, its dependencies |
+| [guide/screenshots.md](guide/screenshots.md) | Screenshots of the governance screens and the dashboard |
+| [guide/roadmap.md](guide/roadmap.md) | Planned, not yet implemented |
+
+## Running Whiskers — [operations/](operations/README.md)
+
+| Document | What |
+|---|---|
+| [operations/installation.md](operations/installation.md) | Every install path: installer, `docker run`, Compose, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
+| [operations/configuration.md](operations/configuration.md) | All environment variables, runtime details, tech stack |
+| [operations/container-hardening.md](operations/container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
+| [operations/README.md](operations/README.md) | **Operator guides**: production checklist (with the accepted limits of 1.0), upgrade and rollback, backup and recovery, troubleshooting, observability, and one guide per feature that needs host-side setup |
 | [../deploy/telemetry/README.md](../deploy/telemetry/README.md) | Mesh/mTLS telemetry deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL) |
+
+## Contributing — [architecture/](architecture/)
+
+| Document | What |
+|---|---|
+| [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | The SSH-key-free design, mesh + mTLS, the three planes, PKI, onboarding |
+| [architecture/security-architecture.md](architecture/security-architecture.md) | The three planes per host, security summary, supply chain |
+| [architecture/CODEBASE_MAP.md](architecture/CODEBASE_MAP.md) | Orientation in the code: projects and areas with their sizes, how a call flows to the host, where state lives, where to start a change, hotspots |
+| [architecture/project-structure.md](architecture/project-structure.md) | Source layout and code conventions |
+| [architecture/adr/](architecture/adr/) | Architecture decision records |
+| [contracts/](contracts/README.md) | Accepted interface contracts per work package |
+| [v1/](v1/README.md) | The 1.0 product contract, security invariants, release gate, claim register and work packages |
+
+## Product and reference
+
+| Document | What |
+|---|---|
+| [product/README.md](product/README.md) | **Product strategy** — canonical positioning, the one-liner and pitch, target audience, the three product pillars, and the hero workflow ([product/POSITIONING.md](product/POSITIONING.md)) |
+| [releases/](releases/) | Release notes |
+| [reference/history/](reference/history/README.md) | Historical internal documents: the security-fix history, the 2026-08-26 log-monitor incident, the SSH hardening rollout, the CodeQL triage before 1.0, an early implementation plan |
 
 ## Code documentation
 

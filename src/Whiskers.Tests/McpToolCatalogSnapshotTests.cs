@@ -14,7 +14,7 @@ namespace Whiskers.Tests;
 /// </summary>
 public class McpToolCatalogSnapshotTests
 {
-    private const string CatalogPath = "docs/mcp-tool-catalog.md";
+    private const string CatalogPath = "docs/guide/mcp-tool-catalog.md";
 
     private static IReadOnlyList<IWhiskersModule> EnabledModules() =>
         ModuleCatalog.DiscoverEnabled(new ConfigurationBuilder().Build());

@@ -68,7 +68,7 @@ never a pass.
   allowed nesting. `MutationGatewayCoverageTests.Inventory` (`src/Whiskers.Tests/MutationGatewayCoverageTests.cs:69`)
   lists `(surface, capability, boundary)` for the guarded writes; `Every_capability_has_an_execution_boundary_the_guard_checks`
   and `The_inventory_names_real_boundaries_for_every_surface` keep it honest against the code, but not against §7.
-- **Generated-document precedent.** `McpToolCatalogSnapshotTests` renders `docs/mcp-tool-catalog.md` from the code,
+- **Generated-document precedent.** `McpToolCatalogSnapshotTests` renders `docs/guide/mcp-tool-catalog.md` from the code,
   fails on any difference and writes `<file>.actual` beside it for review — it never repairs the file itself.
 - **Required tests in CI (R1-47).** `.github/required-tests/in-process.txt` and `docker.txt` name tests that must be in
   the TRX file and pass; `check-test-results.sh --require` enforces them (`ci.yml:80`, `:91`), and
@@ -185,7 +185,7 @@ cannot be checked themselves.
 
 One row per capability, sorted by id: `id`, level, target kind, risk, MCP tool (or —), verification kind
 (read back / `NotVerifiable` + reason), surfaces from `MutationGatewayCoverageTests.Inventory`, allowed compositions,
-and the §7 rows that name it (from D6). A header says "generated — do not edit", as in `docs/mcp-tool-catalog.md`.
+and the §7 rows that name it (from D6). A header says "generated — do not edit", as in `docs/guide/mcp-tool-catalog.md`.
 
 ### `docs/v1/PATH_CAPABILITIES.md` (new, hand-maintained — only with D6 option b)
 

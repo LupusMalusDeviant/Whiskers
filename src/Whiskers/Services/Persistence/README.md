@@ -2,7 +2,7 @@
 
 The storage primitives every other service builds on. Whiskers persists two ways: a **relational database** (via EF Core) for time-series and structured data, and **JSON file stores** for configuration. The relational provider is chosen at startup — **SQLite** (zero-config default) or **PostgreSQL** (opt-in). JSON stores, keys and certificates always live under the data directory — `WHISKERS_DATA_DIR`, default `/app/data` — resolved centrally by [`../../Configuration/DataPathOptions.cs`](../../Configuration/DataPathOptions.cs), never in the image.
 
-> The EF Core `DbContext`, its 20 entity types and the UTC value converter now live in the standalone [`Whiskers.Data`](../../../Whiskers.Data/) project; the per-provider migrations live in [`Whiskers.Migrations.Sqlite`](../../../Whiskers.Migrations.Sqlite/) and [`Whiskers.Migrations.Postgres`](../../../Whiskers.Migrations.Postgres/). See [ADR-0004](../../../../docs/adr/0004-postgres-provider-support.md) for why.
+> The EF Core `DbContext`, its 20 entity types and the UTC value converter now live in the standalone [`Whiskers.Data`](../../../Whiskers.Data/) project; the per-provider migrations live in [`Whiskers.Migrations.Sqlite`](../../../Whiskers.Migrations.Sqlite/) and [`Whiskers.Migrations.Postgres`](../../../Whiskers.Migrations.Postgres/). See [ADR-0004](../../../../docs/architecture/adr/0004-postgres-provider-support.md) for why.
 
 ## Files
 
@@ -49,7 +49,7 @@ The schema is managed by **EF Core migrations**, one assembly per provider, appl
    ```
 3. Commit the generated `*.cs` — never hand-write DDL. `MigrateAsync` applies it on the next boot.
 
-**Baseline (SQLite):** the original `InitialCreate` name is frozen (ADR-0003) — `DatabaseInitializer` recognises pre-migration `EnsureCreated` databases (tables present, no `__EFMigrationsHistory`), heals any missing table, records `InitialCreate` as already-applied, then migrates — non-destructive by construction. See [ADR-0003](../../../../docs/adr/0003-ef-core-migrations-baseline.md) and `DbMigrationBaselineTests` for the data-safety proof.
+**Baseline (SQLite):** the original `InitialCreate` name is frozen (ADR-0003) — `DatabaseInitializer` recognises pre-migration `EnsureCreated` databases (tables present, no `__EFMigrationsHistory`), heals any missing table, records `InitialCreate` as already-applied, then migrates — non-destructive by construction. See [ADR-0003](../../../../docs/architecture/adr/0003-ef-core-migrations-baseline.md) and `DbMigrationBaselineTests` for the data-safety proof.
 
 ## Related
 

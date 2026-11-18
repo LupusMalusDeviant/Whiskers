@@ -31,7 +31,7 @@ to `latest`, no generated vault key, no `VAULT_KEY_FILE`, no setup token); for t
 | Images | `ghcr.io/lupusmalusdeviant/whiskers`, amd64 + arm64, Trivy-gated, SBOM + provenance, keyless cosign signature. <!-- claim:RM-08 --> |
 | Stack | C# / .NET 10, ASP.NET Core, MudBlazor, EF Core, SignalR. License Apache 2.0. <!-- claim:RM-16 --> |
 
-The full tool list with permission levels is generated from the code: [docs/mcp-tool-catalog.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/mcp-tool-catalog.md).
+The full tool list with permission levels is generated from the code: [docs/guide/mcp-tool-catalog.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp-tool-catalog.md).
 
 ## Install
 
@@ -58,7 +58,7 @@ docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
 <!-- claim-free:advice -->
 
 This has no vault key; set `VAULT_KEY_FILE` before you store secrets. Compose, Helm, reverse proxy, Tailscale and the
-hardened profile: [docs/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/installation.md). <!-- claim-free:advice -->
+hardened profile: [docs/operations/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md). <!-- claim-free:advice -->
 
 ## First sign-in
 
@@ -97,8 +97,8 @@ Any other client:
 ```
 <!-- claim-free:advice -->
 
-Crush and more: [docs/installation.md → MCP clients](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/installation.md#mcp-clients). Scopes, prompts and
-resources: [docs/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/mcp.md).
+Crush and more: [docs/operations/installation.md → MCP clients](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md#mcp-clients). Scopes, prompts and
+resources: [docs/guide/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp.md).
 
 ## Verifying the image
 
@@ -111,7 +111,7 @@ cosign verify "ghcr.io/lupusmalusdeviant/whiskers:${VER}" \
 <!-- claim-free:advice -->
 
 Images before v0.12.1 are not cosign-signed. Supply-chain details:
-[docs/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/security-architecture.md#supply-chain). <!-- claim-free:history -->
+[docs/architecture/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/security-architecture.md#supply-chain). <!-- claim-free:history -->
 
 ## Configuration
 
@@ -132,7 +132,7 @@ Everything is optional. Where a setting goes depends on the install path: <!-- c
 | `PATH_BASE` | `PathBase` | Subpath behind a reverse proxy. <!-- claim:RM-22 --> |
 | — (not mapped; add an `environment:` entry) | `ForwardedHeaders__TrustedNetworks__0` | Proxy whose `X-Forwarded-*` headers are believed; loopback only by default. <!-- claim:RM-12 --> |
 
-All keys: [docs/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/configuration.md) and [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example). <!-- claim-free:pointer -->
+All keys: [docs/operations/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/configuration.md) and [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example). <!-- claim-free:pointer -->
 
 ## Accepted limits (1.0)
 
@@ -149,7 +149,7 @@ Deliberate limits of Whiskers 1.0
 ## Compose exposure checks: remaining risks
 
 Compose deployments are decided on their exposures (published ports, host network, privileges, route labels; contract
-0006, INV-62 — details in [docs/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/features.md#compose-deployments-and-exposure-changes)). Not caught,
+0006, INV-62 — details in [docs/guide/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/features.md#compose-deployments-and-exposure-changes)). Not caught,
 or caught only after `up`: <!-- claim-free:limit -->
 
 - **Proxies and tunnels behind an unrecognisable entrypoint**: Traefik, cloudflared and Tailscale are recognised by
@@ -227,17 +227,17 @@ CI checks the build, the tests, the image, the PostgreSQL suites, dependencies, 
 
 | Topic | File |
 |---|---|
-| Governance model, hero workflow, policy layer | [docs/governance.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/governance.md) |
-| Features | [docs/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/features.md) |
-| Installation (all paths) | [docs/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/installation.md) <!-- claim-free:pointer --> |
-| Configuration | [docs/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/configuration.md) |
-| MCP server | [docs/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/mcp.md) |
-| In-process AI agent | [docs/agent.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/agent.md) |
-| Security architecture and supply chain | [docs/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/security-architecture.md) |
-| Architecture | [docs/ARCHITECTURE.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/ARCHITECTURE.md) |
-| Screenshots | [docs/screenshots.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/screenshots.md) |
-| Roadmap | [docs/roadmap.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/roadmap.md) |
-| Project structure | [docs/project-structure.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/project-structure.md) |
+| Governance model, hero workflow, policy layer | [docs/guide/governance.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/governance.md) |
+| Features | [docs/guide/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/features.md) |
+| Installation (all paths) | [docs/operations/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md) <!-- claim-free:pointer --> |
+| Configuration | [docs/operations/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/configuration.md) |
+| MCP server | [docs/guide/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp.md) |
+| In-process AI agent | [docs/guide/agent.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/agent.md) |
+| Security architecture and supply chain | [docs/architecture/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/security-architecture.md) |
+| Architecture | [docs/architecture/ARCHITECTURE.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/ARCHITECTURE.md) |
+| Screenshots | [docs/guide/screenshots.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/screenshots.md) |
+| Roadmap | [docs/guide/roadmap.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/roadmap.md) |
+| Project structure | [docs/architecture/project-structure.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/project-structure.md) |
 | Everything else | [docs/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/README.md) <!-- claim-free:pointer --> |
 
 Security issues: report privately, see [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md).

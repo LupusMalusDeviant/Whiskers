@@ -1,3 +1,5 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit area A: Authentication, Authorization, HTTP/SignalR surface, Sessions
 
 Repo: repository @ `498e70d` (read-only audit). Paths below are relative to `src/Whiskers/` unless noted.

@@ -188,7 +188,7 @@ the repo or docs.
 
 - A **one-time bootstrap SSH** connection during onboarding is allowed and expected.
 - After onboarding, **steady-state operation is designed to run without a standing private SSH
-  key** — management moves to mesh + mTLS (see [../ARCHITECTURE.md](../ARCHITECTURE.md)).
+  key** — management moves to mesh + mTLS (see [../ARCHITECTURE.md](../architecture/ARCHITECTURE.md)).
 - We do **not** claim SSH is never used, and we do **not** claim Whiskers "replaces SSH".
 
 ---
@@ -218,5 +218,5 @@ Use these terms precisely and do not treat them as synonyms.
 ## Related
 
 - [README.md](README.md) — index of product-strategy documents.
-- [../ARCHITECTURE.md](../ARCHITECTURE.md) — the SSH-key-free design, mesh + mTLS, the three planes.
+- [../ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — the SSH-key-free design, mesh + mTLS, the three planes.
 - [../../SECURITY.md](../../SECURITY.md) — security model and hardening.

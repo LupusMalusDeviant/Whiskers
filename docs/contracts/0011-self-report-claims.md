@@ -75,13 +75,13 @@ code or configuration, and a new claim without a register entry fails a test.
 
 ### Part B — Claim register
 
-- **D8 — Governed documents.** `README.md`, `SECURITY.md`, `docs/security-architecture.md`,
+- **D8 — Governed documents.** `README.md`, `SECURITY.md`, `docs/architecture/security-architecture.md`,
   `docs/operations/production-checklist.md`. Why these: README and SECURITY.md are named by INV-56;
   `security-architecture.md` is where both send the reader for the security and supply-chain claims, and it makes
   nothing but such claims; the production checklist is the written counterpart of the readiness card and quotes its
-  lines. Not governed for now: `docs/ARCHITECTURE.md`, `features.md`, `installation.md`, `configuration.md`,
+  lines. Not governed for now: `docs/architecture/ARCHITECTURE.md`, `features.md`, `installation.md`, `configuration.md`,
   `container-hardening.md`, `mcp.md`, `governance.md`, ADRs, folder READMEs (long descriptive documents; their
-  security statements repeat the governed ones), `docs/v1/*` (already checked by the release gate), `docs/reviews/*`
+  security statements repeat the governed ones), `docs/v1/*` (already checked by the release gate), `docs/reference/history/*`
   (dated history). Adding a file later is one line in `ClaimRules.GovernedFiles` plus its markers. See Q1.
 - **D9 — Register: `docs/v1/CLAIMS.md`**, markdown tables parsed by the tests, as in contract 0008.
   - *Claims* table: `| Claim | File | Block | Quote | Check | Tests |`

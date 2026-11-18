@@ -1,6 +1,6 @@
 # Claim register (contract 0011, INV-56)
 
-Every checkable statement of the governed documents — `README.md`, `SECURITY.md`, `docs/security-architecture.md` and
+Every checkable statement of the governed documents — `README.md`, `SECURITY.md`, `docs/architecture/security-architecture.md` and
 `docs/operations/production-checklist.md` — is listed here with the test that proves it against the code or the
 repository's configuration ([contract 0011](../contracts/0011-self-report-claims.md), Part B). The tables are read by
 `ClaimRegisterTests`; the release gate requires every test named under *Claims* (R8).
@@ -53,7 +53,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | SEC-01 | `SECURITY.md` | `30036fb4eb56` | This source tree is the **stable** (`1.0.x`) line. | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
 | SEC-02 | `SECURITY.md` | `2c3376c66abd` | Helm chart pins `replicas: 1` with a `Recreate` strategy | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
 | SEC-15 | `SECURITY.md` | `be2a1ac9b3fe` | roll out the mTLS certificates, the Docker proxy and telemetry | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
-| SEC-16 | `SECURITY.md` | `2bb11d69e4f0` | the Docker API (Docker Engine API over mutual TLS, client CN pinned, behind a verb-whitelisting socket proxy) | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
+| SEC-16 | `SECURITY.md` | `6f24cdfbc22b` | the Docker API (Docker Engine API over mutual TLS, client CN pinned, behind a verb-whitelisting socket proxy) | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
 | SEC-17 | `SECURITY.md` | `838dc5210a13` | onboarding binds the mTLS Docker proxy (port 2376) and `node_exporter` to the host's mesh (WireGuard) address, not to a public interface. | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
 | SEC-18 | `SECURITY.md` | `e611af28a2dc` | evaluated in code at the tool boundary — not in a prompt. | behaviour | `DirectMcpCallGuardWireTests.The_running_server_applies_guardrails_to_direct_tool_calls`, `MutationGatewayCoverageTests.Every_changing_mcp_tool_is_decided_by_the_gateway` |
 | SEC-03 | `SECURITY.md` | `50a9b9218f4b` | (Viewer → Read, Operator → Write, Admin → Admin) | behaviour | `SelfReportClaimTests.Every_role_maps_to_its_scope` |
@@ -81,20 +81,20 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | SEC-14 | `SECURITY.md` | `307fdb03b8fd` | It requires the one-time token from `/app/data/setup-token.txt` (or `WHISKERS_SETUP_TOKEN`) | behaviour | `SetupStateServiceTests.First_run_writes_an_owner_only_token_and_completion_requires_it`, `SetupStateServiceTests.The_token_survives_a_restart_and_can_be_preset` |
 | SEC-26 | `SECURITY.md` | `02f9f13d5a4a` | Without a usable vault Whiskers creates no webhook | behaviour | `WebhookSecretTests.Without_a_usable_vault_creating_or_rotating_a_secret_is_refused_and_nothing_is_written` |
 | SEC-27 | `SECURITY.md` | `71782ea65271` | Dependabot config ships in `.github/dependabot.yml`. | artifact | `OnboardingCommandsTests.The_templates_roll_out_the_same_images_as_the_files_dependabot_keeps_current` |
-| SEC-28 | `SECURITY.md` | `007bd7c8b6e7` | (non-root, no `privileged`, dropped capabilities, read-only rootfs | artifact | `SelfReportClaimTests.The_default_compose_is_privileged_and_the_hardened_one_is_not` |
-| SA-03 | `docs/security-architecture.md` | `70cea61dc284` | `node_exporter` → VictoriaMetrics (pull over the mesh) | artifact | `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
-| SA-04 | `docs/security-architecture.md` | `e915755fa45e` | Docker Engine API over **mTLS** (client certificate, CN-pinned) + verb-whitelisting socket proxy | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
-| SA-05 | `docs/security-architecture.md` | `3bc8fefd5b56` | one-shot privileged `nsenter` container | behaviour | `HostShellDeadlineTests.The_helper_is_a_one_shot_privileged_nsenter_container_in_the_host_pid_namespace` |
-| SA-06 | `docs/security-architecture.md` | `066bcd52a8ab` | roll out the mTLS certificates and the Docker proxy, and install telemetry | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
-| SA-07 | `docs/security-architecture.md` | `a9b7975d6653` | onboarding binds the mTLS Docker proxy and `node_exporter` to the host's mesh address, not to a public interface. | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
-| SA-08 | `docs/security-architecture.md` | `3dd270dda683` | passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list) | behaviour | `ToolAuthorizationWireTests.Allowed_tools_cannot_widen_a_read_key_to_a_write_tool`, `GuardrailEngineTests.Write_tool_by_read_principal_is_denied`, `GuardrailEngineTests.Tool_outside_principal_allowlist_is_denied`, `ToolAuthorizationTests.A_stricter_stored_level_applies_to_the_agent_too` |
-| SA-09 | `docs/security-architecture.md` | `cfdf38e7ce43` | `api-keys.json` no longer exists | behaviour | `McpPermissionServiceTests.Leftover_files_of_the_removed_flat_key_store_are_deleted_on_start` |
-| SA-10 | `docs/security-architecture.md` | `78e331d4ad87` | The SSH private keys and the mTLS client keys are sealed with a key derived from `VAULT_KEY` | behaviour + readiness | `KeyMaterialAtRestTests.No_file_or_unencrypted_self_backup_holds_a_key_after_upload_rollout_renewal_rotation_and_start_migration`, `ProductionReadinessServiceTests.The_vault_line_names_every_sealed_key_kind_and_the_key_line_counts_what_is_left` |
-| SA-01 | `docs/security-architecture.md` | `aafa47cd02e7` | the vault on **AES-256-GCM + PBKDF2** | behaviour | `SelfReportClaimTests.The_vault_encrypts_with_aes_256_gcm_under_a_pbkdf2_key` |
-| SA-11 | `docs/security-architecture.md` | `251f583a6182` | both architectures (amd64 and arm64) are scanned by digest and exactly the scanned digests are published, only after the full test suite passed on the tag commit, and a published version is never replaced | artifact | `ReleaseWorkflowTests.Both_architectures_are_scanned_by_digest_and_exactly_those_digests_are_published`, `ReleaseWorkflowTests.Release_builds_the_tag_commit_and_publishes_only_after_tests_and_scan`, `ReleaseWorkflowTests.Versioned_artifacts_are_checked_for_existence_before_they_are_pushed` |
-| SA-12 | `docs/security-architecture.md` | `b1989e7bb9d8` | **keyless-signed with [cosign](https://github.com/sigstore/cosign)** (Sigstore) | artifact | `SelfReportClaimTests.The_release_attests_provenance_and_an_sbom_and_signs_keyless` |
+| SEC-28 | `SECURITY.md` | `a2d4bbd175ff` | (non-root, no `privileged`, dropped capabilities, read-only rootfs | artifact | `SelfReportClaimTests.The_default_compose_is_privileged_and_the_hardened_one_is_not` |
+| SA-03 | `docs/architecture/security-architecture.md` | `70cea61dc284` | `node_exporter` → VictoriaMetrics (pull over the mesh) | artifact | `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
+| SA-04 | `docs/architecture/security-architecture.md` | `e915755fa45e` | Docker Engine API over **mTLS** (client certificate, CN-pinned) + verb-whitelisting socket proxy | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
+| SA-05 | `docs/architecture/security-architecture.md` | `3bc8fefd5b56` | one-shot privileged `nsenter` container | behaviour | `HostShellDeadlineTests.The_helper_is_a_one_shot_privileged_nsenter_container_in_the_host_pid_namespace` |
+| SA-06 | `docs/architecture/security-architecture.md` | `066bcd52a8ab` | roll out the mTLS certificates and the Docker proxy, and install telemetry | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
+| SA-07 | `docs/architecture/security-architecture.md` | `a9b7975d6653` | onboarding binds the mTLS Docker proxy and `node_exporter` to the host's mesh address, not to a public interface. | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
+| SA-08 | `docs/architecture/security-architecture.md` | `c3d0ff1cc471` | passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list) | behaviour | `ToolAuthorizationWireTests.Allowed_tools_cannot_widen_a_read_key_to_a_write_tool`, `GuardrailEngineTests.Write_tool_by_read_principal_is_denied`, `GuardrailEngineTests.Tool_outside_principal_allowlist_is_denied`, `ToolAuthorizationTests.A_stricter_stored_level_applies_to_the_agent_too` |
+| SA-09 | `docs/architecture/security-architecture.md` | `0f9e59c1dea9` | `api-keys.json` no longer exists | behaviour | `McpPermissionServiceTests.Leftover_files_of_the_removed_flat_key_store_are_deleted_on_start` |
+| SA-10 | `docs/architecture/security-architecture.md` | `838be6feb29c` | The SSH private keys and the mTLS client keys are sealed with a key derived from `VAULT_KEY` | behaviour + readiness | `KeyMaterialAtRestTests.No_file_or_unencrypted_self_backup_holds_a_key_after_upload_rollout_renewal_rotation_and_start_migration`, `ProductionReadinessServiceTests.The_vault_line_names_every_sealed_key_kind_and_the_key_line_counts_what_is_left` |
+| SA-01 | `docs/architecture/security-architecture.md` | `4bdeb672deb6` | the vault on **AES-256-GCM + PBKDF2** | behaviour | `SelfReportClaimTests.The_vault_encrypts_with_aes_256_gcm_under_a_pbkdf2_key` |
+| SA-11 | `docs/architecture/security-architecture.md` | `251f583a6182` | both architectures (amd64 and arm64) are scanned by digest and exactly the scanned digests are published, only after the full test suite passed on the tag commit, and a published version is never replaced | artifact | `ReleaseWorkflowTests.Both_architectures_are_scanned_by_digest_and_exactly_those_digests_are_published`, `ReleaseWorkflowTests.Release_builds_the_tag_commit_and_publishes_only_after_tests_and_scan`, `ReleaseWorkflowTests.Versioned_artifacts_are_checked_for_existence_before_they_are_pushed` |
+| SA-12 | `docs/architecture/security-architecture.md` | `b1989e7bb9d8` | **keyless-signed with [cosign](https://github.com/sigstore/cosign)** (Sigstore) | artifact | `SelfReportClaimTests.The_release_attests_provenance_and_an_sbom_and_signs_keyless` |
 | PC-03 | `docs/operations/production-checklist.md` | `d29aa25b3152` | The installer pins `X.Y.Z` and, with cosign installed, the verified digest (`image: …:X.Y.Z@sha256:…`). | artifact | `InstallerContractTests.A_new_install_pins_the_release_and_hands_over_a_generated_vault_key_as_a_file`, `InstallerContractTests.A_good_signature_is_checked_against_exactly_this_release_and_its_digest_is_pinned` |
-| PC-04 | `docs/operations/production-checklist.md` | `554600de4e28` | The default `docker-compose.yml` is privileged (host PID namespace, root) | artifact | `SelfReportClaimTests.The_default_compose_is_privileged_and_the_hardened_one_is_not` |
+| PC-04 | `docs/operations/production-checklist.md` | `6eb192f1ac00` | The default `docker-compose.yml` is privileged (host PID namespace, root) | artifact | `SelfReportClaimTests.The_default_compose_is_privileged_and_the_hardened_one_is_not` |
 | PC-01 | `docs/operations/production-checklist.md` | `7b64c749fd34` | The installer binds to `127.0.0.1` by default (`--bind <addr>` or `WHISKERS_BIND` | artifact | `SelfReportClaimTests.The_installer_binds_loopback_by_default_and_sets_tz_and_the_vault_key_file`, `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | PC-05 | `docs/operations/production-checklist.md` | `078a85b415f3` | the readiness card names it as an ignored peer | readiness | `ProductionReadinessServiceTests.A_peer_whose_forwarded_headers_were_ignored_is_named_and_none_means_no_line`, `HttpSecurityTests.The_session_cookie_is_http_only_lax_and_secure_over_https` |
 | PC-06 | `docs/operations/production-checklist.md` | `c87862b5df46` | Helm pins `replicas: 1` with `Recreate`. | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
@@ -119,15 +119,15 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `941b3da88f96` | history | **Scope of this README:** `main`, i.e. t |
 | `README.md` | `323ff41f5965` | advice | ```bash VER=X.Y.Z # a release from https |
 | `README.md` | `8e38830acb63` | advice | ```bash VER=X.Y.Z docker run -d --name w |
-| `README.md` | `7f89fd39428a` | advice | This has no vault key; set `VAULT_KEY_FI |
+| `README.md` | `91c6b0a1e1db` | advice | This has no vault key; set `VAULT_KEY_FI |
 | `README.md` | `5e10ca319749` | advice | ```bash docker exec whiskers cat /app/da |
 | `README.md` | `92d3708115e3` | advice | ```bash export WHISKERS_MCP_API_KEY=… cl |
 | `README.md` | `347d236a9d4a` | advice | ```json { "mcpServers": { "whiskers": { |
 | `README.md` | `88b08bffdb1d` | advice | ```bash VER=X.Y.Z cosign verify "ghcr.io |
-| `README.md` | `dad9e95b15b0` | history | Images before v0.12.1 are not cosign-sig |
+| `README.md` | `36d9f10fb978` | history | Images before v0.12.1 are not cosign-sig |
 | `README.md` | `7b6ff0ec096d` | advice | Everything is optional. Where a setting |
 | `README.md` | `272aa341265e` | advice | - **`docker run`:** nothing is set; pass |
-| `README.md` | `b84bad32980e` | pointer | All keys: [docs/configuration.md](https: |
+| `README.md` | `1a1cdfbbdcf5` | pointer | All keys: [docs/operations/configuration |
 | `README.md` | `0f986ac3dd73` | limit | Deliberate limits of Whiskers 1.0 ([prod |
 | `README.md` | `79ff0f69e977` | limit | - **Root-equivalent administration.** An |
 | `README.md` | `024c9da26d23` | limit | - **Single instance.** One process and o |
@@ -135,7 +135,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `0f8418efa46a` | limit | - **No terminal transcript.** Opening a |
 | `README.md` | `3a0cc64255b0` | limit | - **Out-of-band changes are invisible.** |
 | `README.md` | `d5a1a574b44a` | limit | - **No second factor for local accounts. |
-| `README.md` | `a2747be852ac` | limit | Compose deployments are decided on their |
+| `README.md` | `f1c14d86e3a4` | limit | Compose deployments are decided on their |
 | `README.md` | `568319d4e1e3` | limit | - **Proxies and tunnels behind an unreco |
 | `README.md` | `7d874a4c037c` | limit | - **Tailscale serve state** is read from |
 | `README.md` | `ce0710612c8e` | limit | - **A Traefik on the host** outside the |
@@ -150,7 +150,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `f7af4d73bc43` | advice | Requires the .NET SDK version in `global |
 | `README.md` | `2319ae6706c7` | advice | ```bash dotnet build Whiskers.slnx -c Re |
 | `README.md` | `fc3e806e0705` | advice | After changing a package reference: `dot |
-| `README.md` | `bde34b02dcf3` | pointer | \| Installation (all paths) \| [docs/insta |
+| `README.md` | `7753b065881b` | pointer | \| Installation (all paths) \| [docs/opera |
 | `README.md` | `22a2a8ef1298` | pointer | \| Everything else \| [docs/README.md](htt |
 | `SECURITY.md` | `e233f1b70b26` | policy | **Please report vulnerabilities privatel |
 | `SECURITY.md` | `873df784dcd1` | policy | Whiskers has a single maintainer, so the |
@@ -165,11 +165,11 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `SECURITY.md` | `7bd63b63bc53` | limit | - **Not covered in 1.0, by design** (pro |
 | `SECURITY.md` | `a223f82ae23f` | advice | - **Local accounts have no MFA in 1.0.** |
 | `SECURITY.md` | `26ac10ed8324` | advice | - Keep the agent's guardrail presets res |
-| `docs/security-architecture.md` | `14f4cc7038ab` | pointer | How Whiskers reaches managed hosts, what |
-| `docs/security-architecture.md` | `7daa853142a0` | pointer | None of them uses SSH in steady state, a |
-| `docs/security-architecture.md` | `597e2b99ff77` | limit | **The Docker-API and host-control planes |
-| `docs/security-architecture.md` | `e89aa1cb46e5` | history | Every published release image is, from v |
-| `docs/security-architecture.md` | `d5272bac9020` | history | The verify command is in the [README](.. |
+| `docs/architecture/security-architecture.md` | `59e9b730c50e` | pointer | How Whiskers reaches managed hosts, what |
+| `docs/architecture/security-architecture.md` | `7daa853142a0` | pointer | None of them uses SSH in steady state, a |
+| `docs/architecture/security-architecture.md` | `597e2b99ff77` | limit | **The Docker-API and host-control planes |
+| `docs/architecture/security-architecture.md` | `e89aa1cb46e5` | history | Every published release image is, from v |
+| `docs/architecture/security-architecture.md` | `72010146a518` | history | The verify command is in the [README](.. |
 | `docs/operations/production-checklist.md` | `f7f263e36e2f` | advice | Go through this list before Whiskers man |
 | `docs/operations/production-checklist.md` | `d380c7f4ee0f` | pointer | Read [Accepted limits](#accepted-limits- |
 | `docs/operations/production-checklist.md` | `64e87685a443` | advice | - [ ] **MCP keys with the least level** |
@@ -182,7 +182,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `docs/operations/production-checklist.md` | `c1106c6de89e` | advice | - [ ] **`/healthz` and `/readyz` probed* |
 | `docs/operations/production-checklist.md` | `6d5658970302` | advice | - [ ] **Structured logs** if you ship lo |
 | `docs/operations/production-checklist.md` | `cc421d26b6fb` | advice | - [ ] **A notification channel** that re |
-| `docs/operations/production-checklist.md` | `040f876fc46c` | advice | - [ ] **Onboarded hosts run over the mes |
+| `docs/operations/production-checklist.md` | `512c03300f93` | advice | - [ ] **Onboarded hosts run over the mes |
 | `docs/operations/production-checklist.md` | `f1c36c40f1a9` | advice | - [ ] **Every mTLS host on its own clien |
 | `docs/operations/production-checklist.md` | `e61cb49bcfaf` | limit | These are deliberate limits of Whiskers |
 | `docs/operations/production-checklist.md` | `8789645ea456` | limit | - **Root-equivalent administration.** Th |

@@ -17,7 +17,7 @@ namespace Whiskers.Tests.TestData;
 /// this proves a rule <b>fires</b>; it does not prove it stays quiet on a normal week. That second question
 /// needs the real series, and it is still open.</para>
 ///
-/// <para>Source: <c>docs/reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md</c>.</para>
+/// <para>Source: <c>docs/reference/history/2026-08-26-logmonitor-dockerd-cpu-incident.md</c>.</para>
 /// </summary>
 public static class CpuIncidentSeries
 {

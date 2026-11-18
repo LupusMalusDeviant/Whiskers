@@ -21,4 +21,4 @@ failing — and the Terminal panel in Settings is hidden.
 module never instantiates them and never hits a missing-service DI error. The session/service code stays in
 [`../../Services/Terminal/`](../../Services/Terminal/).
 
-See [`docs/modules/terminal.md`](../../../../docs/modules/terminal.md).
+See [`docs/guide/modules/terminal.md`](../../../../docs/guide/modules/terminal.md).

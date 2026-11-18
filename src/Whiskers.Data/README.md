@@ -1,6 +1,6 @@
 # Whiskers.Data
 
-The shared EF Core data layer, extracted into its own assembly so the per-provider migration projects can reference it without a circular dependency on the app ([ADR-0004](../../docs/adr/0004-postgres-provider-support.md)).
+The shared EF Core data layer, extracted into its own assembly so the per-provider migration projects can reference it without a circular dependency on the app ([ADR-0004](../../docs/architecture/adr/0004-postgres-provider-support.md)).
 
 Contains:
 

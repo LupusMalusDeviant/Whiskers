@@ -8,7 +8,7 @@ namespace Whiskers.Startup;
 
 /// <summary>The authentication wiring — cookie session + optional Google/OIDC providers, or full bypass for
 /// trusted LAN-only deployments. Isolated from the rest of the composition root because it is the
-/// security-sensitive protected layer (docs/ARCHITECTURE.md, ADR-0002): the provider events and the cookie policy were
+/// security-sensitive protected layer (docs/architecture/ARCHITECTURE.md, ADR-0002): the provider events and the cookie policy were
 /// moved here verbatim from Program.cs. One deliberate change since (user-approved 2026-11-03, R1-26): the cookie's
 /// per-request check is no longer the fail-open whitelist re-check but the fail-closed session check
 /// (<c>SessionCookieValidation</c> → <c>ISessionValidator</c>). R1-27 (contract 0003, approved 2026-11-04): one claim

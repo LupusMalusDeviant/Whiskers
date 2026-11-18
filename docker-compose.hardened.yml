@@ -19,7 +19,7 @@
 #     against the *local* host. Remote hosts over mTLS are unaffected.
 #   • the in-container VPN daemon — run Tailscale/NetBird on the host instead.
 #
-# See docs/container-hardening.md for the full rationale and the per-mode matrix.
+# See docs/operations/container-hardening.md for the full rationale and the per-mode matrix.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:

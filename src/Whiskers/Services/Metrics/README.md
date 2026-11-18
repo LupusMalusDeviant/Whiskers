@@ -1,6 +1,6 @@
 # Services/Metrics
 
-Metric collection, storage and querying (CPU, RAM, disk, container stats). The design **decouples the collector from where metrics come from** so a server can use live Docker stats *or* a push/scrape telemetry pipeline (VictoriaMetrics) without the collector caring, see [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md).
+Metric collection, storage and querying (CPU, RAM, disk, container stats). The design **decouples the collector from where metrics come from** so a server can use live Docker stats *or* a push/scrape telemetry pipeline (VictoriaMetrics) without the collector caring, see [docs/architecture/ARCHITECTURE.md](../../../../docs/architecture/ARCHITECTURE.md).
 
 A background collector samples on a schedule and writes time-series to SQLite ([`../Persistence/`](../Persistence/)); the query service reads it back for charts and reports.
 

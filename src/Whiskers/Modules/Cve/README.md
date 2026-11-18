@@ -29,4 +29,4 @@ cycle, so it's safe but wants a proper rename rather than an alias workaround).
 Service code stays in [`../../Services/Cve/`](../../Services/Cve/), tools in
 [`../../Mcp/Tools/CveTools.cs`](../../Mcp/Tools/CveTools.cs).
 
-See [`docs/modules/cve.md`](../../../../docs/modules/cve.md).
+See [`docs/guide/modules/cve.md`](../../../../docs/guide/modules/cve.md).

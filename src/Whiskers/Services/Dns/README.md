@@ -30,6 +30,6 @@ never in a tool answer, never in a log line.
 
 ## Related
 
-- Module: [`../../Modules/Dns/`](../../Modules/Dns/) · docs: [`docs/modules/dns.md`](../../../../docs/modules/dns.md)
+- Module: [`../../Modules/Dns/`](../../Modules/Dns/) · docs: [`docs/guide/modules/dns.md`](../../../../docs/guide/modules/dns.md)
 - MCP tools: [`../../Mcp/Tools/DnsTools.cs`](../../Mcp/Tools/DnsTools.cs) — `list_dns_records`, `set_dns_record`, `delete_dns_record`
 - Settings: [`../../Configuration/DnsSettings.cs`](../../Configuration/DnsSettings.cs)

@@ -9,7 +9,7 @@
 #
 # If Whiskers only monitors REMOTE hosts (mesh + mTLS) and should not have these
 # privileges, use the locked-down profile instead: docker-compose.hardened.yml
-# (non-root, no privileged, socket-proxy, dropped caps). See docs/container-hardening.md.
+# (non-root, no privileged, socket-proxy, dropped caps). See docs/operations/container-hardening.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The service, container and volume keep their pre-rebrand name `serverwatch` (Whiskers was called

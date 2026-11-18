@@ -13,7 +13,7 @@ using Whiskers.Utils;
 
 namespace Whiskers.Tests;
 
-/// <summary>CodeQL triage 2026-11 (docs/security/codeql-triage-2026-11.md): a logged value stays on one line
+/// <summary>CodeQL triage 2026-11 (docs/reference/history/codeql-triage-2026-11.md): a logged value stays on one line
 /// (<c>cs/log-forging</c>), an account's address never reaches the application log — the audit row keeps it
 /// (<c>cs/exposure-of-sensitive-information</c>, contract 0003) — and a database password never stands in a logged
 /// command (<c>cs/cleartext-storage-of-sensitive-information</c>).</summary>

@@ -29,7 +29,7 @@ nav entry disappears and `/hello-world` shows a "module disabled" notice.
    services, add a **no-op default** for it in Core before the module loop (see e.g. `NoopNotificationService`).
 4. Wrap the module's pages in `ModuleGuard` (or gate a `Settings.razor` panel with `@if IsEnabled(...)`).
 5. Register the module in [`../ModuleCatalog.cs`](../ModuleCatalog.cs); add a per-folder README +
-   `docs/modules/<id>.md`; prove `Features:<id>:Enabled=false` boots cleanly (Development + `ValidateOnBuild`).
+   `docs/guide/modules/<id>.md`; prove `Features:<id>:Enabled=false` boots cleanly (Development + `ValidateOnBuild`).
 
-See the [module system chapter in ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md) and
-[`docs/modules/`](../../../../docs/modules/).
+See the [module system chapter in ARCHITECTURE.md](../../../../docs/architecture/ARCHITECTURE.md) and
+[`docs/guide/modules/`](../../../../docs/guide/modules/).

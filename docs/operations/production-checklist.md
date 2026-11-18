@@ -13,7 +13,7 @@ rest of the list is not mistaken for more than it is. <!-- claim-free:pointer --
   digest (`image: …:X.Y.Z@sha256:…`). Use `--verify require` on production hosts. No `latest`. <!-- claim:PC-03 -->
 - [ ] **The right profile.** The default `docker-compose.yml` is privileged (host PID namespace, root) so Whiskers can
   manage its own host. If it only manages remote hosts, use `docker-compose.hardened.yml` (non-root, read-only root
-  file system, socket proxy) — [container-hardening.md](../container-hardening.md). The readiness line
+  file system, socket proxy) — [container-hardening.md](container-hardening.md). The readiness line
   "Hardened profile (non-root)" shows which one runs. <!-- claim:PC-04 -->
 - [ ] **Not on a public interface.** The installer binds to `127.0.0.1` by default (`--bind <addr>` or
   `WHISKERS_BIND`, for a new install only; afterwards edit the `ports:` line of the compose file it wrote). The
@@ -94,7 +94,7 @@ host. Self-backups hold the same data; with `VAULT_KEY` set they are encrypted. 
 
 ## Managed hosts
 
-- [ ] **Onboarded hosts run over the mesh and mTLS**, not over a standing SSH key ([ARCHITECTURE.md](../ARCHITECTURE.md)). <!-- claim-free:advice -->
+- [ ] **Onboarded hosts run over the mesh and mTLS**, not over a standing SSH key ([ARCHITECTURE.md](../architecture/ARCHITECTURE.md)). <!-- claim-free:advice -->
 - [ ] **Every mTLS host on its own client identity**, the shared one retired once no host admits it
   ([per-host-mtls-migration.md](per-host-mtls-migration.md)). <!-- claim-free:advice -->
 - [ ] **Critical containers listed as protected resources** in the guardrails. Whiskers' own control plane is

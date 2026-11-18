@@ -64,7 +64,7 @@ built in). <!-- claim:SEC-02 -->
   VictoriaMetrics over the mesh), the Docker API (Docker Engine API over mutual TLS, client CN pinned,
   behind a verb-whitelisting socket proxy) and host control (a one-shot `nsenter` container driven over
   the same mTLS channel). Whiskers holds **no standing SSH key** for an onboarded host. See
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). <!-- claim:SEC-16 -->
+  [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md). <!-- claim:SEC-16 -->
 - **Management ports are bound to the mesh address**: onboarding binds the mTLS Docker proxy (port 2376) and
   `node_exporter` to the host's mesh (WireGuard) address, not to a public interface. <!-- claim:SEC-17 -->
 
@@ -218,4 +218,4 @@ are logged (lines that quote rows are left out). <!-- claim:SEC-12 -->
   privileged because it can manage its own host (nsenter host-shell). If Whiskers only monitors
   *remote* hosts, deploy `docker-compose.hardened.yml` instead (non-root, no `privileged`, dropped
   capabilities, read-only rootfs, Docker via a verb-restricted socket-proxy). See
-  [docs/container-hardening.md](docs/container-hardening.md). <!-- claim:SEC-28 -->
+  [docs/operations/container-hardening.md](docs/operations/container-hardening.md). <!-- claim:SEC-28 -->

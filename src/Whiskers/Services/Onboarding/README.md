@@ -8,7 +8,7 @@ The bootstrap authenticates with **either an uploaded SSH key or a transient roo
 
 **Contract 0018 (PR 3, part E).** The MCP tools `add_server`, `onboard_server` and `get_onboarding_status` (`Mcp/Tools/ServerTools.Onboarding.cs`) use the same services. `onboard_server` runs with what the gateway decided (`MutationScope.DecidedTarget`: the server, its mTLS state and the host it reached), on a token bound to the 30-minute gateway deadline rather than the request. Every run, from any surface, is recorded once it holds the host lock in `OnboardingRuns` (`IOnboardingRuns` / `IOnboardingRunRecorder`): the latest run per server in memory — operation id, start, current step, the last 200 progress lines, the Tailscale login link and the result — which `get_onboarding_status` answers (Admin only, D5).
 
-See [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md) > *Onboarding a new server* for the full step sequence.
+See [docs/architecture/ARCHITECTURE.md](../../../../docs/architecture/ARCHITECTURE.md) > *Onboarding a new server* for the full step sequence.
 
 ## Files
 
@@ -25,6 +25,6 @@ See [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md) > *Onboarding a new
 
 ## Related
 
-- Architecture: [`../../../../docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md)
+- Architecture: [`../../../../docs/architecture/ARCHITECTURE.md`](../../../../docs/architecture/ARCHITECTURE.md)
 - Deploy templates: [`../../../../deploy/telemetry/`](../../../../deploy/telemetry/)
 - Server registry: [`../ServerConfig/`](../ServerConfig/)

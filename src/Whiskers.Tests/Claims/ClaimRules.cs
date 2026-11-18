@@ -15,7 +15,7 @@ public static class ClaimRules
     [
         ("README.md", "RM"),
         ("SECURITY.md", "SEC"),
-        ("docs/security-architecture.md", "SA"),
+        ("docs/architecture/security-architecture.md", "SA"),
         ("docs/operations/production-checklist.md", "PC"),
     ];
 
