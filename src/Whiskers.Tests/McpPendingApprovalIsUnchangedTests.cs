@@ -37,9 +37,21 @@ public sealed class McpPendingApprovalIsUnchangedTests
         var approval = approvals.Get(outcome.ApprovalId!)!;
         Assert.Equal("mcp-direct", approval.ActorType);
         Assert.Equal(ApprovalStatus.Pending, approval.Status);
-        // Not an INV-59 hit, not a web request: the runner's conditions never hold, and no prompt was involved.
+        // Not an INV-59 hit: the rollout rule never applies to it.
         Assert.False(InlineApproval.Applies(capability.Id, outcome.MatchedRules));
+
+        // Even handed to a UI runner with the dialog wired in, as an INV-59 hit of a listed capability for the very
+        // operation, the key's approval is never shown: it was not raised by the web UI for this person.
+        var stub = new InlineApprovalRunnerTests.StubGateway(new MutationOutcome<string>(approval.CorrelationId!,
+            MutationStatus.PendingApproval, null, "pending", VerificationStatus.NotRun, ApprovalId: approval.Id)
+            { MatchedRules = [Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId] });
+        var runner = new UiMutationRunner(stub, new CapabilityCatalog(), new InlineApprovalRunnerTests.Person(),
+            prompt: prompt, approvals: approvals);
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync(capability.Id, args,
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult("ran")));
+        Assert.Equal(approval.Id, refused.ApprovalId);
         Assert.Empty(prompt.Asked);
+        Assert.Equal(ApprovalStatus.Pending, approvals.Get(approval.Id)!.Status);
         // The requesting key never decides its own non-interactive request (unchanged, R1-15).
         Assert.NotNull(approvals.CanDecide(approval.Id, new ApprovalResolver("key:k1", McpPermissionLevels.Admin, "ci")));
     }

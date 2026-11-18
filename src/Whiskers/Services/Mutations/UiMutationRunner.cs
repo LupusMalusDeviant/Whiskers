@@ -205,7 +205,8 @@ public sealed class UiMutationRunner : IUiMutationRunner
 
         // Contract 0019 (D4): the same capability and arguments, the principal and session read again; the gateway
         // continues the original operation through its approve-then-retry path and uses the grant once.
-        ct.ThrowIfCancellationRequested();
+        // INV-65: only while the page and the circuit the decision was made in are still there.
+        StillThere(asked, ct);
         var second = await AttemptAsync(capabilityId, args, capability, targetType, action, ct);
         if (second.Outcome.Status != MutationStatus.PendingApproval
             || string.Equals(second.Outcome.ApprovalId, raised.ApprovalId, StringComparison.Ordinal))
@@ -226,7 +227,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
             PayloadsOf(args)) { ChangedSinceApproval = true }, ct);
         if (again.Outcome is not (InlineApprovalOutcome.ApprovedHere or InlineApprovalOutcome.ApprovedElsewhereRun))
             throw NotApproved(drifted, again.Outcome);
-        ct.ThrowIfCancellationRequested();
+        StillThere(again, ct);
         // A third PendingApproval is today's refusal: there is no loop.
         return Settle((await AttemptAsync(capabilityId, args, capability, targetType, action, ct)).Outcome, ct);
     }
@@ -276,6 +277,19 @@ public sealed class UiMutationRunner : IUiMutationRunner
         return result ?? new InlineApprovalResult(InlineApprovalOutcome.LeftPending);
     }
 
+    /// <summary>INV-65: a continuation runs only within the same runner call, directly after the decision: the page's
+    /// call is not cancelled and the circuit the dialog ran in has not dropped or closed since. Otherwise nothing runs
+    /// (the grant stays approved and unused, and lapses).</summary>
+    private void StillThere(InlineApprovalResult decided, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (decided.Circuit.IsCancellationRequested)
+        {
+            _logger?.LogWarning("The circuit of an approval dialog dropped after the decision; nothing ran");
+            throw new OperationCanceledException("The circuit dropped after the approval; nothing ran.", decided.Circuit);
+        }
+    }
+
     /// <summary>The refusal of an approval the dialog did not approve: left pending, rejected or expired.</summary>
     private MutationRefusedException NotApproved<T>(MutationOutcome<T> outcome, InlineApprovalOutcome result)
     {
@@ -286,6 +300,11 @@ public sealed class UiMutationRunner : IUiMutationRunner
                 $"Approval {id} was rejected by {RejectedBy(id)}; nothing ran.", id, RejectedBy(id))),
             InlineApprovalOutcome.Expired => (MutationStatus.Denied, Text("InlineApproval_Refused_Expired",
                 $"Approval {id} expired; nothing ran.", id)),
+            // The dialog was gone (closed, its wait ended) while someone approved it: nothing ran, and it is not pending.
+            _ when _approvals?.Get(id) is { Status: Whiskers.Models.Agent.ApprovalStatus.Approved } approved =>
+                (MutationStatus.PendingApproval, Text("InlineApproval_Refused_ApprovedAfterClose",
+                    $"Approval {id} was approved by {approved.ResolvedBy}, but its dialog had closed; nothing ran. Repeat the action within {Whiskers.Services.Approvals.ApprovalStore.GrantLifetime.TotalMinutes:0} minutes to run it once.",
+                    id, approved.ResolvedBy ?? "?", Whiskers.Services.Approvals.ApprovalStore.GrantLifetime.TotalMinutes.ToString("0"))),
             _ => (MutationStatus.PendingApproval, Text("InlineApproval_Refused_LeftPending",
                 $"Approval {id} was left on the Approvals page; nothing ran. Once it is approved there, run the action again.", id)),
         };

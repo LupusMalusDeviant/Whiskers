@@ -42,7 +42,12 @@ public enum InlineApprovalOutcome
     Expired,
 }
 
-public sealed record InlineApprovalResult(InlineApprovalOutcome Outcome, ApprovalDecisionResult? Decision = null);
+public sealed record InlineApprovalResult(InlineApprovalOutcome Outcome, ApprovalDecisionResult? Decision = null)
+{
+    /// <summary>Cancelled once the circuit the dialog ran in drops or closes (INV-65): the runner checks it right before
+    /// the continuation, so a circuit lost after the decision runs nothing. <c>None</c> from a prompt without a circuit.</summary>
+    public CancellationToken Circuit { get; init; }
+}
 
 /// <summary>Contract 0019 (D7): the rollout list of capabilities whose INV-59 approval may be given in the dialog.
 /// Code, not configuration.</summary>
@@ -62,6 +67,8 @@ public static class InlineApproval
         "mtls.client_migrate", "certificate.renew_mtls", "certificate.issue_mtls", "mtls.client_renew",
         "volume.backup", "volume.restore", "db.query",
         "compose.deploy", "app.deploy",
+        // … and the Git deploy started from the UI (Git deploy page, a webhook's test run): a deploy path too (D7).
+        "gitdeploy.deploy",
     };
 
     /// <summary>Whether the approval of a call of <paramref name="capabilityId"/> refused with

@@ -582,9 +582,12 @@ differs, it is listed here:
 1. **One change for both waves (D7 says "one PR per wave").** Waves 1 and 2 were built together: the rollout list
    `InlineApproval.Capabilities` holds both, and the §7 notes cover both. Splitting them would have shipped the same
    code twice with a shorter list. Wave 3 and `server.hostkey_replace` are not in the list.
-2. **The app-store path in wave 2.** "The deploy / compose / app-store paths" is read as the capabilities
-   `compose.deploy` and `app.deploy` (U-10, U-11, U-12). Both are listed; `Applies` still requires the INV-59 hit
-   (`protected-resource`), so only a plan that touches a protected container is prompted.
+2. **The deploy paths in wave 2.** "The deploy / compose / app-store paths" is read as the capabilities
+   `compose.deploy` (deploy form, compose tab, compose editor), `app.deploy` (app store) and `gitdeploy.deploy` (the
+   Git deploy started from the UI: the Git deploy page and a webhook's test run); U-10, U-11, U-12 and U-29 carry the
+   §7 note. `Applies` still requires the INV-59 hit (`protected-resource`), so only a plan that touches a protected
+   container is prompted. The unattended Git deploy (S-04/S-05) gains nothing: it runs through the automation runner,
+   which has no prompt.
 3. **Additive members the contract does not name.**
    - `InlineApprovalRequest.ChangedSinceApproval` (init-only): marks the second prompt "changed since you approved"
      (D4).
@@ -594,6 +597,15 @@ differs, it is listed here:
    - `InlineApprovalCircuit` (a scoped `CircuitHandler`): the prompt shows nothing unless the scope is a live circuit,
      and a dropped connection ends the wait as `LeftPending`.
    - `InlineApprovalDialog.Time` (a `TimeProvider` parameter, for the arming delay and the countdown in tests).
+   - `InlineApprovalResult.Circuit` (init-only `CancellationToken`): the prompt hands back the token of the circuit
+     the dialog ran in (`InlineApprovalCircuit.Lost`, cancelled when the connection drops or the circuit closes; a
+     reconnect gets a new token, the old one stays cancelled). The runner checks it, with the page's own token, right
+     before the second and the third gateway call, so a circuit lost after the decision runs nothing (UI flow step 6,
+     the fail-closed table, INV-65). The check is made before the call, not linked into it: a dropped connection while
+     the action already runs does not cancel the action, as before.
+   - `AddInlineApprovalPrompt()`: the prompt and the circuit marker are registered with the UI (`AddWhiskersUi`, next
+     to MudBlazor's services the prompt needs), not inside `AddMutationGateway`; without them the runner refuses as
+     before.
 4. **The prompt's wait is bounded by the approval's own expiry.** The dialog has no timeout of its own (D5); it
    closes as expired at the approval's end. As a fail-closed backstop, `MudInlineApprovalPrompt` also stops waiting
    5 s after `ExpiresAt` and reads the outcome from the store.
@@ -605,8 +617,17 @@ differs, it is listed here:
    - `ApprovalChannelTests.DecidedVia_is_persisted_on_both_providers` checks, for both providers, that the shipped
      migration `ApprovalDecidedVia` adds exactly the nullable column, and does the round trip on a migrated SQLite
      database. A round trip on a real PostgreSQL is not part of the in-process run.
-   - One test beyond the plan: `InlineApprovalDialogTests.Closing_leaves_the_approval_pending_and_outside_a_circuit_nothing_is_shown`.
+   - Tests beyond the plan: `InlineApprovalDialogTests.Closing_leaves_the_approval_pending_and_outside_a_circuit_nothing_is_shown`,
+     `InlineApprovalDialogTests.The_approval_hands_back_the_circuit_token_and_a_drop_cancels_it`,
+     `InlineApprovalRunnerTests.A_circuit_dropped_after_the_decision_runs_nothing` (drops the circuit through
+     `InlineApprovalCircuit` itself), `InlineApprovalRunnerTests.An_approval_of_this_operation_from_another_caller_is_never_prompted`
+     (same operation id, another requester or a non-web actor type) and
+     `InlineApprovalRunnerTests.An_approval_given_after_the_dialog_closed_is_not_called_left_pending`.
+   - `McpPendingApprovalIsUnchangedTests.A_key_never_gets_an_inline_prompt` also hands the key's approval to a UI
+     runner with the prompt wired in, as an INV-59 hit for the very operation, and shows it is never prompted.
    - `The_page_records_page_and_the_chat_records_chat` drives the Approvals page's real handler; for the two chats
      (`AgentView`, `AiChat`) it checks their source passes `ApprovalChannel.Chat` to every `DecideAsync`.
 6. **Refusal statuses.** "Rejected" and "Expired" are refused as `Denied`, "left pending" and the "already used"
-   case as `PendingApproval`, each with `ApprovalId`.
+   case as `PendingApproval`, each with `ApprovalId`. When the dialog's wait ended but the store shows the approval approved
+   (someone approved it just as the dialog closed, or the expiry backstop hit), the refusal says who approved it and
+   that repeating the action within the grant runs it once, not "left on the Approvals page".

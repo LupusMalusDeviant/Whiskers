@@ -486,6 +486,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
 
         builder.Services.AddMudServices();
+        // Contract 0019 (INV-65): the dialog that shows an INV-59 approval raised by a UI call.
+        builder.Services.AddInlineApprovalPrompt();
 
         // Blazor + SignalR
         builder.Services.AddRazorComponents()

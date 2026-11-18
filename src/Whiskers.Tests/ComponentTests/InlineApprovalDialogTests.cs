@@ -204,6 +204,22 @@ public sealed class InlineApprovalDialogTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_approval_hands_back_the_circuit_token_and_a_drop_cancels_it()
+    {
+        var id = await RaiseAsync();
+        var (provider, asked) = await OpenAsync(id);
+        await TickAsync(provider, TimeSpan.FromSeconds(2));
+        await provider.Find("[data-testid=inline-approval-approve]").ClickAsync(new());
+        var result = await asked.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(InlineApprovalOutcome.ApprovedHere, result.Outcome);
+        Assert.True(result.Circuit.CanBeCanceled);
+        Assert.False(result.Circuit.IsCancellationRequested);
+        await _circuit.OnConnectionDownAsync(null!, default);
+        Assert.True(result.Circuit.IsCancellationRequested);   // the runner then runs nothing
+    }
+
+    [Fact]
     public async Task Expiry_closes_as_expired()
     {
         var id = await RaiseAsync();

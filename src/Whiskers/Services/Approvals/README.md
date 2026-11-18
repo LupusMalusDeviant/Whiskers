@@ -101,7 +101,8 @@ it as it binds the page.
 - **Continuation (D4).** After the decision the runner rebuilds the request and calls the gateway once more; the
   approve-then-retry path continues the same operation and uses the grant once. A drifted binding raises a new
   approval, shown once as "changed since you approved"; a second drift is refused; a grant another call used first is
-  reported as already used.
+  reported as already used. The prompt hands back the circuit's token (`InlineApprovalResult.Circuit`); a circuit that dropped or
+  closed after the decision stops the continuation before the gateway is asked again.
 - **Closing (D5).** Close, Escape, a dropped circuit or an expiry leave the approval pending (or expired). Nothing runs
   after the runner call has ended; an approved grant left unused lapses after `GrantLifetime` unless the same person
   repeats the identical action.

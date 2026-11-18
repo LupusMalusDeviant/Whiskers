@@ -6800,6 +6800,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="InlineApproval_Refused_LeftPending" xml:space="preserve">
     <value>Freigabe {0} bleibt auf der Seite „Freigaben“ offen; nichts lief. Sobald sie dort freigegeben ist, starte die Aktion erneut.</value>
   </data>
+  <data name="InlineApproval_Refused_ApprovedAfterClose" xml:space="preserve">
+    <value>Freigabe {0} wurde von {1} erteilt, aber ihr Dialog war schon geschlossen; nichts lief. Wiederhole die Aktion innerhalb von {2} Minuten, dann läuft sie einmal.</value>
+  </data>
   <data name="ApprovalsView_InDialog" xml:space="preserve">
     <value>im Dialog</value>
   </data>

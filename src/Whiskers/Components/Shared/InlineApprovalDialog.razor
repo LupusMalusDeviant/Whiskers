@@ -54,7 +54,8 @@
                     </MudPaper>
                 }
 
-                @if (_selfDecision && _approval.Status == ApprovalStatus.Pending)
+                @* Only while the person can decide: under RequireSecondApprover they cannot approve their own request. *@
+                @if (_selfDecision && _refusal is null && _approval.Status == ApprovalStatus.Pending)
                 {
                     <MudAlert Severity="Severity.Info" Dense="true" data-testid="inline-approval-self">@L["InlineApproval_SelfDecision"]</MudAlert>
                 }

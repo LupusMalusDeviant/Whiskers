@@ -9,26 +9,52 @@ namespace Whiskers.Components.Shared;
 /// <summary>Contract 0019: whether this DI scope is a live Blazor circuit, and when its connection drops. One per
 /// circuit (scoped, registered as a <see cref="CircuitHandler"/>). Outside a circuit it stays closed, so the prompt
 /// shows nothing there.</summary>
-public sealed class InlineApprovalCircuit : CircuitHandler
+public sealed class InlineApprovalCircuit : CircuitHandler, IDisposable
 {
+    private readonly object _gate = new();
     private int _open;
     private int _down;
+    // Cancelled when the connection drops or the circuit closes. A connection that comes back gets a new one, so a
+    // token handed out before the drop stays cancelled: what was decided before it never continues (INV-65).
+    private CancellationTokenSource _live = new();
 
     /// <summary>The circuit is open and its connection is up.</summary>
     public bool IsLive => Volatile.Read(ref _open) == 1 && Volatile.Read(ref _down) == 0;
+
+    /// <summary>Cancelled once the connection of this circuit drops or the circuit closes; already cancelled when the
+    /// scope is not a live circuit.</summary>
+    public CancellationToken Lost
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (!IsLive && !_live.IsCancellationRequested) _live.Cancel();
+                return _live.Token;
+            }
+        }
+    }
 
     /// <summary>Raised when the browser connection of this circuit drops.</summary>
     public event Action? ConnectionDown;
 
     public override Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _open, 1);
+        lock (_gate)
+        {
+            Volatile.Write(ref _open, 1);
+            Renew();
+        }
         return Task.CompletedTask;
     }
 
     public override Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _down, 0);
+        lock (_gate)
+        {
+            Volatile.Write(ref _down, 0);
+            Renew();
+        }
         return Task.CompletedTask;
     }
 
@@ -45,10 +71,24 @@ public sealed class InlineApprovalCircuit : CircuitHandler
         return Task.CompletedTask;
     }
 
+    private void Renew()
+    {
+        if (_live.IsCancellationRequested && IsLive) _live = new CancellationTokenSource();
+    }
+
     private void MarkDown()
     {
-        Volatile.Write(ref _down, 1);
+        lock (_gate)
+        {
+            Volatile.Write(ref _down, 1);
+            _live.Cancel();
+        }
         ConnectionDown?.Invoke();
+    }
+
+    public void Dispose()
+    {
+        lock (_gate) _live.Dispose();
     }
 }
 
@@ -140,9 +180,9 @@ public sealed class MudInlineApprovalPrompt : IInlineApprovalPrompt
         return answered.Outcome switch
         {
             InlineApprovalOutcome.ApprovedHere when approval is { Status: ApprovalStatus.Approved, DecidedVia: ApprovalChannels.Dialog }
-                => answered,
+                => answered with { Circuit = _circuit.Lost },
             InlineApprovalOutcome.ApprovedElsewhereRun when approval is { Status: ApprovalStatus.Approved }
-                => answered,
+                => answered with { Circuit = _circuit.Lost },
             InlineApprovalOutcome.ApprovedHere or InlineApprovalOutcome.ApprovedElsewhereRun
                 => new InlineApprovalResult(InlineApprovalOutcome.LeftPending),
             _ => FromStore(approvalId),

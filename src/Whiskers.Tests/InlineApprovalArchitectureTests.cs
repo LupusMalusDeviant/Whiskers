@@ -31,6 +31,7 @@ public sealed class InlineApprovalArchitectureTests
         var services = new ServiceCollection();
         services.AddGuardrailPolicy();
         services.AddMutationGateway();
+        services.AddInlineApprovalPrompt();
 
         // Registered per circuit (scoped), together with the circuit marker it checks before it shows anything.
         Assert.Equal(ServiceLifetime.Scoped, Assert.Single(services, d => d.ServiceType == typeof(IInlineApprovalPrompt)).Lifetime);

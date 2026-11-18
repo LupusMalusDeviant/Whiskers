@@ -6800,6 +6800,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="InlineApproval_Refused_LeftPending" xml:space="preserve">
     <value>Approval {0} was left on the Approvals page; nothing ran. Once it is approved there, run the action again.</value>
   </data>
+  <data name="InlineApproval_Refused_ApprovedAfterClose" xml:space="preserve">
+    <value>Approval {0} was approved by {1}, but its dialog had closed; nothing ran. Repeat the action within {2} minutes to run it once.</value>
+  </data>
   <data name="ApprovalsView_InDialog" xml:space="preserve">
     <value>in the dialog</value>
   </data>

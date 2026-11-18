@@ -2332,7 +2332,7 @@ accepted before the work started (#209). They come from the full review of the w
   *Require a second approver* still makes a second Admin approve (then *Run now*). The action then continues as the
   same operation, uses the approval once and reports in the same window. *Close* leaves the approval pending, and
   nothing runs after the window is gone. Covered now: re-onboarding, container start/stop/restart/update/rollback,
-  the mTLS actions on *Servers* (migrate, renew, issue), volume backup and restore, `db.query`, compose and app
+  the mTLS actions on *Servers* (migrate, renew, issue), volume backup and restore, `db.query`, compose, app and Git
   deployments. Remove, self-backup restore, shared-credential retirement, backup deletion and host-key replacement
   are still approved on the Approvals page. The approval records where it was decided (`page`, `dialog`, `chat`; new
   nullable column `Approvals.DecidedVia`), the audit of the run names it next to the self-approval mark, and the

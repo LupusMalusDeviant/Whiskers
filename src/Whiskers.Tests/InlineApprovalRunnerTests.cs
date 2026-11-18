@@ -459,9 +459,83 @@ public class InlineApprovalRunnerTests
         Assert.Empty(h.Runs);
         Assert.False(InlineApproval.Capabilities.Contains("server.hostkey_replace"));
     }
+    [Fact]
+    public async Task A_circuit_dropped_after_the_decision_runs_nothing()
+    {
+        var h = new Harness();
+        var circuit = new Whiskers.Components.Shared.InlineApprovalCircuit();
+        await circuit.OnCircuitOpenedAsync(null!, default);
+        h.Prompt.Then(async (r, ct) =>
+        {
+            var approved = await h.ApproveHere()(r, ct);
+            // What the real prompt hands back: the token of the circuit the dialog ran in …
+            var decided = approved with { Circuit = circuit.Lost };
+            // … and the circuit drops after the decision, before the continuation. The page's own call is not cancelled.
+            await circuit.OnConnectionDownAsync(null!, default);
+            return decided;
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.OnboardAsync());
+
+        var approval = h.Approvals.Get(h.Prompt.Asked.Single().ApprovalId)!;
+        Assert.Empty(h.Runs);
+        Assert.Empty(h.Begins);
+        Assert.Equal(ApprovalStatus.Approved, approval.Status);
+        Assert.Null(approval.ConsumedAt);   // the grant stays unused and lapses
+        // A connection that comes back does not revive what was decided before the drop.
+        await circuit.OnConnectionUpAsync(null!, default);
+        Assert.True(circuit.IsLive);
+        Assert.False(circuit.Lost.IsCancellationRequested);
+    }
+
+    public static TheoryData<string> SameOperationOtherCaller => ["another requester", "not the web ui"];
+
+    /// <summary>The approval was raised for exactly this operation, but not by this person in the web UI: only the
+    /// requester or the surface check stands between it and the dialog.</summary>
+    [Theory]
+    [MemberData(nameof(SameOperationOtherCaller))]
+    public async Task An_approval_of_this_operation_from_another_caller_is_never_prompted(string caller)
+    {
+        var h = new Harness();
+        var raised = await h.Approvals.CreateAsync(new ApprovalRequest("mcp-direct", "call-1",
+            caller == "another requester" ? "other@example.com" : "ci",
+            caller == "another requester" ? "web" : "mcp-direct", "server.onboard", McpPermissionLevels.Admin, "{}",
+            "control plane", CorrelationId: "op-same",
+            Requesters: [caller == "another requester" ? PrincipalIds.User("other@example.com") : PrincipalIds.User(AdminEmail)]),
+            _ => Task.CompletedTask);
+        var stub = new StubGateway(new MutationOutcome<string>("op-same", MutationStatus.PendingApproval, null,
+            "pending", VerificationStatus.NotRun, ApprovalId: raised.Id) { MatchedRules = [ProtectedResourceRule.RuleId] });
+        var runner = new UiMutationRunner(stub, new CapabilityCatalog(), h.User, prompt: h.Prompt, approvals: h.Approvals);
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("server.onboard", OnboardArgs,
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult("x")));
+
+        Assert.Equal(raised.Id, refused.ApprovalId);
+        Assert.Empty(h.Prompt.Asked);
+        Assert.Equal(ApprovalStatus.Pending, h.Approvals.Get(raised.Id)!.Status);
+    }
+
+    [Fact]
+    public async Task An_approval_given_after_the_dialog_closed_is_not_called_left_pending()
+    {
+        var h = new Harness(secondApprover: true);
+        // The dialog's wait ended (closed, or the expiry backstop) just as a second Admin approved it on the page.
+        h.Prompt.Then(async (r, _) =>
+        {
+            await h.Approvals.DecideAsync(r.ApprovalId, true, h.Admin("second@example.com"), ApprovalChannel.Page);
+            return new InlineApprovalResult(InlineApprovalOutcome.LeftPending);
+        });
+
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => h.OnboardAsync(h.Runner()));
+
+        Assert.Empty(h.Runs);
+        Assert.Contains("second@example.com", refused.Message);
+        Assert.DoesNotContain("left on the Approvals page", refused.Message);
+    }
+
 
     /// <summary>A gateway that answers one fixed outcome and never runs anything.</summary>
-    private sealed class StubGateway(MutationOutcome<string> outcome) : IMutationGateway
+    internal sealed class StubGateway(MutationOutcome<string> outcome) : IMutationGateway
     {
         public Task<MutationOutcome<T>> ExecuteAsync<T>(MutationRequest request,
             Func<MutationContext, CancellationToken, Task<T>> execute, CancellationToken ct = default) =>
