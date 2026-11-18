@@ -574,7 +574,7 @@ Docker):
 
 ## Amendment (implementation, 2026-11-18)
 
-Status: awaiting maintainer acceptance
+Status: accepted by the maintainer on 18 November 2026.
 
 The implementation follows the contract. Where the code forced a choice the contract does not state, or a point
 differs, it is listed here:
