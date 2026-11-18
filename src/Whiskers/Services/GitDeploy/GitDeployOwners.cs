@@ -46,6 +46,17 @@ public static class GitDeployOwners
         if (automation is null) return (false, "Automated deployments are not available.", true);
 
         var actor = ActorOf(app);
+        // Contract 0020 (D6): a handed-over or held app deploys nothing until an Admin resumes it — refused before
+        // anything is fetched, on record as the gateway's Denied gitdeploy.deploy.
+        if (app.HeldReason is not null)
+        {
+            var reason = $"{MutationReasonCodes.AutomationHeld}: '{app.Name}' is held ({app.HeldReason}); an Admin must " +
+                         "resume it on the Git deploy page.";
+            await automation.RefuseAsync(actor, "gitdeploy.deploy",
+                new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
+                reason, ct);
+            return (false, reason, true);
+        }
         var outcome = await automation.RunAsync(actor, "gitdeploy.deploy",
             new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
             (ResolvedGitApp decided, CancellationToken token) => decided.Id == app.Id && decided.Revision == app.Revision

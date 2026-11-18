@@ -96,6 +96,8 @@ else
                     @if (owner.State != OwnerState.Active)
                     {
                         <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                        @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                        <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
                     }
                 }
                 @if (_role >= AppRole.Admin && _me is not null && context.Owner != _me)

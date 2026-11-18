@@ -178,7 +178,28 @@
         _confirmDelete = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.delete", new { account = email },
             (ResolvedRecord rt, CancellationToken ct) => Accounts.DeleteAsync(rt.Id, ct)), whitelistMayChange: true);
-        if (result is { Success: true }) Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
+        if (result is { Success: true })
+        {
+            Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
+            await ShowOwnedAutomationAsync(email);
+        }
+    }
+
+    /// <summary>Contract 0020: a count read after the deletion (no gateway call) — what the account owned stops now and
+    /// can be handed over in Settings → Automation owners.</summary>
+    private async Task ShowOwnedAutomationAsync(string email)
+    {
+        if (ServiceProvider.GetService<IAutomationHandover>() is not { } handover) return;
+        try
+        {
+            var owned = await handover.OwnedByAsync(PrincipalIds.User(email));
+            if (owned.Count > 0)
+                Snackbar.Add(L["LocalAccounts_Snackbar_OwnedAutomation", owned.Count].Value, Severity.Warning);
+        }
+        catch (Exception)
+        {
+            // Only a hint: the list in Settings → Automation owners shows it as well.
+        }
     }
 
     /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded. Whatever happens,

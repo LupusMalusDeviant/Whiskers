@@ -8,7 +8,7 @@ public class InvariantTableParserTests
     public void The_real_table_has_every_invariant_once_with_its_status_and_tests()
     {
         var rows = InvariantTableParser.Parse(GateFiles.Require(GateFiles.Invariants));
-        Assert.Equal(65, rows.Count);
+        Assert.Equal(66, rows.Count);
         Assert.Equal(rows.Count, rows.Select(r => r.Id).Distinct().Count());
         Assert.All(rows, r => Assert.NotNull(r.Status));
         var inv18 = rows.Single(r => r.Id == "INV-18");
@@ -173,7 +173,7 @@ public class ReleaseGateDocumentTests
     {
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
-        Assert.Equal("INV-65", gate.Pin);
+        Assert.Equal("INV-66", gate.Pin);
         Assert.Equal(InvariantTableParser.Parse(GateFiles.Require(GateFiles.Invariants)).Count(r => r.Status != InvariantStatus.Holds),
             gate.Open.Count);
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial, Package: "R1-44" });
@@ -194,7 +194,7 @@ public class ReleaseGateDocumentTests
         var text = GateFiles.Require(GateFiles.ReleaseGateDoc);
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("## Platform skips", "## Skips")).Problems, p => p.Contains("Platform skips"));
         Assert.Contains(ReleaseGateDocument.Parse(text + "\nHighest invariant ID: INV-63\n").Problems, p => p.Contains("2 times"));
-        Assert.Contains(ReleaseGateDocument.Parse(text.Replace("Highest invariant ID: INV-65", "Highest ID INV-65")).Problems, p => p.Contains("no line"));
+        Assert.Contains(ReleaseGateDocument.Parse(text.Replace("Highest invariant ID: INV-66", "Highest ID INV-66")).Problems, p => p.Contains("no line"));
         Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-58 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
     }
 

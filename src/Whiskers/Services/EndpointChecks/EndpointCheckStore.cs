@@ -41,6 +41,25 @@ public interface IEndpointCheckStore
     /// <summary>Deletes results older than <paramref name="cutoffUtc"/>, except each check's newest one, and every
     /// result whose check no longer exists.</summary>
     Task<int> PruneAsync(DateTime cutoffUtc, CancellationToken ct = default);
+
+    /// <summary>Contract 0020: <c>OwnerId := to</c> only while it is <paramref name="fromOwnerId"/>; <c>Enabled := false</c>;
+    /// <c>SuspendedReason :=</c> the handover text. Called only from <c>AutomationHandover</c>.</summary>
+    [MutatingOperation("automation.handover")]
+    Task<HandoverWrite> HandOverAsync(string checkId, string fromOwnerId, string toOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand a check over.");
+
+    /// <summary>Contract 0020 (D11 c): off with the hold text only while the owner is <paramref name="ownerId"/>; the
+    /// owner stays. Inside <c>account.create</c> only.</summary>
+    [MutatingOperation("automation.hold")]
+    Task<HandoverWrite> HoldAsync(string checkId, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold a check.");
+
+    /// <summary>Contract 0020 (D7): <c>Enabled := true</c>, <c>SuspendedReason := null</c>, only while the owner is
+    /// <paramref name="expectedOwnerId"/> and the check is off with the handover or hold reason; the owner is kept (a
+    /// resume never re-owns). False when the check is gone, has another owner, is on, or is off for another reason.</summary>
+    [MutatingOperation("endpointcheck.save")]
+    Task<bool> ResumeAsync(string id, string expectedOwnerId, CancellationToken ct) =>
+        throw new NotSupportedException($"{GetType().Name} cannot resume a check.");
 }
 
 /// <inheritdoc cref="IEndpointCheckStore"/>
@@ -50,8 +69,13 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
     private readonly IServerConfigService _servers;
     private readonly TimeProvider _time;
 
-    public EndpointCheckStore(IServiceScopeFactory scopes, IServerConfigService servers, TimeProvider? time = null)
+    // Contract 0020: the first-run ledger of handed-over checks.
+    private readonly IHandoverLedger? _handovers;
+
+    public EndpointCheckStore(IServiceScopeFactory scopes, IServerConfigService servers, TimeProvider? time = null,
+        IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
         _scopes = scopes;
         _servers = servers;
         _time = time ?? TimeProvider.System;
@@ -112,11 +136,15 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
         entity.IntervalSeconds = draft.IntervalSeconds;
         entity.TimeoutSeconds = draft.TimeoutSeconds;
         entity.ExceptionsJson = EndpointCheckDefinition.WriteExceptions(exceptions);
+        var previousOwner = string.IsNullOrEmpty(draft.Id) ? null : entity.OwnerId;
         entity.Enabled = draft.Enabled;
         entity.SuspendedReason = null;
         entity.OwnerId = editorId;
         entity.UpdatedUtc = now;
         await db.SaveChangesAsync(ct);
+        // Contract 0020: a save is a takeover (it re-owns); a handover's note ends with it unless the owner stays.
+        if (previousOwner is not null && previousOwner != editorId)
+            HandoverNotes.ForgetQuietly(_handovers, ItemOf(entity.Id));
         return EndpointCheckDefinition.From(entity);
     }
 
@@ -126,6 +154,7 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
         var db = Db(scope);
         await db.EndpointCheckResults.Where(r => r.CheckId == id).ExecuteDeleteAsync(ct);
         await db.EndpointChecks.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
+        HandoverNotes.ForgetQuietly(_handovers, ItemOf(id));   // contract 0020
     }
 
     public async Task<bool> SuspendAsync(string id, string expectedOwnerId, string reason, CancellationToken ct = default)
@@ -203,6 +232,74 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
         var keep = await db.EndpointCheckResults.GroupBy(r => r.CheckId).Select(g => g.Max(r => r.Id)).ToListAsync(ct);
         return orphans + await db.EndpointCheckResults.Where(r => r.AtUtc < cutoffUtc && !keep.Contains(r.Id)).ExecuteDeleteAsync(ct);
     }
+
+
+    public Task<HandoverWrite> HandOverAsync(string checkId, string fromOwnerId, string toOwnerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromOwnerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toOwnerId);
+        return SwitchOffAsync(checkId, fromOwnerId, toOwnerId, HandoverReason, ct);
+    }
+
+    public Task<HandoverWrite> HoldAsync(string checkId, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return SwitchOffAsync(checkId, ownerId, ownerId, HoldReason, ct);
+    }
+
+    /// <summary>Contract 0020: the suspension text of a handover and of an <c>account.create</c> hold.</summary>
+    public const string HandoverReason = "handed over: off until an Admin resumes it";
+    public const string HoldReason = "held when a local account was created for its owner's address: off until an Admin resumes it";
+
+    /// <summary>Contract 0020: owner <paramref name="from"/> → <paramref name="to"/> (the same for a hold), off, with
+    /// the reason; one conditional update on the state read, so "was on" is what it replaced.</summary>
+    private async Task<HandoverWrite> SwitchOffAsync(string checkId, string from, string to, string reason, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = Db(scope);
+        var now = _time.GetUtcNow().UtcDateTime;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var before = await db.EndpointChecks.AsNoTracking().FirstOrDefaultAsync(c => c.Id == checkId, ct);
+            if (before is null) return new(HandoverItemStatus.SkippedGone, checkId, false);
+            if (before.OwnerId != from) return new(HandoverItemStatus.SkippedOwnerChanged, before.Name, before.Enabled);
+            var wasOn = before.Enabled;
+            var changed = await db.EndpointChecks
+                .Where(c => c.Id == checkId && c.OwnerId == from && c.Enabled == wasOn)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(c => c.OwnerId, to)
+                    .SetProperty(c => c.Enabled, false)
+                    // A bulk update passes the save interceptor by: redacted here (INV-51).
+                    .SetProperty(c => c.SuspendedReason, Whiskers.Utils.SinkRedaction.Text(reason))
+                    .SetProperty(c => c.UpdatedUtc, now), ct);
+            if (changed == 1) return new(HandoverItemStatus.HandedOver, before.Name, wasOn);
+        }
+        throw new InvalidOperationException("The check kept changing while it was handed over; nothing was written.");
+    }
+
+    public async Task<bool> ResumeAsync(string id, string expectedOwnerId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
+        using var scope = _scopes.CreateScope();
+        var now = _time.GetUtcNow().UtcDateTime;
+        // Only a check that a handover or hold switched off: one off for another reason (switched off by hand,
+        // suspended for its owner's lost authority) is switched on by a save, as today. Stored redacted (INV-51).
+        var handover = Whiskers.Utils.SinkRedaction.Text(HandoverReason);
+        var hold = Whiskers.Utils.SinkRedaction.Text(HoldReason);
+        // The owner is kept: a resume never re-owns (D7).
+        var resumed = await Db(scope).EndpointChecks
+            .Where(c => c.Id == id && c.OwnerId == expectedOwnerId && !c.Enabled
+                        && (c.SuspendedReason == handover || c.SuspendedReason == hold))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.Enabled, true)
+                .SetProperty(c => c.SuspendedReason, (string?)null)
+                .SetProperty(c => c.UpdatedUtc, now), ct) == 1;
+        if (resumed) HandoverNotes.RecordResumeInScope(_handovers, ItemOf(id));
+        return resumed;
+    }
+
+    private static AutomationItemRef ItemOf(string checkId) => new(AutomationKind.EndpointCheck, checkId);
 
     private static MetricsDbContext Db(IServiceScope scope) => scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 }

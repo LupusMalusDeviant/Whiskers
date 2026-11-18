@@ -91,6 +91,10 @@ public sealed class DataPathOptions
     public string AiTriggersJson => P("ai-triggers.json");
     /// <summary>Owners an admin confirmed for AutoPatch and AutoUpdate (PC-D6).</summary>
     public string AutomationOwnersJson => P("automation-owners.json");
+    /// <summary>Contract 0020: automation handed over or held and not yet run since (the first-run ledger).</summary>
+    public string AutomationHandoversJson => P("automation-handovers.json");
+    /// <summary>Contract 0020 (D13): the personal handover notices until their addressee acknowledges them.</summary>
+    public string AutomationHandoverNoticesJson => P("automation-handover-notices.json");
     /// <summary>The newest signed audit checkpoint, kept outside the database (R1-23, ADR-0006).</summary>
     public string AuditCheckpointJson => P("audit-checkpoint.json");
     /// <summary>Emails that had a local account, so a deleted one is noticed with federated sign-in too (R1-04).</summary>

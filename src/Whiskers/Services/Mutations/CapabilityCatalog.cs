@@ -182,7 +182,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
             "webhook" => typeof(ResolvedWebhook),
             "volume" => id == "volume.backup" ? typeof(ResolvedVolume) : typeof(ResolvedVolumeBackup),
             "log-alert" => typeof(ResolvedLogAlertRule),
-            "config" or "account" or "identity" or "whiskers" or "fleet" => typeof(ResolvedRecord),
+            "config" or "account" or "identity" or "whiskers" or "fleet" or "automation-owner" or "handover-notice"
+                => typeof(ResolvedRecord),
             // An unknown kind has no type: the catalog test refuses it.
             _ => typeof(ResolvedTarget),
         };
@@ -356,6 +357,13 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // The in-app VPN bring-up at start (R1-43, S-07): starts the VPN daemon as root and joins the mesh with the
         // configured key. Unattended, on the authority of the admin who took it over; `tailscale up` waits up to 60 s.
         yield return Ui("vpn.bootstrap", A, "whiskers", Root, Normal);
+        // Contract 0020 (INV-66): an Admin hands the automation of an owner who can no longer act over to another usable
+        // person — one decision on the old owner's record (UI only, D10). The new owner acknowledges the personal
+        // notice (read level, own notices only; the service refuses anyone else's). The hold is nested in account.create
+        // only (D11 c); a direct call is refused by the scope guard.
+        yield return Ui("automation.handover", A, "automation-owner", Root, Short);
+        yield return Ui("automation.handover_acknowledge", McpPermissionLevels.Read, "handover-notice", Rev, Short);
+        yield return Ui("automation.hold", A, "automation-owner", Dis, Short);
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);

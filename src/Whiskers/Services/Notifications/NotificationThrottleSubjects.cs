@@ -32,6 +32,9 @@ public static class NotificationThrottleSubjects
     /// <summary><c>automation_suspended</c> of an owned automation (<c>autopatch</c>, <c>autoupdate</c>): its fixed name.</summary>
     public static string Automation(string name) => $"automation:{name}";
 
+    /// <summary>Contract 0020: <c>automation_handed_over</c> of one handover: its operation id.</summary>
+    public static string Handover(string operationId) => $"handover:{operationId}";
+
     /// <summary><c>monitoring_stalled</c> / <c>monitoring_resumed</c>: the loop's fixed name.</summary>
     public static string Loop(string loop) => $"loop:{loop}";
 

@@ -6,6 +6,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
+@inject IAutomationHandover Handover
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
 
@@ -73,6 +74,18 @@ else
                     @if (owner.State != OwnerState.Active)
                     {
                         <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                        @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                        <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
+                    }
+                }
+                @if (context.HeldReason is { } held)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" title="@held">@L["GitDeployView_Chip_Held"]</MudChip>
+                    @if (_role >= AppRole.Admin && !string.IsNullOrWhiteSpace(context.Owner))
+                    {
+                        @* Contract 0020 (D7): Resume clears the hold and keeps the owner (it never re-owns). *@
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ResumeApp(context))"
+                                   Class="sw-gitdeploy-resume">@L["GitDeployView_Button_Resume"]</MudButton>
                     }
                 }
                 @if (_role >= AppRole.Admin && context.Owner != _me)
@@ -239,7 +252,8 @@ else
                 new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch, revision = form.Revision },
                 async (ResolvedTarget rt, CancellationToken _) =>
                 {
-                    var saved = await GitDeploy.SaveAppAsync(form, token, owner);
+                    // Contract 0020 (D6): the page's save releases a handover hold, as the contract accepts here.
+                    var saved = await GitDeploy.SaveAppAsync(form, token, owner, releaseHold: true);
                     // The saved app's id (new on create) is part of the gateway's event (R1-21).
                     MutationScope.Note($"App {saved.Id}");
                     return saved;
@@ -330,6 +344,34 @@ else
             _apps = await GitDeploy.GetAppsAsync();
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>Contract 0020 (D7): resumes a held app with its owner kept. Refused when the run's own judgment does not
+    /// clear the recorded owner: then the Admin can only take it over as today.</summary>
+    private async Task ResumeApp(Whiskers.Models.GitDeployApp app)
+    {
+        var owner = app.Owner ?? "";
+        var arguments = new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision,
+                              owner, resume = true };
+        if (!await RequireAsync("gitdeploy.save", arguments)) return;
+        try
+        {
+            var item = (await Handover.OwnedByAsync(owner)).FirstOrDefault(i => i.Ref == new AutomationItemRef(AutomationKind.GitDeployApp, app.Id));
+            if (item is not { Eligibility: HandoverEligibility.RunsOnOwner })
+            {
+                await Mutations.RefuseAsync("gitdeploy.save", arguments,
+                    $"Its recorded owner cannot run it ({item?.Why ?? "not judged"}); take it over instead.");
+                Snackbar.Add(L["GitDeployView_Snackbar_ResumeRefused", app.Name].Value, Severity.Warning);
+                return;
+            }
+            var resumed = await Mutations.RunAsync("gitdeploy.save", arguments,
+                (ResolvedTarget rt, CancellationToken ct) => GitDeploy.ResumeAsync(rt.Id, owner, ct));
+            Snackbar.Add(resumed ? L["GitDeployView_Snackbar_Resumed", app.Name].Value : L["GitDeployView_Snackbar_Conflict", app.Name].Value,
+                resumed ? Severity.Success : Severity.Warning);
+            _apps = await GitDeploy.GetAppsAsync();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { Snackbar.Add(L["GitDeployView_Snackbar_Error", ex.Message].Value, Severity.Error); }
     }
 
     // Taking an app over (R1-08): the admin's authority replaces the owner's for webhook deploys, only if nobody

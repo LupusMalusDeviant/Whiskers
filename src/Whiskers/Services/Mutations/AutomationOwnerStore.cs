@@ -64,6 +64,25 @@ public interface IAutomationOwnerStore
 
     /// <summary>The entry of a blocked feature (owner and reason), for the UI; <c>null</c> otherwise.</summary>
     AutomationOwnerEntry? GetBlocked(string feature) => null;
+
+    /// <summary>Contract 0020: entry := (<paramref name="toOwnerId"/>, blocked, the handover text) only while the owner
+    /// is <paramref name="fromOwnerId"/>. Called only from <c>AutomationHandover</c>.</summary>
+    [MutatingOperation("automation.handover")]
+    Task<HandoverWrite> HandOverAsync(string feature, string fromOwnerId, string toOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand a feature over.");
+
+    /// <summary>Contract 0020 (D11 c): blocked with the hold text only while the owner is <paramref name="ownerId"/>; the
+    /// owner stays. Inside <c>account.create</c> only.</summary>
+    [MutatingOperation("automation.hold")]
+    Task<HandoverWrite> HoldAsync(string feature, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold a feature.");
+
+    /// <summary>Contract 0020 (D7): <b>Resume as {owner}</b> — clears the block only while <paramref name="expectedOwnerId"/>
+    /// is recorded; the owner is kept (a resume never re-owns). False when another owner is recorded or it is not
+    /// blocked.</summary>
+    [MutatingOperation("automation.owner_set")]
+    Task<bool> ResumeAsync([MutationTarget] string feature, string expectedOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot resume a feature.");
 }
 
 /// <summary>A small JSON file in the data directory (<c>automation-owners.json</c>), written atomically.</summary>
@@ -77,8 +96,16 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     private Dictionary<string, AutomationOwnerEntry> _entries;
     private bool _loadFailed;
 
-    public AutomationOwnerStore(DataPathOptions paths, ILogger<AutomationOwnerStore> logger)
+    // Contract 0020: the first-run ledger of handed-over features.
+    private readonly IHandoverLedger? _handovers;
+
+    /// <summary>Contract 0020: the block text of a handover and of an <c>account.create</c> hold.</summary>
+    public const string HandoverReason = "handed over: blocked until an Admin resumes it";
+    public const string HoldReason = "held when a local account was created for its owner's address: blocked until an Admin resumes it";
+
+    public AutomationOwnerStore(DataPathOptions paths, ILogger<AutomationOwnerStore> logger, IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
         ArgumentNullException.ThrowIfNull(paths);
         _path = paths.AutomationOwnersJson;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -98,7 +125,87 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         var replaced = await WriteAsync(feature, _ => new AutomationOwnerEntry(ownerId, DateTime.UtcNow), ct);
+        // Contract 0020: a takeover as today ends a handover's first-run note.
+        HandoverNotes.ForgetQuietly(_handovers, new AutomationItemRef(AutomationKind.FleetFeature, feature), _logger);
         return replaced?.OwnerId is { Length: > 0 } previous ? previous : null;
+    }
+
+    public Task<HandoverWrite> HandOverAsync(string feature, string fromOwnerId, string toOwnerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromOwnerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toOwnerId);
+        return BlockAsync(feature, fromOwnerId, toOwnerId, HandoverReason, ct);
+    }
+
+    public Task<HandoverWrite> HoldAsync(string feature, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return BlockAsync(feature, ownerId, ownerId, HoldReason, ct);
+    }
+
+    /// <summary>Contract 0020: owner <paramref name="from"/> → <paramref name="to"/> (the same for a hold), blocked with
+    /// the reason, only while <paramref name="from"/> is recorded — under the write lock, with the versioned diff.</summary>
+    private async Task<HandoverWrite> BlockAsync(string feature, string from, string to, string reason, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feature);
+        HandoverWrite? result = null;
+        await WriteIfAsync(feature, current =>
+        {
+            if (current is null || string.IsNullOrWhiteSpace(current.OwnerId))
+            {
+                result = new(HandoverItemStatus.SkippedGone, feature, false);
+                return null;
+            }
+            if (!string.Equals(current.OwnerId, from, StringComparison.Ordinal))
+            {
+                result = new(HandoverItemStatus.SkippedOwnerChanged, feature, !current.Blocked);
+                return null;
+            }
+            result = new(HandoverItemStatus.HandedOver, feature, !current.Blocked);
+            return new AutomationOwnerEntry(to, DateTime.UtcNow, Blocked: true, SuspendedReason: reason);
+        }, ct);
+        return result!;
+    }
+
+    public async Task<bool> ResumeAsync(string feature, string expectedOwnerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
+        var resumed = false;
+        await WriteIfAsync(feature, current =>
+        {
+            if (current is not { Blocked: true } || !string.Equals(current.OwnerId, expectedOwnerId, StringComparison.Ordinal))
+                return null;
+            resumed = true;
+            // The owner is kept: a resume never re-owns (D7).
+            return new AutomationOwnerEntry(expectedOwnerId, DateTime.UtcNow);
+        }, ct);
+        if (resumed)
+            HandoverNotes.RecordResumeInScope(_handovers, new AutomationItemRef(AutomationKind.FleetFeature, feature), _logger);
+        return resumed;
+    }
+
+    /// <summary>Replaces the feature's entry with what <paramref name="next"/> returns for the current one, unless it
+    /// returns <c>null</c> (nothing written). Throws when the file cannot be written.</summary>
+    private async Task WriteIfAsync(string feature, Func<AutomationOwnerEntry?, AutomationOwnerEntry?> next, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feature);
+        await _write.WaitAsync(ct);
+        try
+        {
+            var current = _entries.GetValueOrDefault(feature);
+            if (next(current) is not { } entry) return;
+            var updated = new Dictionary<string, AutomationOwnerEntry>(_entries, StringComparer.Ordinal) { [feature] = entry };
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            if (_loadFailed) KeepUnreadableFile();
+            await Whiskers.Services.Persistence.DurableFile.WriteAllTextAsync(_path, JsonSerializer.Serialize(updated, Json), ct: ct);
+            Volatile.Write(ref _entries, updated);
+            _loadFailed = false;
+            ConfigChange.Record($"automation-owner:{feature}", current, entry);   // R1-22
+        }
+        finally
+        {
+            _write.Release();
+        }
     }
 
     public async Task<SuspendResult> SuspendAsync(string feature, string? expectedOwnerId, string reason,

@@ -36,6 +36,7 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton<IKeyInterceptorService>(ServersKubeconfigSaveTests.NullProxy<IKeyInterceptorService>.Create());
         Services.AddSingleton<IEndpointCheckStore>(_store);
+        Services.AddSingleton<Whiskers.Services.Mutations.IAutomationHandover>(ServersKubeconfigSaveTests.NullProxy<Whiskers.Services.Mutations.IAutomationHandover>.Create());
         Services.AddSingleton<IEndpointCheckRunner>(_runner);
         Services.AddSingleton<IEndpointCheckSlots>(new EndpointCheckSlots());
         Services.AddSingleton<IServerConfigService>(_servers);

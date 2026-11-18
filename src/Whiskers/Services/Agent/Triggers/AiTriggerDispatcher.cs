@@ -207,7 +207,10 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             if (summary.Length > MaxSummaryChars) summary = ShellUtils.CutAtBoundary(summary, MaxSummaryChars) + "…";
             _logger?.LogInformation("AI trigger '{Name}' ran ({Event} @ {Container}).", t.Name, evt.EventType, evt.ContainerName);
 
-            await TryAuditAsync(t, evt);
+            // Contract 0020: the first run after a handover (or hold) names it and the resumer; the run consumes the entry.
+            var handover = FirstRunNote(t.Id);
+            await TryAuditAsync(t, evt, handover);
+            if (handover is not null && handover != HandoverNotes.Unknown) ConsumeHandover(t.Id);
             await TryNotifyAsync(t, evt, summary);
         }
         catch (Exception ex)
@@ -277,13 +280,43 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
     private static MutationPrincipal TriggerPrincipal(AiTrigger t) =>
         new(MutationPrincipalKind.Automation, PrincipalIds.Trigger(t.Id), PrincipalIds.Trigger(t.Id), McpPermissionLevels.None);
 
-    private async Task TryAuditAsync(AiTrigger t, NotificationEvent evt)
+    /// <summary>Contract 0020: the ledger note of trigger <paramref name="triggerId"/>'s run, or <c>null</c>. An unreadable
+    /// ledger never blocks the run.</summary>
+    private string? FirstRunNote(string triggerId)
+    {
+        if (_sp.GetService<IHandoverLedger>() is not { } ledger) return null;
+        try
+        {
+            return ledger.PeekFirstRun(new AutomationItemRef(AutomationKind.AiTrigger, triggerId)) is { } entry
+                ? HandoverNotes.Of(entry) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "The handover ledger could not be read for AI trigger {TriggerId}", triggerId);
+            return HandoverNotes.Unknown;
+        }
+    }
+
+    private void ConsumeHandover(string triggerId)
+    {
+        try
+        {
+            _sp.GetService<IHandoverLedger>()?.ConsumeAfterExecuted(new AutomationItemRef(AutomationKind.AiTrigger, triggerId),
+                triggerId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "The handover ledger entry of AI trigger {TriggerId} could not be consumed", triggerId);
+        }
+    }
+
+    private async Task TryAuditAsync(AiTrigger t, NotificationEvent evt, string? handover = null)
     {
         try
         {
             var audit = _sp.GetRequiredService<IAuditLogService>();
             await audit.TryLogAsync(TriggerPrincipal(t), "agent.run", "ai-trigger", t.Id, t.Name,
-                details: $"{evt.EventType} @ {evt.ContainerName}");
+                details: handover is null ? $"{evt.EventType} @ {evt.ContainerName}" : $"{evt.EventType} @ {evt.ContainerName}; {handover}");
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "Audit of the AI trigger run failed."); }
     }

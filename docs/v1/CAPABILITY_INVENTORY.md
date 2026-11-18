@@ -8,18 +8,21 @@ its compositions (`MutationCompositions`) and the rows of [`PRODUCT_CONTRACT.md`
 that name it (M rows through their tool, the others through [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)).
 Contract 0008, D7: §7 stays hand-written; this file is generated and the release gate joins the two (R12–R15).
 
-117 capabilities, 49 of them with an MCP tool; by level: admin 89, read 1, write 27.
+120 capabilities, 49 of them with an MCP tool; by level: admin 91, read 2, write 27.
 
 The column *Resolution* is how the target resolves and the object the execution receives (contract 0012, D2).
 
 | Capability | Level | Target | Resolution | Risk | MCP tool | Verification | Surfaces | Composes | Composed by | §7 rows |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `account.create` | admin | account | Creates `ResolvedNew` | RootEquivalent | — | `NotVerifiable`: Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; there is no external effect to read back. | — | `config.roles` | — | U-35 |
+| `account.create` | admin | account | Creates `ResolvedNew` | RootEquivalent | — | `NotVerifiable`: Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; there is no external effect to read back. | — | `automation.hold`, `config.roles` | — | U-35 |
 | `account.delete` | admin | account | Object `ResolvedRecord` | Destructive | — | `NotVerifiable`: Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; there is no external effect to read back. | — | `config.roles` | — | U-35 |
 | `account.password_change` | read | account | Object `ResolvedRecord` | Reversible | — | `NotVerifiable`: Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; there is no external effect to read back. | — | — | — | U-35 |
 | `account.password_reset` | admin | account | Object `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; there is no external effect to read back. | — | — | — | U-35 |
 | `aitrigger.save` | admin | whiskers | Singleton `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | ui | — | — | U-31 |
 | `app.deploy` | admin | host | Server `ResolvedHostObject` | RootEquivalent | `deploy_app` | read back: every container of the compose project runs. | mcp | `container.disable_restart`, `container.stop` | — | M-05, U-10, U-11 |
+| `automation.handover` | admin | automation-owner | Object `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-42 |
+| `automation.handover_acknowledge` | read | handover-notice | Object `ResolvedRecord` | Reversible | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-42 |
+| `automation.hold` | admin | automation-owner | Object `ResolvedRecord` | Disruptive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | `account.create` | U-35 |
 | `automation.owner_set` | admin | fleet | Object `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-34 |
 | `autopatch.preview` | write | fleet | Singleton `ResolvedRecord` | Reversible | `preview_auto_patch` | `NotVerifiable`: a preview pulls images to compare digests; it changes no container. | mcp | — | — | M-40 |
 | `autopatch.run` | admin | fleet | Singleton `ResolvedRecord` | Disruptive | — | `NotVerifiable`: each container it patches is updated as container.update, which is verified. | background | — | — | S-03 |

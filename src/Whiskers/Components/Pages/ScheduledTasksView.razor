@@ -91,6 +91,8 @@ else
             {
                 <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" Class="ml-2"
                            OnClick="AdoptAll">@L["ScheduledTasksView_Button_AdoptAll"]</MudButton>
+                @* Contract 0020: or hand them to another person in Settings → Automation owners. *@
+                <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption" Class="ml-2">@L["AutomationHandover_Link"]</MudLink>
             }
         </MudAlert>
     }
@@ -565,6 +567,13 @@ else
         if (!success && notStarted is not null)
         {
             Snackbar.Add(L[notStarted, task.Name].Value, Severity.Warning);
+            await LoadData();
+            return;
+        }
+        // Contract 0020: a handed-over or held task is refused until it is switched on — a refusal, nothing failed.
+        if (!success && output.StartsWith(Whiskers.Services.Mutations.MutationReasonCodes.AutomationHeld, StringComparison.Ordinal))
+        {
+            Snackbar.Add(output, Severity.Warning);
             await LoadData();
             return;
         }

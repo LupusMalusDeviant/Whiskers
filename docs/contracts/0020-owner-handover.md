@@ -928,3 +928,77 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 - A tombstone for re-created local accounts (D11 b), unless chosen.
 - MCP or agent access to the handover (D10).
 - Changing the existing per-item takeovers. The rule-set observation for key-owned items in D12 is noted, not changed.
+
+## Amendment (implementation, 18 November 2026)
+
+Status: accepted by the maintainer on 18 November 2026 (points 1-14, with point 15 added at acceptance).
+
+The implementation follows the accepted contract, D11 option (c) included. It differs in these points:
+
+1. **Asynchronous reads.** `IAutomationHandover.UnusableOwners`, `OwnedBy` and `Check` are `UnusableOwnersAsync`,
+   `OwnedByAsync` and `CheckAsync`, because the stores they read (scheduler, webhooks, Git deploy) are asynchronous.
+   The rules are unchanged: anything the check cannot read or judge counts as refused.
+2. **No `[MutationTarget]` on the store methods.** The six store `HandOverAsync` and `HoldAsync` methods take no
+   target parameter. The decision's target is the old owner (`automation-owner`). A binding on each item id would never
+   match that target, so each method is pinned in `ResolvedTargetFlowTests.WithoutTargetParameter` instead. Each method
+   is a compare-and-set on the old owner, so it changes nothing that the decision did not cover.
+3. **One event result per item.** The event carries a summary
+   (`handover = { from: <id> (<state>, <level>), to: …, items: N }`, for a hold `hold = { owner, items }`) and one
+   result per item (target type `automation-item`, `kind, id, name, wasOn, status`). A single result is cut at the
+   audit's per-result length (300 characters), and a handover with many items would have lost most of its list. The
+   audit row as a whole stays bounded (4000 characters; its fields shrink to fit, R1-20). The operation log therefore
+   also names every item with its outcome.
+4. **Where the resume is recorded.** `IHandoverLedger.RecordResume` is called from the resume and switch-on methods of
+   the stores themselves (`HandoverNotes.RecordResumeInScope`), inside the decision, with the decision's principal and
+   operation id. It is not called from each page's delegate. This also covers the existing switches of scheduled tasks,
+   webhooks and AI triggers without a change to their pages. Because it sits in the store, a resume is recorded from
+   every surface that calls the store's switch, not only from the pages. Today the pages are the only callers of these
+   switches: no MCP or agent tool switches a scheduled task, a webhook or an AI trigger on. A later MCP or agent path
+   that calls them would record its resume the same way, as would the Git deploy page's save that releases a hold
+   (point 8). Every store records the resume only after its switch is saved. A takeover as today and a delete forget the entry (`ForgetQuietly`).
+5. **Ledger pruning and stale rows.** `Prune` runs with the audit retention in `MetricsCollectorService`. Besides
+   unresumed entries older than 30 days (D14), it removes `Pending` rows that are more than an hour old. A younger
+   `Pending` row may belong to a handover or hold that is still running, so the next ledger write (contract step 4)
+   also drops only `Pending` rows older than an hour, not every `Pending` row. A handover and an `account.create` hold
+   share one lock per ledger, so neither writes the ledger or its items while the other does.
+6. **Notification lists.** `automation_handed_over` is in `AdministrativeEvents` and `UnsuppressibleEvents`, as the
+   suspension events are. Quiet hours never hold it (INV-04, R1-56).
+7. **Deleting an account shows what it owned.** After an account is deleted, *Settings → Local accounts* shows how many
+   automations the account owned and points to the handover. This is a read only, with no gateway call.
+8. **A Git deploy save keeps the hold, except on the page.** The contract lets `SaveAppAsync` clear `HeldReason`. The
+   implementation clears it only when the caller says so (`releaseHold: true`), which only the *Git deploy* page's save
+   does, as the contract accepts there; that save also records the resume. An MCP save (`create_git_deploy_app`) and
+   an MCP token change (`set_git_deploy_token`) leave a held app held, whatever the caller's copy says. Both still make
+   the saver the owner as today (R1-08), which forgets the ledger entry like a takeover. So an MCP save of a held app
+   is an ownership change to the key's person while the app stays held; its first deployment after the page's resume
+   does not name the handover.
+9. **"Run now" of a held task is refused.** `SchedulerService.RunNowAsync` (the page's *Run now* and the MCP tool
+   `run_scheduled_task`) refuses a task that is off **and** has a ledger entry nobody resumed (also a `Pending` one
+   younger than an hour). The reason starts with `AutomationHeld`; nothing runs and no run is recorded. The
+   `scheduler.run` decision is recorded as failed with that reason. A task that is switched on counts as resumed, even if
+   its resume could not be recorded; a task that is off for another reason has no entry and runs by hand as today. While
+   the ledger cannot be read, *Run now* of a task that is off is refused (fail closed). The refusal lasts as long as
+   the ledger entry, which for a scheduled task does not age out (point 15). Only a `Pending` row older than an hour
+   is dropped; after that, *Run now* of that task runs it on its recorded owner, as for any task that is off.
+10. **AI trigger runs.** An AI trigger run is an agent session, not one gateway decision. Its first-run note goes on the
+    run's `agent.run` audit line, and the entry is consumed after every agent run of the trigger that started. This also
+    covers a run that timed out or whose mutations were all denied. The contract's "consumed only by an executed run"
+    holds for the other runners, not for AI triggers.
+11. **Endpoint check resume.** `IEndpointCheckStore.ResumeAsync` also requires that the check is off with the handover
+    or hold reason. A check that is off for another reason (switched off by hand, suspended for lost authority) is not
+    resumed; a save switches it on, as today.
+12. **Hold matching.** `AutomationHold` matches the address without regard to case. Each store's compare-and-set gets
+    the owner id as it is stored.
+13. **Notice after a partial failure.** When an item write fails after other items were handed over, the new owner's
+    notice and the Admins' notification are still recorded for the items that were handed over, before the failure ends
+    the decision.
+14. **No hold, no account.** `LocalAccountService` refuses `account.create` when no `IAutomationHold` is registered.
+    This is fail closed; the running app registers it.
+15. **A scheduled task's entry does not age out (exception to D14, maintainer, 18 November 2026).** The 30-day ageing
+    skips an unresumed entry of a scheduled task, because that entry is what keeps *Run now* of the handed-over or held
+    task refused (point 9). The entry goes when the task is switched on and its first run executes, when it is taken
+    over, or when it is deleted. The other kinds age out after 30 days as D14 says.
+
+The other points are as specified: the capabilities, levels, compositions, persisted fields and the invariant text.
+PRODUCT_CONTRACT §7 carries the notes listed under "Invariant and §7 impact", plus the additions of points 8 to 10:
+the *Run now* refusal on the scheduler rows (S-01, U-26), the save rule on U-29, and the AI trigger note on A-03.

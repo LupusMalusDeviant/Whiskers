@@ -17,14 +17,18 @@ public interface IGitDeployService
     /// <summary>Creates/updates the app. A non-null <paramref name="token"/> is stored in the vault;
     /// null keeps an existing token; an empty string removes it. Whoever saves becomes the owner
     /// (<paramref name="ownerId"/>, a principal id, R1-08). An update must carry the <see cref="GitDeployApp.Revision"/>
-    /// it was loaded with; a stale one throws <see cref="GitDeployConflictException"/>.</summary>
+    /// it was loaded with; a stale one throws <see cref="GitDeployConflictException"/>. Contract 0020: a held app
+    /// (<see cref="GitDeployApp.HeldReason"/>) stays held, whatever the caller's copy says, unless
+    /// <paramref name="releaseHold"/> — only the Git deploy page's save passes it, as the contract accepts for that page;
+    /// an MCP save or token change never releases a hold.</summary>
     [MutatingOperation("gitdeploy.save")]
-    Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId);
+    Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId, bool releaseHold = false);
 
     /// <summary>Replaces the stored app's repository token (empty string removes it) and keeps every other setting
     /// (contract 0001). The app must still be at <paramref name="revision"/>, otherwise
     /// <see cref="GitDeployConflictException"/>; a missing app throws <see cref="KeyNotFoundException"/>. Like a save,
-    /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.</summary>
+    /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.
+    /// A held app stays held (contract 0020).</summary>
     [MutatingOperation("gitdeploy.set_token")]
     Task<GitDeployApp> SetTokenAsync([MutationTarget] string appId, int revision, string token, string ownerId);
 
@@ -46,6 +50,25 @@ public interface IGitDeployService
     [MutatingOperation("gitdeploy.deploy")]
     Task<(bool Success, string Output)> DeployAsync(GitDeployApp app, ComposePlanGate gate,
         IProgress<string>? progress = null, CancellationToken ct = default);
+
+    /// <summary>Contract 0020: <c>Owner := to</c> only while it is <paramref name="fromOwnerId"/>; <c>Revision + 1</c>;
+    /// <see cref="GitDeployApp.HeldReason"/> := the handover text (D6). Called only from <c>AutomationHandover</c>.</summary>
+    [MutatingOperation("automation.handover")]
+    Task<HandoverWrite> HandOverAsync(string appId, string fromOwnerId, string toOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand an app over.");
+
+    /// <summary>Contract 0020 (D11 c): held (<see cref="GitDeployApp.HeldReason"/>, <c>Revision + 1</c>) only while the
+    /// owner is <paramref name="ownerId"/>; the owner stays. Inside <c>account.create</c> only.</summary>
+    [MutatingOperation("automation.hold")]
+    Task<HandoverWrite> HoldAsync(string appId, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold an app.");
+
+    /// <summary>Contract 0020 (D7): clears <see cref="GitDeployApp.HeldReason"/> only while the owner is
+    /// <paramref name="expectedOwnerId"/>; the owner is kept (a resume never re-owns). False when the app is gone, has
+    /// another owner, or is not held.</summary>
+    [MutatingOperation("gitdeploy.save")]
+    Task<bool> ResumeAsync(string appId, string expectedOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot resume an app.");
 }
 
 /// <summary>The app was changed since it was loaded (R1-08): the save or deployment is refused rather than run with

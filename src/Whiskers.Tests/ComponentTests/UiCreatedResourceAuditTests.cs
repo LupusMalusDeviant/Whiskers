@@ -61,6 +61,7 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser()));
         Services.AddSingleton(_docker.Object);
         Services.AddSingleton(_gitDeploy.Object);
+        Services.AddSingleton(new Stub<IAutomationHandover>().Object);
         Services.AddSingleton(new Stub<IServerConfigService>().Object);
         Services.AddSingleton(new Stub<Whiskers.Services.Vault.IVaultService>().Object);
         Services.AddSingleton(new Stub<IAutomationOwnerResolver>().Object);

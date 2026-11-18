@@ -6806,4 +6806,178 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ApprovalsView_InDialog" xml:space="preserve">
     <value>im Dialog</value>
   </data>
+  <data name="AutomationHandover_Title" xml:space="preserve">
+    <value>Automatisierung von {0} übergeben</value>
+  </data>
+  <data name="AutomationHandover_LoadError" xml:space="preserve">
+    <value>Die Automatisierung konnte nicht gelesen werden: {0}</value>
+  </data>
+  <data name="AutomationHandover_Result_Title" xml:space="preserve">
+    <value>Ergebnis der Übergabe</value>
+  </data>
+  <data name="AutomationHandover_WasOn" xml:space="preserve">
+    <value>war an</value>
+  </data>
+  <data name="AutomationHandover_WasOff" xml:space="preserve">
+    <value>war aus</value>
+  </data>
+  <data name="AutomationHandover_On" xml:space="preserve">
+    <value>an</value>
+  </data>
+  <data name="AutomationHandover_Off" xml:space="preserve">
+    <value>aus</value>
+  </data>
+  <data name="AutomationHandover_Step_Items" xml:space="preserve">
+    <value>1. Elemente: übergebbare Elemente sind vorausgewählt; ausgegraute Elemente können nicht übergeben werden.</value>
+  </data>
+  <data name="AutomationHandover_Step_Owner" xml:space="preserve">
+    <value>2. Neuer Besitzer: eine Person, die jetzt handeln kann. Elemente, die diese Person nicht halten kann, werden abgewählt.</value>
+  </data>
+  <data name="AutomationHandover_NoCandidates" xml:space="preserve">
+    <value>Es ist keine Person verfügbar, die jetzt handeln kann.</value>
+  </data>
+  <data name="AutomationHandover_Label_NewOwner" xml:space="preserve">
+    <value>Neuer Besitzer</value>
+  </data>
+  <data name="AutomationHandover_Summary" xml:space="preserve">
+    <value>{0} Elemente von {1} an {2}. Alle sind danach aus; jedes wird durch Einschalten fortgesetzt. Im Audit-Log festgehalten; {2} wird benachrichtigt.</value>
+  </data>
+  <data name="AutomationHandover_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="AutomationHandover_Button_Close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="AutomationHandover_Button_Back" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="AutomationHandover_Button_Next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
+  <data name="AutomationHandover_Button_HandOver" xml:space="preserve">
+    <value>Übergeben</value>
+  </data>
+  <data name="AutomationHandover_Button_Open" xml:space="preserve">
+    <value>Übergeben…</value>
+  </data>
+  <data name="AutomationHandover_Why_Key" xml:space="preserve">
+    <value>von einem MCP-Schlüssel besessen oder erstellt: auf seiner Seite übernehmen</value>
+  </data>
+  <data name="AutomationHandover_Why_CannotJudge" xml:space="preserve">
+    <value>nicht beurteilbar: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Refused" xml:space="preserve">
+    <value>Nur ein Admin kann Automatisierung übergeben.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_CheckFailed" xml:space="preserve">
+    <value>Die Übergabe wurde abgelehnt: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Done" xml:space="preserve">
+    <value>{0} Elemente übergeben; jedes bleibt aus, bis es eingeschaltet wird.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Error" xml:space="preserve">
+    <value>Die Übergabe ist fehlgeschlagen: {0}</value>
+  </data>
+  <data name="AutomationHandover_Status_HandedOver" xml:space="preserve">
+    <value>übergeben</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedOwnerChanged" xml:space="preserve">
+    <value>übersprungen: der Besitzer hat sich inzwischen geändert</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedGone" xml:space="preserve">
+    <value>übersprungen: inzwischen gelöscht</value>
+  </data>
+  <data name="AutomationHandover_Status_Failed" xml:space="preserve">
+    <value>fehlgeschlagen: unverändert</value>
+  </data>
+  <data name="AutomationHandover_Status_NotAttempted" xml:space="preserve">
+    <value>nicht versucht</value>
+  </data>
+  <data name="AutomationHandover_Kind_ScheduledTask" xml:space="preserve">
+    <value>Geplante Aufgaben</value>
+  </data>
+  <data name="AutomationHandover_Kind_Webhook" xml:space="preserve">
+    <value>Webhooks</value>
+  </data>
+  <data name="AutomationHandover_Kind_GitDeployApp" xml:space="preserve">
+    <value>Git-Deploy-Apps</value>
+  </data>
+  <data name="AutomationHandover_Kind_AiTrigger" xml:space="preserve">
+    <value>KI-Trigger</value>
+  </data>
+  <data name="AutomationHandover_Kind_EndpointCheck" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="AutomationHandover_Kind_FleetFeature" xml:space="preserve">
+    <value>Flottenfunktionen</value>
+  </data>
+  <data name="AutomationHandover_Section_Title" xml:space="preserve">
+    <value>Besitzer, die nicht mehr handeln können</value>
+  </data>
+  <data name="AutomationHandover_Section_Intro" xml:space="preserve">
+    <value>Besitzer, deren Automatisierung nicht mehr in ihrem Namen laufen kann. Ein Admin übergibt sie an eine andere handlungsfähige Person; jedes Element bleibt aus, bis jemand es einschaltet.</value>
+  </data>
+  <data name="AutomationHandover_Section_None" xml:space="preserve">
+    <value>Alle Besitzer können noch handeln.</value>
+  </data>
+  <data name="AutomationHandover_Link" xml:space="preserve">
+    <value>In Einstellungen → Automatisierungs-Besitzer übergeben</value>
+  </data>
+  <data name="AutomationOwners_State_Active" xml:space="preserve">
+    <value>kann handeln, aber es fehlt eine Stufe, die die Elemente brauchen</value>
+  </data>
+  <data name="AutomationOwners_Button_ResumeAs" xml:space="preserve">
+    <value>Als {0} fortsetzen</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Resumed" xml:space="preserve">
+    <value>{0} fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Nicht fortgesetzt: Besitzer oder Zustand haben sich inzwischen geändert.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Der eingetragene Besitzer kann es nicht ausführen; stattdessen übernehmen.</value>
+  </data>
+  <data name="Checks_Button_Resume" xml:space="preserve">
+    <value>Fortsetzen</value>
+  </data>
+  <data name="Checks_Snackbar_Resumed" xml:space="preserve">
+    <value>Check fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Nicht fortgesetzt: Besitzer oder Zustand haben sich inzwischen geändert.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Der eingetragene Besitzer kann ihn nicht ausführen; stattdessen durch Speichern übernehmen.</value>
+  </data>
+  <data name="GitDeployView_Chip_Held" xml:space="preserve">
+    <value>angehalten</value>
+  </data>
+  <data name="GitDeployView_Button_Resume" xml:space="preserve">
+    <value>Fortsetzen</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Resumed" xml:space="preserve">
+    <value>'{0}' fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>'{0}' wurde nicht fortgesetzt: der eingetragene Besitzer kann es nicht ausführen; stattdessen übernehmen.</value>
+  </data>
+  <data name="HandoverNotice_Text" xml:space="preserve">
+    <value>{0} hat dir am {3} {1} Automatisierungen von {2} übergeben. Sie bleiben aus, bis sie eingeschaltet werden.</value>
+  </data>
+  <data name="HandoverNotice_Button_Show" xml:space="preserve">
+    <value>Anzeigen</value>
+  </data>
+  <data name="HandoverNotice_Button_Acknowledge" xml:space="preserve">
+    <value>Bestätigen</value>
+  </data>
+  <data name="HandoverNotice_Snackbar_Error" xml:space="preserve">
+    <value>Der Hinweis konnte nicht bestätigt werden: {0}</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_OwnedAutomation" xml:space="preserve">
+    <value>Dieses Konto besaß {0} Automatisierungen; sie stoppen jetzt. In Einstellungen → Automatisierungs-Besitzer übergeben.</value>
+  </data>
+  <data name="Mutation_Refused_AutomationHeld" xml:space="preserve">
+    <value>Die Automatisierung wurde übergeben oder angehalten und wartet darauf, dass ein Admin sie fortsetzt; nichts lief.</value>
+  </data>
 </root>

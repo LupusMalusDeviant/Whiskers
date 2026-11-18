@@ -80,6 +80,9 @@ public static class NotificationEventTypes
     public const string AgentApproval = "agent_approval";
     public const string AutomationSuspended = "automation_suspended";
     public const string AutomationRefused = "automation_refused";
+    /// <summary>Contract 0020: an Admin handed the automation of an owner who can no longer act over to another person
+    /// (counts only, no item names). Administrative, never held.</summary>
+    public const string AutomationHandedOver = "automation_handed_over";
     public const string OperationsInterrupted = "operations_interrupted";
     public const string WebhookDisabled = "webhook_disabled";
 
@@ -155,7 +158,7 @@ public static class NotificationEventTypes
     /// the per-container mute.</summary>
     public static readonly IReadOnlySet<string> AdministrativeEvents = new HashSet<string>(StringComparer.Ordinal)
     {
-        AutomationSuspended, AutomationRefused, OperationsInterrupted,
+        AutomationSuspended, AutomationRefused, OperationsInterrupted, AutomationHandedOver,
     };
 
     /// <summary>
@@ -168,7 +171,7 @@ public static class NotificationEventTypes
     /// </summary>
     public static readonly IReadOnlySet<string> UnsuppressibleEvents = new HashSet<string>(StringComparer.Ordinal)
     {
-        AutomationSuspended, AutomationRefused, OperationsInterrupted,
+        AutomationSuspended, AutomationRefused, OperationsInterrupted, AutomationHandedOver,
         WebhookDisabled, AgentApproval, ExposureViolation,
         LoopsPausedReminder, LogScanSuspended, LogScanResumed, MonitoringStalled, MonitoringResumed,
         AutoUpdateFailed, QuietHoursSummary, Test,

@@ -270,10 +270,15 @@ public static class MutationReasonCodes
     /// <summary>The operation could not be registered before it ran: nothing ran.</summary>
     public const string OperationNotRegistered = "OperationNotRegistered";
 
+    /// <summary>Contract 0020 (D6): the automation was handed over or held and waits for an Admin to resume it; nothing
+    /// ran.</summary>
+    public const string AutomationHeld = "AutomationHeld";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved, TargetChanged,
             DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval,
-            OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered];
+            OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered,
+            AutomationHeld];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;
