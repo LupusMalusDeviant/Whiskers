@@ -99,7 +99,7 @@ public class GitDeployService : IGitDeployService
         return await SaveAppAsync(stored, token, ownerId);
     }
 
-    public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId)
+    public async Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId, bool releaseHold = false)
     {
         ValidateId(app.Id);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
@@ -175,15 +175,16 @@ public class GitDeployService : IGitDeployService
             // Whoever saves the inputs answers for what a webhook later deploys with them (R1-08).
             stored.Owner = ownerId;
             stored.Revision = app.Revision + 1;
-            // Contract 0020 (D6): saving the app clears a handover hold, as today's save re-owns it to the saver.
-            stored.HeldReason = null;
+            // Contract 0020 (D6): the hold is the stored one, never the caller's copy. Only the page's save releases it
+            // (releaseHold, as the contract accepts there); an MCP save or token change leaves a held app held.
+            stored.HeldReason = releaseHold ? null : previous?.HeldReason;
             if (idx >= 0) data.Apps[idx] = stored; else data.Apps.Add(stored);
             await _store.SaveAsync(data);
             if (previous is not null)
             {
                 if (!string.Equals(previous.Owner, ownerId, StringComparison.Ordinal))
                     HandoverNotes.ForgetQuietly(_handovers, ItemOf(stored.Id), _logger);
-                else if (previous.HeldReason is not null)
+                else if (previous.HeldReason is not null && stored.HeldReason is null)
                     HandoverNotes.RecordResumeInScope(_handovers, ItemOf(stored.Id), _logger);
             }
             // The versioned, redacted diff is part of the gateway's event (R1-22).

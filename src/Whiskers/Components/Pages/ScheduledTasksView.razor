@@ -570,6 +570,13 @@ else
             await LoadData();
             return;
         }
+        // Contract 0020: a handed-over or held task is refused until it is switched on — a refusal, nothing failed.
+        if (!success && output.StartsWith(Whiskers.Services.Mutations.MutationReasonCodes.AutomationHeld, StringComparison.Ordinal))
+        {
+            Snackbar.Add(output, Severity.Warning);
+            await LoadData();
+            return;
+        }
         Snackbar.Add(success ? L["ScheduledTasksView_Snackbar_RunSuccess", output].Value : L["ScheduledTasksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         await LoadData();

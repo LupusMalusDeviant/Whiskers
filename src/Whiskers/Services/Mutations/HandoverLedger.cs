@@ -31,8 +31,8 @@ public interface IHandoverLedger
         IReadOnlyList<AutomationItemRef> items, HandoverEntryKind kind = HandoverEntryKind.Handover);
 
     /// <summary>After each item write: its status in that entry. Only <c>HandedOver</c> items stay in the ledger. A
-    /// failed write is logged; the stale <c>Pending</c> row reads as "not handed over" and is dropped at the next
-    /// write.</summary>
+    /// failed write is logged; the stale <c>Pending</c> row reads as "not handed over" and is dropped by the first
+    /// handover write or pruning once it is an hour old.</summary>
     void Reconcile(string operationId, AutomationItemRef item, HandoverItemStatus status);
 
     /// <summary>Called inside a resume decision for an item in the ledger; remembers who resumed it and in which
@@ -42,6 +42,11 @@ public interface IHandoverLedger
     /// <summary>For a runner's run of a ledger item: the entry, without removing it. Null otherwise. Throws
     /// <see cref="HandoverLedgerUnavailableException"/> when the ledger cannot be read; the run goes on.</summary>
     HandoverEntry? PeekFirstRun(AutomationItemRef item);
+
+    /// <summary>Whether <paramref name="item"/> has an entry (also a <c>Pending</c> one, whose handover may still be
+    /// running) that nobody resumed yet: a run by hand of such an item is refused as <c>AutomationHeld</c>. Throws
+    /// <see cref="HandoverLedgerUnavailableException"/> when the ledger cannot be read; the caller then refuses.</summary>
+    bool AwaitsResume(AutomationItemRef item);
 
     /// <summary>Removes the entry, called only after a run of the item that the gateway <b>executed</b>.</summary>
     void ConsumeAfterExecuted(AutomationItemRef item, string runOperationId);
@@ -178,8 +183,9 @@ public sealed class HandoverLedger : IHandoverLedger
         var now = DateTime.UtcNow;
         lock (_gate)
         {
-            // Stale Pending rows (a reconcile that could not be written) are read as "not handed over" and dropped here.
-            var rows = Read().Where(r => !r.Pending).ToList();
+            // Stale Pending rows (a reconcile that could not be written, an hour ago or more) are read as "not handed
+            // over" and dropped here. A younger one may belong to a handover or hold that is still running: kept.
+            var rows = Read().Where(r => !IsStalePending(r, now)).ToList();
             foreach (var item in items)
             {
                 rows.RemoveAll(r => r.Kind == item.Kind && r.Id == item.Id);
@@ -230,6 +236,15 @@ public sealed class HandoverLedger : IHandoverLedger
             return Read().FirstOrDefault(r => !r.Pending && r.Kind == item.Kind && r.Id == item.Id)?.Entry;
     }
 
+    public bool AwaitsResume(AutomationItemRef item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var now = DateTime.UtcNow;
+        lock (_gate)
+            return Read().Any(r => r.Kind == item.Kind && r.Id == item.Id && r.Entry.ResumedBy is null
+                                   && !IsStalePending(r, now));
+    }
+
     public void ConsumeAfterExecuted(AutomationItemRef item, string runOperationId)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -256,14 +271,18 @@ public sealed class HandoverLedger : IHandoverLedger
 
     private static readonly TimeSpan StalePending = TimeSpan.FromHours(1);
 
+    /// <summary>A Pending row is stale once its handover is long over (an hour); a younger one may belong to a handover
+    /// or hold in progress.</summary>
+    private static bool IsStalePending(Row row, DateTime nowUtc) =>
+        row.Pending && nowUtc - row.Entry.HandedOverAtUtc > StalePending;
+
     public int Prune(TimeSpan maxAge, DateTime nowUtc)
     {
         List<Row> gone;
         lock (_gate)
         {
             var rows = Read();
-            // A Pending row is stale once its handover is long over (an hour); a younger one may belong to a handover in progress.
-            gone = rows.Where(r => (r.Pending && nowUtc - r.Entry.HandedOverAtUtc > StalePending)
+            gone = rows.Where(r => IsStalePending(r, nowUtc)
                                    || (r.Entry.ResumedBy is null && nowUtc - r.Entry.HandedOverAtUtc > maxAge))
                 .ToList();
             if (gone.Count == 0) return 0;

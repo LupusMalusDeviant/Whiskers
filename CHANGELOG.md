@@ -2354,7 +2354,11 @@ accepted before the work started (#209). They come from the full review of the w
   first run names the handover and who resumed it. The new owner sees a notice until they acknowledge it
   (`automation.handover_acknowledge`, read level); the Admins get one notification with counts only. Creating a local
   account for an address that still owns automation holds those items first (`automation.hold`), so nothing runs
-  again without an Admin switching it on. An address that signs in again never gets its items back. New files in the
+  again without an Admin switching it on. A held item stays held on every path: *Run now* (page or MCP
+  `run_scheduled_task`) of a handed-over or held task that is still off is refused as `AutomationHeld`, and an MCP save
+  or token change of a held Git deploy app leaves it held (only the *Git deploy* page's save or *Resume* releases it).
+  *Resume* on an endpoint check applies only to a check a handover or hold switched off. An address that signs in again
+  never gets its items back. New files in the
   data directory: `automation-handovers.json` (entries age out after 30 days) and `automation-handover-notices.json`;
   both are in the self-backup. New optional field `HeldReason` on Git deploy apps.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and

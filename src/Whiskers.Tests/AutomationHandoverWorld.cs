@@ -101,6 +101,10 @@ internal sealed class AutomationHandoverWorld : IDisposable
 
     public AutomationHold Hold() => new(Ledger, Scheduler, Webhooks, Git, Triggers, Checks, Fleet);
 
+    /// <summary>A scheduler over the world's database and ledger whose runs go to <paramref name="executor"/> ("Run now").</summary>
+    public SchedulerService SchedulerRunning(ITaskExecutor executor) =>
+        new(_db.Scopes, executor, null!, NullLogger<SchedulerService>.Instance, handovers: Ledger);
+
     /// <summary>The resolver the runner asks: the world's current one, so a test can swap it.</summary>
     private sealed class LateResolver(AutomationHandoverWorld world) : IAutomationOwnerResolver
     {

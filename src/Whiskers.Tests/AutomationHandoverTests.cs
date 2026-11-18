@@ -1,9 +1,16 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Services.Auth;
 using Whiskers.Services.GitDeploy;
+using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Notifications;
+using Whiskers.Services.Scheduler;
 using static Whiskers.Tests.AutomationHandoverWorld;
 
 namespace Whiskers.Tests;
@@ -762,7 +769,276 @@ public sealed class AutomationHandoverTests : IDisposable
         Assert.StartsWith("hold = ", HandoverNotes.Of(entry));
     }
 
+    // ---- review round 1: a held item stays held on every path -------------------------------------------------------
+
+    private static readonly string BackId = PrincipalIds.User("back@local.test");
+
+    [Fact]
+    public async Task An_mcp_token_change_leaves_a_handed_over_git_app_held()
+    {
+        await _w.SeedAppAsync(AppA, GoneId);
+        await HandOverAsync(GoneId, NewId, App(AppA));
+        var before = (await _w.Git.GetAppAsync(AppA))!;
+        var (http, permissions) = await McpAdminAsync();
+        // Set here: the accessor keeps the context in an AsyncLocal, which an awaited helper would not hand back.
+        var accessor = new HttpContextAccessor { HttpContext = http };
+
+        using (Decision("gitdeploy.set_token"))
+            await Whiskers.Mcp.Tools.GitDeployTools.SetGitDeployToken(accessor, permissions, _w.Git, _w.Webhooks, AppA,
+                before.Revision, "");
+
+        var after = (await _w.Git.GetAppAsync(AppA))!;
+        Assert.Equal(before.Revision + 1, after.Revision);   // the token change was saved
+        Assert.Equal(GitDeployService.HandoverHeldReason, after.HeldReason);
+        var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(_w.Git, _w.Runner, AppA);
+        Assert.False(success);
+        Assert.True(refused);
+        Assert.StartsWith(MutationReasonCodes.AutomationHeld, output);
+    }
+
+    [Fact]
+    public async Task A_save_off_the_page_leaves_a_held_git_app_held_and_only_the_pages_save_releases_it()
+    {
+        await _w.SeedAppAsync(AppA, GoneId);
+        await HandOverAsync(GoneId, NewId, App(AppA));
+
+        // A save as the MCP tools make it (no release), from a copy that claims no hold: the stored hold stands.
+        var copy = (await _w.Git.GetAppAsync(AppA))!;
+        copy.HeldReason = null;
+        using (Decision("gitdeploy.save")) await _w.Git.SaveAppAsync(copy, null, NewId);
+        var kept = (await _w.Git.GetAppAsync(AppA))!;
+        Assert.Equal(GitDeployService.HandoverHeldReason, kept.HeldReason);
+        Assert.Null(_w.Ledger.PeekFirstRun(App(AppA))!.ResumedBy);   // no resume recorded
+
+        // The page's save releases it, as the contract accepts there; that is its resume.
+        using (Decision("gitdeploy.save")) await _w.Git.SaveAppAsync(kept, null, NewId, releaseHold: true);
+        Assert.Null((await _w.Git.GetAppAsync(AppA))!.HeldReason);
+        Assert.Equal(AdminId, _w.Ledger.PeekFirstRun(App(AppA))?.ResumedBy);
+    }
+
+    [Fact]
+    public async Task Run_now_of_a_handed_over_or_held_task_is_refused_as_AutomationHeld_until_it_is_switched_on()
+    {
+        await _w.SeedTaskAsync("t1", GoneId);
+        await _w.SeedTaskAsync("t2", BackId);
+        await _w.SeedTaskAsync("t3", NewId, enabled: false);   // switched off by hand: no ledger entry
+        await HandOverAsync(GoneId, NewId, TaskItem("t1"));
+        using (Decision("account.create")) await _w.Hold().HoldAllAsync(BackId);
+        var executor = new CountingExecutor();
+        var scheduler = _w.SchedulerRunning(executor);
+
+        foreach (var id in new[] { "t1", "t2" })
+        {
+            using var scope = Decision("scheduler.run");
+            var (success, output) = await scheduler.RunNowAsync(id);
+            Assert.False(success);
+            Assert.StartsWith(MutationReasonCodes.AutomationHeld, output);
+            Assert.StartsWith(MutationReasonCodes.AutomationHeld, scope.FailureReason);
+        }
+        Assert.Equal(0, executor.Runs);
+        Assert.Empty(await scheduler.GetHistoryAsync("t1"));
+
+        // A task that is off for another reason runs by hand as today.
+        using (Decision("scheduler.run")) Assert.True((await scheduler.RunNowAsync("t3")).Success);
+        // Switched on (its resume): "Run now" runs it.
+        using (Decision("scheduler.update"))
+        {
+            var task = await _w.TaskAsync("t1");
+            task.Enabled = true;
+            await scheduler.UpdateTaskAsync(task);
+        }
+        using (Decision("scheduler.run")) Assert.True((await scheduler.RunNowAsync("t1")).Success);
+        Assert.Equal(2, executor.Runs);
+    }
+
+    [Fact]
+    public async Task Run_now_of_an_off_task_is_refused_while_the_ledger_cannot_be_read()
+    {
+        await _w.SeedTaskAsync("t1", NewId, enabled: false);
+        await _w.SeedTaskAsync("t2", NewId);
+        Break(_w.Paths.AutomationHandoversJson);
+        var executor = new CountingExecutor();
+        var scheduler = _w.SchedulerRunning(executor);
+
+        using (Decision("scheduler.run"))
+        {
+            var (success, output) = await scheduler.RunNowAsync("t1");
+            Assert.False(success);
+            Assert.StartsWith(MutationReasonCodes.AutomationHeld, output);
+            Assert.Contains("ledger", output);
+        }
+        // A task that is on was never handed over or was resumed: the ledger is not needed to run it.
+        using (Decision("scheduler.run")) Assert.True((await scheduler.RunNowAsync("t2")).Success);
+        Assert.Equal(1, executor.Runs);
+    }
+
+    [Fact]
+    public async Task The_mcp_run_task_of_a_handed_over_task_is_refused_as_AutomationHeld()
+    {
+        await _w.SeedTaskAsync("t1", GoneId);
+        await HandOverAsync(GoneId, NewId, TaskItem("t1"));
+        var executor = new CountingExecutor();
+        var scheduler = _w.SchedulerRunning(executor);
+        var (http, permissions) = await McpAdminAsync(new ServiceCollection()
+            .AddSingleton<ISchedulerService>(scheduler)
+            .AddSingleton<IEffectiveRequirementResolver>(sp => new SchedulerRequirementResolver(new CapabilityCatalog(), sp))
+            .BuildServiceProvider());
+        var accessor = new HttpContextAccessor { HttpContext = http };
+        using var scope = Decision("scheduler.run");
+        scope.DecidedLevel = McpPermissionLevels.Admin;
+
+        var answer = await Whiskers.Mcp.Tools.SchedulerTools.RunScheduledTask(accessor, permissions, scheduler,
+            new NullToolAudit(), "t1");
+
+        Assert.Contains(MutationReasonCodes.AutomationHeld, answer);
+        Assert.StartsWith(MutationReasonCodes.AutomationHeld, scope.FailureReason);
+        Assert.Equal(0, executor.Runs);
+    }
+
+    [Fact]
+    public void A_ledger_write_keeps_a_young_pending_row_of_another_operation_and_drops_a_stale_one()
+    {
+        var path = _w.Paths.AutomationHandoversJson;
+        var stale = new HandoverLedger.Row(AutomationKind.ScheduledTask, "old", true,
+            new HandoverEntry(HandoverEntryKind.Handover, "op-old", GoneId, NewId, AdminId, DateTime.UtcNow.AddHours(-2), null, null));
+        File.WriteAllText(path, JsonSerializer.Serialize(new[] { stale },
+            new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } }));
+
+        // A hold has written its rows (Pending) when a handover writes its own.
+        _w.Ledger.RecordHandover("op-hold", BackId, BackId, AdminId, [TaskItem("held")], HandoverEntryKind.Hold);
+        _w.Ledger.RecordHandover("op-hand", GoneId, NewId, AdminId, [TaskItem("handed")]);
+        _w.Ledger.Reconcile("op-hold", TaskItem("held"), HandoverItemStatus.HandedOver);
+        _w.Ledger.Reconcile("op-hand", TaskItem("handed"), HandoverItemStatus.HandedOver);
+
+        Assert.Equal(HandoverEntryKind.Hold, _w.Ledger.PeekFirstRun(TaskItem("held"))?.Kind);
+        Assert.Equal(HandoverEntryKind.Handover, _w.Ledger.PeekFirstRun(TaskItem("handed"))?.Kind);
+        Assert.DoesNotContain("op-old", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public async Task A_hold_and_a_handover_share_one_lock_and_both_keep_their_ledger_rows()
+    {
+        await _w.SeedTaskAsync("t1", GoneId);
+        await _w.SeedTaskAsync("t2", BackId);
+        async Task<IReadOnlyList<HandoverItemResult>> HoldAsync()
+        {
+            using var scope = Decision("account.create");
+            return await _w.Hold().HoldAllAsync(BackId);
+        }
+        async Task<HandoverResult> HandAsync()
+        {
+            using var scope = Decision("automation.handover");
+            return await _w.Handover().HandOverAsync(GoneId, NewId, [TaskItem("t1")]);
+        }
+
+        var gate = HandoverLocks.For(_w.Ledger);
+        await gate.WaitAsync();   // another handover is running
+        System.Threading.Tasks.Task hold, handover;
+        try
+        {
+            hold = HoldAsync();
+            handover = HandAsync();
+            await System.Threading.Tasks.Task.Delay(200);
+            Assert.False(hold.IsCompleted);
+            Assert.False(handover.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+        await System.Threading.Tasks.Task.WhenAll(hold, handover);
+
+        Assert.Equal(HandoverEntryKind.Hold, _w.Ledger.PeekFirstRun(TaskItem("t2"))?.Kind);
+        Assert.Equal(HandoverEntryKind.Handover, _w.Ledger.PeekFirstRun(TaskItem("t1"))?.Kind);
+    }
+
+    [Fact]
+    public async Task A_handover_that_fails_half_way_still_notifies_the_new_owner_and_the_admins_of_what_was_handed_over()
+    {
+        await _w.SeedTaskAsync("t1", GoneId);
+        await _w.SeedFleetAsync(IAutomationOwnerStore.AutoPatch, GoneId);
+        Break(_w.Paths.AutomationOwnersJson);   // the fleet feature's write fails after the task's
+
+        using (Decision("automation.handover"))
+            await Assert.ThrowsAnyAsync<Exception>(() => _w.Handover().HandOverAsync(GoneId, NewId,
+                [TaskItem("t1"), Feature(IAutomationOwnerStore.AutoPatch)]));
+
+        Assert.Equal(1, Assert.Single(_w.Notices.For(NewId)).Count);
+        Assert.Contains("1 items: 1 ScheduledTask", Assert.Single(_w.Notify.Events).ImageInfo);
+    }
+
+    [Fact]
+    public async Task Resume_switches_on_only_a_check_that_a_handover_or_hold_switched_off()
+    {
+        var check = await _w.SeedCheckAsync(NewId);
+        Assert.True(await _w.Checks.SuspendAsync(check.Id, NewId, "owner lost"));
+
+        using (Decision("endpointcheck.save")) Assert.False(await _w.Checks.ResumeAsync(check.Id, NewId, default));
+
+        Assert.False(_w.Checks.List().Single().Enabled);
+    }
+
+    [Fact]
+    public async Task A_hold_matches_the_owner_address_without_regard_to_case()
+    {
+        const string stored = "user:Back@Local.Test";
+        await _w.SeedTaskAsync("t1", stored);
+
+        IReadOnlyList<HandoverItemResult> held;
+        using (Decision("account.create")) held = await _w.Hold().HoldAllAsync(BackId);
+
+        Assert.Equal(HandoverItemStatus.HandedOver, Assert.Single(held).Status);
+        var task = await _w.TaskAsync("t1");
+        Assert.Equal((stored, false), (task.CreatedBy, task.Enabled));
+    }
+
+    [Fact]
+    public async Task Without_the_hold_service_no_account_is_created()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [LocalAccountWorld.Root] });
+        const string returning = "back@local.test";
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root), ownerResolver: Resolver(world),
+            withoutHold: true);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => admin.Mutations.RunAsync("account.create",
+            new { account = returning, role = "Operator" },
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync(returning, AppRole.Operator, ct)));
+
+        Assert.Null(await world.FindAsync(returning));
+    }
+
+    /// <summary>An MCP caller with an Admin key over the world's data directory; the caller sets the accessor itself.</summary>
+    private async Task<(DefaultHttpContext Http, IMcpPermissionService Permissions)> McpAdminAsync(IServiceProvider? services = null)
+    {
+        var permissions = new McpPermissionService(NullLogger<McpPermissionService>.Instance, _w.Paths);
+        await permissions.InitializeAsync();
+        var key = await permissions.AddApiKeyAsync("admin", McpPermissionLevels.Admin);
+        var http = new DefaultHttpContext { RequestServices = services ?? new ServiceCollection().BuildServiceProvider() };
+        http.Request.Headers.Authorization = "Bearer " + key.Key;
+        return (http, permissions);
+    }
+
     // ---- doubles ---------------------------------------------------------------------------------------------------
+
+    /// <summary>"Run now" without a host: counts the runs it was handed.</summary>
+    private sealed class CountingExecutor : ITaskExecutor
+    {
+        public int Runs { get; private set; }
+
+        public Task<(bool Success, string Output)> ExecuteAsync(ScheduledTaskEntity task)
+        {
+            Runs++;
+            return System.Threading.Tasks.Task.FromResult((true, "ran"));
+        }
+    }
+
+    private sealed class NullToolAudit : Whiskers.Services.AuditLog.IToolAuditLog
+    {
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) =>
+            System.Threading.Tasks.Task.CompletedTask;
+    }
 
     /// <summary>The owner resolver the account service asks; <paramref name="accounts"/> replaces the world's account record
     /// (a federated sign-in the world has no provider for).</summary>

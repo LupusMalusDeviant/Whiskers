@@ -391,9 +391,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var existing = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == task.TaskId);
         if (existing == null) return;
         var cron = ParseOrThrow(task.CronExpression);   // before anything changes
-        // Contract 0020 (D7): switching a handed-over task on is its resume; the owner stays, the resumer is recorded.
-        if (!existing.Enabled && task.Enabled)
-            Whiskers.Services.Mutations.HandoverNotes.RecordResumeInScope(_handovers, ItemOf(existing.TaskId), _logger);
+        var switchedOn = !existing.Enabled && task.Enabled;
 
         existing.Name = task.Name;
         existing.CronExpression = task.CronExpression;
@@ -407,6 +405,10 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         existing.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
 
         await db.SaveChangesAsync();
+        // Contract 0020 (D7): switching a handed-over task on is its resume; the owner stays, the resumer is recorded —
+        // only once the switch is saved, so a failed save records no resume.
+        if (switchedOn)
+            Whiskers.Services.Mutations.HandoverNotes.RecordResumeInScope(_handovers, ItemOf(existing.TaskId), _logger);
     }
 
     public async Task<bool> SetOwnerAsync(string taskId, string ownerId, string? expectedOwnerId,
@@ -489,6 +491,28 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     /// <summary>Stable result of <see cref="RunNowAsync"/> while a restore is staged; the UI shows it translated.</summary>
     public const string MaintenanceResult = "A restore is in progress and Whiskers is about to restart; the task was not started.";
 
+    /// <summary>Contract 0020: why "Run now" refuses <paramref name="task"/> (<c>AutomationHeld: …</c>), or <c>null</c>. The
+    /// signal: the task is off <b>and</b> the ledger holds an entry for it that nobody resumed. A task switched on again
+    /// is resumed (even if its resume could not be recorded); a task that is off for another reason has no entry. A
+    /// ledger that cannot be read refuses an off task (fail closed).</summary>
+    private string? HeldResult(ScheduledTaskEntity task)
+    {
+        if (task.Enabled || _handovers is null) return null;
+        var item = ItemOf(task.TaskId);
+        try
+        {
+            if (!_handovers.AwaitsResume(item)) return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "The handover ledger could not be read for a run of task {TaskId}; the run is refused", task.TaskId);
+            return $"{Whiskers.Services.Mutations.MutationReasonCodes.AutomationHeld}: whether '{task.Name}' was handed over " +
+                   "cannot be read (handover ledger unreadable); nothing ran.";
+        }
+        return $"{Whiskers.Services.Mutations.MutationReasonCodes.AutomationHeld}: '{task.Name}' was handed over or held and " +
+               "stays off until it is switched on; nothing ran.";
+    }
+
     public async Task<(bool Success, string Output)> RunNowAsync(string taskId)
     {
         if (_maintenance?.IsMaintenance == true) return (false, MaintenanceResult);
@@ -496,6 +520,9 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
         if (task == null) return (false, "Task not found");
+        // Contract 0020: a handed-over or held task stays off until someone switches it on; "Run now" is no way around
+        // that (it would run on the new owner's authority before anyone resumed it). Refused, before anything is recorded.
+        if (HeldResult(task) is { } held) return (false, Whiskers.Services.Mutations.MutationScope.Fail(held));
 
         // R1-39: a run by hand is admitted like a scheduled one — not while Whiskers stops, not while the task runs —
         // and the drain waits for it until its result is recorded.

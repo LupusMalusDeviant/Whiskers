@@ -252,7 +252,8 @@ else
                 new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch, revision = form.Revision },
                 async (ResolvedTarget rt, CancellationToken _) =>
                 {
-                    var saved = await GitDeploy.SaveAppAsync(form, token, owner);
+                    // Contract 0020 (D6): the page's save releases a handover hold, as the contract accepts here.
+                    var saved = await GitDeploy.SaveAppAsync(form, token, owner, releaseHold: true);
                     // The saved app's id (new on create) is part of the gateway's event (R1-21).
                     MutationScope.Note($"App {saved.Id}");
                     return saved;

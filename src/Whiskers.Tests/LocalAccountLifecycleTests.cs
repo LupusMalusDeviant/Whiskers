@@ -1179,6 +1179,16 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         ], AuthConstants.FederatedScheme));
     }
 
+    /// <summary>Contract 0020: the hold for a world without automation — nothing is recorded on any address. The account
+    /// service needs one (without it, it creates no account).</summary>
+    private sealed class NothingHeld : IAutomationHold
+    {
+        public static readonly NothingHeld Instance = new();
+
+        public Task<IReadOnlyList<HandoverItemResult>> HoldAllAsync(string ownerId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<HandoverItemResult>>([]);
+    }
+
     /// <summary>The binding store sees the world's roles and whitelist; everything else (the account database's scopes)
     /// comes from the world's provider.</summary>
     private sealed class BindingServices(IRoleService roles, IWhitelistService whitelist, IServiceProvider app,
@@ -1193,7 +1203,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
 
     public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7", IWhitelistService? whitelist = null,
         Func<IServiceProvider, UserManager<AppUser>>? users = null, IAutomationHold? hold = null,
-        IAutomationOwnerResolver? ownerResolver = null)
+        IAutomationOwnerResolver? ownerResolver = null, bool withoutHold = false)
     {
         var scope = _sp.CreateScope();
         var user = new SessionUser(Validator, principal);
@@ -1201,7 +1211,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
             _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, whitelist ?? Whitelist,
-            hold, ownerResolver);
+            withoutHold ? null : hold ?? NothingHeld.Instance, ownerResolver);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

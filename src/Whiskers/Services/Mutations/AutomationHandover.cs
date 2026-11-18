@@ -299,8 +299,8 @@ internal sealed class HandoverJudge(IAutomationOwnerResolver resolver, IAutomati
 /// <summary>Contract 0020: the handover service over the existing stores (singleton).</summary>
 public sealed class AutomationHandover : IAutomationHandover
 {
-    // One handover at a time: the re-check and the writes are one step.
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    // One handover or hold at a time on a ledger: the re-check and the writes are one step.
+    private readonly SemaphoreSlim _lock;
     private readonly AutomationInventory _inventory;
     private readonly HandoverJudge _judge;
     private readonly IAutomationOwnerResolver _resolver;
@@ -326,6 +326,7 @@ public sealed class AutomationHandover : IAutomationHandover
         ArgumentNullException.ThrowIfNull(runner);
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _lock = HandoverLocks.For(ledger);
         _notices = notices ?? throw new ArgumentNullException(nameof(notices));
         _scheduler = scheduler;
         _webhooks = webhooks;
@@ -486,14 +487,16 @@ public sealed class AutomationHandover : IAutomationHandover
                 _logger?.LogInformation("Handover {Operation}: {Kind} {Id} ({WasOn}) {Status}", scope.OperationId, r.Ref.Kind,
                     r.Ref.Id, r.WasOn ? "was on" : "was off", r.Status);
             MutationScope.Note(EventDetails(outcome), success: failure is null);
-            failure?.Throw();
 
+            // Before a failure is rethrown: the items handed over before it are handed over all the same, so their new
+            // owner gets the notice and the Admins the notification (neither of them throws).
             var handedOver = results.Count(r => r.Status == HandoverItemStatus.HandedOver);
             if (handedOver > 0)
             {
                 RecordNotice(scope.OperationId, fromOwnerId, toOwnerId, admin!, handedOver);
                 await NotifyAdminsAsync(scope.OperationId, fromOwnerId, toOwnerId, admin!, results);
             }
+            failure?.Throw();
             return outcome;
         }
         finally
@@ -587,6 +590,7 @@ public sealed class AutomationHold : IAutomationHold
 {
     private readonly AutomationInventory _inventory;
     private readonly IHandoverLedger _ledger;
+    private readonly SemaphoreSlim _lock;
     private readonly ISchedulerService? _scheduler;
     private readonly IWebhookService? _webhooks;
     private readonly IGitDeployService? _gitDeploy;
@@ -599,6 +603,7 @@ public sealed class AutomationHold : IAutomationHold
         IAutomationOwnerStore? fleet = null)
     {
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _lock = HandoverLocks.For(ledger);
         _scheduler = scheduler;
         _webhooks = webhooks;
         _gitDeploy = gitDeploy;
@@ -617,30 +622,41 @@ public sealed class AutomationHold : IAutomationHold
         if (string.IsNullOrWhiteSpace(admin))
             throw new UnauthorizedAccessException("A hold is decided by a signed-in Admin only.");
 
-        var owned = (await _inventory.ReadAsync(ct))
-            .Where(i => string.Equals(i.OwnerId, ownerId, StringComparison.Ordinal)).ToList();
-        if (owned.Count == 0) return [];
-        // Before any item: a ledger that cannot be written refuses the hold, and with it the account.
-        _ledger.RecordHandover(scope.OperationId, ownerId, ownerId, admin, owned.Select(i => i.Ref).ToList(),
-            HandoverEntryKind.Hold);
-
-        var results = new List<HandoverItemResult>(owned.Count);
+        // The same lock as a handover: neither drops the other's ledger rows or writes an item the other is writing.
+        await _lock.WaitAsync(ct);
         try
         {
-            foreach (var item in owned)
+            // An address is matched without regard to case (an owner id stored as typed is the same address); each
+            // store's compare-and-set is given the id as it is stored.
+            var owned = (await _inventory.ReadAsync(ct))
+                .Where(i => string.Equals(i.OwnerId, ownerId, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (owned.Count == 0) return [];
+            // Before any item: a ledger that cannot be written refuses the hold, and with it the account.
+            _ledger.RecordHandover(scope.OperationId, ownerId, ownerId, admin, owned.Select(i => i.Ref).ToList(),
+                HandoverEntryKind.Hold);
+
+            var results = new List<HandoverItemResult>(owned.Count);
+            try
             {
-                var write = await HoldAsync(item.Ref, ownerId, ct);
-                results.Add(new(item.Ref, write.Name, write.WasOn, write.Status));
-                try { _ledger.Reconcile(scope.OperationId, item.Ref, write.Status); }
-                catch (HandoverLedgerUnavailableException) { /* the item is off either way */ }
+                foreach (var item in owned)
+                {
+                    var write = await HoldAsync(item.Ref, item.OwnerId, ct);
+                    results.Add(new(item.Ref, write.Name, write.WasOn, write.Status));
+                    try { _ledger.Reconcile(scope.OperationId, item.Ref, write.Status); }
+                    catch (HandoverLedgerUnavailableException) { /* the item is off either way */ }
+                }
             }
+            finally
+            {
+                HandoverEvent.RecordItems(results);
+                MutationScope.Note($"hold = {{ owner: {ownerId}, items: {results.Count} of {owned.Count} }}");
+            }
+            return results;
         }
         finally
         {
-            HandoverEvent.RecordItems(results);
-            MutationScope.Note($"hold = {{ owner: {ownerId}, items: {results.Count} of {owned.Count} }}");
+            _lock.Release();
         }
-        return results;
     }
 
     private Task<HandoverWrite> HoldAsync(AutomationItemRef item, string owner, CancellationToken ct) => item.Kind switch
@@ -653,6 +669,15 @@ public sealed class AutomationHold : IAutomationHold
         AutomationKind.FleetFeature => _fleet!.HoldAsync(item.Id, owner, ct),
         _ => throw new InvalidOperationException($"No store keeps {item.Kind} items."),
     };
+}
+
+/// <summary>Contract 0020: one lock per ledger, shared by <see cref="AutomationHandover"/> and <see cref="AutomationHold"/>,
+/// so a handover and an <c>account.create</c> hold never write the ledger and their items at the same time.</summary>
+internal static class HandoverLocks
+{
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IHandoverLedger, SemaphoreSlim> Locks = new();
+
+    public static SemaphoreSlim For(IHandoverLedger ledger) => Locks.GetValue(ledger, _ => new SemaphoreSlim(1, 1));
 }
 
 /// <summary>Contract 0020: one event result per handed-over or held item (kind, id, name, was on, status), so the audit

@@ -230,7 +230,9 @@ public sealed class LocalAccountService : ILocalAccountService
     /// (fail closed): the items are held.</summary>
     private async Task HoldUnusableOwnerAsync(string email, CancellationToken ct)
     {
-        if (_hold is null) return;
+        // Without the hold nothing could keep the address's automation off: no account is created (fail closed).
+        if (_hold is null)
+            throw new InvalidOperationException("The automation hold is not available; no account is created.");
         var ownerId = PrincipalIds.User(email);
         OwnerState state;
         try

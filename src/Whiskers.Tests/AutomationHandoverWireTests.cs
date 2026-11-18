@@ -152,6 +152,18 @@ public sealed class AutomationHandoverWireTests
         (await services.GetRequiredService<ISchedulerService>().GetTasksAsync()).Single(t => t.TaskId == "t1");
 
     [Fact]
+    public async Task The_automation_hold_is_registered_for_the_account_service()
+    {
+        await WithAppAsync((services, _) =>
+        {
+            // Without it the account service creates no account (fail closed); the running app must have it.
+            // (The scope guard wraps the registered AutomationHold, so the resolved object is its proxy.)
+            Assert.NotNull(services.GetService<IAutomationHold>());
+            return System.Threading.Tasks.Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task A_deleted_local_owner_signing_in_by_oidc_stays_deleted_and_a_handover_moves_task_webhook_trigger_check_and_autopatch()
     {
         await WithAppAsync(async (services, _) =>

@@ -17,14 +17,18 @@ public interface IGitDeployService
     /// <summary>Creates/updates the app. A non-null <paramref name="token"/> is stored in the vault;
     /// null keeps an existing token; an empty string removes it. Whoever saves becomes the owner
     /// (<paramref name="ownerId"/>, a principal id, R1-08). An update must carry the <see cref="GitDeployApp.Revision"/>
-    /// it was loaded with; a stale one throws <see cref="GitDeployConflictException"/>.</summary>
+    /// it was loaded with; a stale one throws <see cref="GitDeployConflictException"/>. Contract 0020: a held app
+    /// (<see cref="GitDeployApp.HeldReason"/>) stays held, whatever the caller's copy says, unless
+    /// <paramref name="releaseHold"/> — only the Git deploy page's save passes it, as the contract accepts for that page;
+    /// an MCP save or token change never releases a hold.</summary>
     [MutatingOperation("gitdeploy.save")]
-    Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId);
+    Task<GitDeployApp> SaveAppAsync(GitDeployApp app, string? token, string ownerId, bool releaseHold = false);
 
     /// <summary>Replaces the stored app's repository token (empty string removes it) and keeps every other setting
     /// (contract 0001). The app must still be at <paramref name="revision"/>, otherwise
     /// <see cref="GitDeployConflictException"/>; a missing app throws <see cref="KeyNotFoundException"/>. Like a save,
-    /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.</summary>
+    /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.
+    /// A held app stays held (contract 0020).</summary>
     [MutatingOperation("gitdeploy.set_token")]
     Task<GitDeployApp> SetTokenAsync([MutationTarget] string appId, int revision, string token, string ownerId);
 

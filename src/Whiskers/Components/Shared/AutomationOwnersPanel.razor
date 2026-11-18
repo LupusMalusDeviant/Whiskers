@@ -73,11 +73,12 @@
             </div>
             <MudStack Row="true" Spacing="1">
             @if (_role >= AppRole.Admin && Owners.GetBlocked(feature.Id) is { OwnerId.Length: > 0 } held
-                 && held.SuspendedReason is AutomationOwnerStore.HandoverReason or AutomationOwnerStore.HoldReason)
+                 && held.SuspendedReason is AutomationOwnerStore.HandoverReason or AutomationOwnerStore.HoldReason
+                 && ResumeName(held.OwnerId) is { } resumeName)
             {
                 @* Contract 0020 (D7): a resume keeps the recorded owner; it never re-owns. *@
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
-                           OnClick="@(() => ResumeFeature(feature, held.OwnerId))">@L["AutomationOwners_Button_ResumeAs", OwnerResolver.Describe(held.OwnerId).Name]</MudButton>
+                           OnClick="@(() => ResumeFeature(feature, held.OwnerId))">@L["AutomationOwners_Button_ResumeAs", resumeName]</MudButton>
             }
             @if (_role >= AppRole.Admin && (string.IsNullOrWhiteSpace(_email) || entry?.OwnerId != PrincipalIds.User(_email)))
             {
@@ -184,6 +185,20 @@ else if (_unusable.Count == 0)
             }
         }
         return active;
+    }
+
+    /// <summary>The recorded owner's name for the Resume button, or <c>null</c> when it cannot be read: then the owner
+    /// cannot be judged, and no Resume is offered (fail closed, like <see cref="CandidatesAsync"/>).</summary>
+    private string? ResumeName(string ownerId)
+    {
+        try
+        {
+            return OwnerResolver.Describe(ownerId).Name;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private async Task OpenHandover(UnusableOwner owner)

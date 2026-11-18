@@ -55,8 +55,8 @@ public interface IEndpointCheckStore
         throw new NotSupportedException($"{GetType().Name} cannot hold a check.");
 
     /// <summary>Contract 0020 (D7): <c>Enabled := true</c>, <c>SuspendedReason := null</c>, only while the owner is
-    /// <paramref name="expectedOwnerId"/>; the owner is kept (a resume never re-owns). False when the check is gone, has
-    /// another owner, or is on.</summary>
+    /// <paramref name="expectedOwnerId"/> and the check is off with the handover or hold reason; the owner is kept (a
+    /// resume never re-owns). False when the check is gone, has another owner, is on, or is off for another reason.</summary>
     [MutatingOperation("endpointcheck.save")]
     Task<bool> ResumeAsync(string id, string expectedOwnerId, CancellationToken ct) =>
         throw new NotSupportedException($"{GetType().Name} cannot resume a check.");
@@ -283,9 +283,14 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
         using var scope = _scopes.CreateScope();
         var now = _time.GetUtcNow().UtcDateTime;
+        // Only a check that a handover or hold switched off: one off for another reason (switched off by hand,
+        // suspended for its owner's lost authority) is switched on by a save, as today. Stored redacted (INV-51).
+        var handover = Whiskers.Utils.SinkRedaction.Text(HandoverReason);
+        var hold = Whiskers.Utils.SinkRedaction.Text(HoldReason);
         // The owner is kept: a resume never re-owns (D7).
         var resumed = await Db(scope).EndpointChecks
-            .Where(c => c.Id == id && c.OwnerId == expectedOwnerId && !c.Enabled)
+            .Where(c => c.Id == id && c.OwnerId == expectedOwnerId && !c.Enabled
+                        && (c.SuspendedReason == handover || c.SuspendedReason == hold))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(c => c.Enabled, true)
                 .SetProperty(c => c.SuspendedReason, (string?)null)
