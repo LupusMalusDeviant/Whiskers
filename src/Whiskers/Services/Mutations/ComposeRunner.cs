@@ -620,11 +620,14 @@ public sealed class ComposeRunner : IComposeRunner
             $"Compose project '{run.Plan.ProjectNameForAudit}' was deployed with exposure changes: {string.Join("; ", lines)}.");
     }
 
+    // Contract 0017, amendment 4 (G2): the stack plus the rules it broke is the throttle subject — two projects, or a
+    // violation found after the first report (a restore that failed), are delivered; the same report again is not.
     private Task NotifyViolationAsync(Run run) =>
         SendAsync(NotificationEventTypes.ExposureViolation, run,
-            $"Compose project '{run.Plan.ProjectNameForAudit}': {string.Join("; ", run.Violations.Distinct(StringComparer.Ordinal))}.");
+            $"Compose project '{run.Plan.ProjectNameForAudit}': {string.Join("; ", run.Violations.Distinct(StringComparer.Ordinal))}.",
+            NotificationThrottleSubjects.Exposure(run.Plan.ProjectNameForAudit, run.Agent, run.Violations));
 
-    private async Task SendAsync(string eventType, Run run, string message)
+    private async Task SendAsync(string eventType, Run run, string message, string? throttleSubject = null)
     {
         if (_notifications is null) return;
         try
@@ -632,6 +635,7 @@ public sealed class ComposeRunner : IComposeRunner
             await _notifications.SendAsync(new NotificationEvent
             {
                 EventType = eventType,
+                ThrottleSubject = throttleSubject,
                 ContainerName = run.Plan.ProjectNameForAudit,
                 ServerId = run.Plan.ServerId,
                 ImageInfo = message,

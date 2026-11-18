@@ -476,6 +476,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         Assert.Empty(host.Calls);
         Assert.Empty(RawStore().Results(check.Id));
         var note = Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.AutomationSuspended && e.ServerId == "web");
+        Assert.Equal(NotificationThrottleSubjects.EndpointCheck(check.Id), note.ThrottleSubject);   // contract 0017, G2
         // Review round 3 N1: notifications reach every role; the former owner stays in the check's reason (Admin-only).
         Assert.DoesNotContain("@", note.ImageInfo);
         Assert.DoesNotContain("user:", note.ImageInfo);

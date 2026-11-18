@@ -309,7 +309,7 @@
 11 Whiskers.Tests.MetricsScrapeAuthTests
 12 Whiskers.Tests.MigrationModelDriftTests
 6 Whiskers.Tests.ModuleMatrixTests
-25 Whiskers.Tests.MonitoringAlarmLogicTests
+26 Whiskers.Tests.MonitoringAlarmLogicTests
 29 Whiskers.Tests.MtlsCertificateRenewalTests
 4 Whiskers.Tests.MultimodalWireTests
 1 Whiskers.Tests.MutationGatewayBootTests
@@ -321,6 +321,7 @@
 7 Whiskers.Tests.NotificationRenderingTests
 5 Whiskers.Tests.NotificationRetryTests
 19 Whiskers.Tests.NotificationThrottlerTests
+17 Whiskers.Tests.NotificationThrottleSubjectTests
 4 Whiskers.Tests.NotificationsModuleTests
 7 Whiskers.Tests.OldImageCleanupPolicyTests
 3 Whiskers.Tests.OpenAiRequestMapperTests

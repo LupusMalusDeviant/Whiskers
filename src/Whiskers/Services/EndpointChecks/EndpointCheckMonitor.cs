@@ -237,6 +237,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         await SendAsync(new NotificationEvent
         {
             EventType = NotificationEventTypes.AutomationSuspended,
+            ThrottleSubject = NotificationThrottleSubjects.EndpointCheck(check.Id),
             ServerId = check.ServerId,
             ServerName = ServerName(check.ServerId),
             ContainerName = check.Name,

@@ -10,6 +10,7 @@ using Whiskers.Services.AutoPatch;
 using Whiskers.Services.AutoUpdate;
 using Whiskers.Services.Cve;
 using Whiskers.Services.ImageUpdate;
+using Whiskers.Services.Notifications;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
@@ -157,6 +158,7 @@ public sealed class KillSwitchTests : IDisposable
         Assert.Contains("account deleted", updateOwners.Suspended[IAutomationOwnerStore.AutoUpdate]);
         // The admins are told it was suspended, with the reason and how to take it over — not just "update failed".
         var suspended = Assert.Single(updateNotes.Events, e => e.EventType == "automation_suspended");
+        Assert.Equal(NotificationThrottleSubjects.Automation(IAutomationOwnerStore.AutoUpdate), suspended.ThrottleSubject);   // contract 0017, G2
         Assert.Contains("account deleted", suspended.ImageInfo);
         Assert.Contains("Automation owners", suspended.ImageInfo);
         Assert.Contains("could not be saved", suspended.ImageInfo);   // a store that failed to write says so
@@ -191,7 +193,8 @@ public sealed class KillSwitchTests : IDisposable
         Assert.Single(script.Calls);                                    // stopped, not refused container by container
         Assert.True(owners.IsBlocked(IAutomationOwnerStore.AutoPatch));
         Assert.Contains(notes.Events, e => e.EventType == "automation_suspended" && e.ContainerName == "AutoPatch"
-                                           && e.ImageInfo!.Contains("could not be saved"));
+                                           && e.ImageInfo!.Contains("could not be saved")
+                                           && e.ThrottleSubject == NotificationThrottleSubjects.Automation(IAutomationOwnerStore.AutoPatch));
         Assert.Contains("suspended", autoPatch.LastCycle!.Error);
     }
 

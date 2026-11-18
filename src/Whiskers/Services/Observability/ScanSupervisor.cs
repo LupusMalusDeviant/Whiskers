@@ -149,6 +149,8 @@ public sealed class ScanSupervisor : Whiskers.Services.FleetBackgroundService
         await _notifications.SendAsync(new NotificationEvent
         {
             EventType = stalled ? NotificationEventTypes.MonitoringStalled : NotificationEventTypes.MonitoringResumed,
+            // Contract 0017, amendment 4 (G2): one slot per loop — two loops stalling on one server are two alerts.
+            ThrottleSubject = NotificationThrottleSubjects.Loop(loop.Loop),
             ServerId = loop.ServerId,
             ServerName = serverName,
             ContainerName = serverName,

@@ -27,6 +27,13 @@ public class NotificationEvent
     /// recovery (the series went without readings, its container or server is gone). Titled and graded as such — never
     /// "back to normal".</summary>
     public bool RecoveryUnconfirmed { get; set; }
+
+    /// <summary>Contract 0017, amendment 4 (G2): what the event is about when it carries no container — a webhook, a task
+    /// or automation, a compose project's violations, a loop. Built only by <c>NotificationThrottleSubjects</c> from ids
+    /// and fixed names (never free text or secrets). Part of the per-channel throttle key when set, so two distinct
+    /// subjects of one type are two deliveries while the same subject stays throttled. A key only: no formatter, payload
+    /// or log shows it. Null or empty keeps the key <c>ServerId/ContainerId</c> plus type.</summary>
+    public string? ThrottleSubject { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     /// <summary>R1-40: one identity per event (shared by its channels), set before the first attempt and kept for every
     /// retry and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an

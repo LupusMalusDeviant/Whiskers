@@ -474,6 +474,32 @@ public sealed class MonitoringAlarmLogicTests
         Assert.Equal(["*", "badwolf"], stalled);
     }
 
+    // ---- Contract 0017, amendment 4 (G2): two loops stalling on one server are two alerts in every channel -------------
+    [Fact]
+    public async Task Two_loops_stalled_on_one_server_carry_their_loop_as_throttle_subject()
+    {
+        var metrics = new SelfMetricsImpl();
+        var sent = new FakeNotifications();
+        var supervisor = new ScanSupervisor(metrics, sent,
+            new FakeServerConfig(new ServerConfig { Id = "web", Name = "Web", IsDefault = true }),
+            NullLogger<ScanSupervisor>.Instance, TimeSpan.Zero);
+        metrics.Restore("logmonitor", "web", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
+        metrics.Restore("cvescan", "web", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
+
+        await supervisor.CheckAsync();
+
+        var stalled = sent.Events.Where(e => e.EventType == NotificationEventTypes.MonitoringStalled).ToList();
+        Assert.Equal([NotificationThrottleSubjects.Loop("cvescan"), NotificationThrottleSubjects.Loop("logmonitor")],
+            stalled.Select(e => e.ThrottleSubject).OrderBy(s => s, StringComparer.Ordinal));
+        // Through one channel's throttle, as the channels see them: both are delivered.
+        var throttler = new NotificationThrottler();
+        foreach (var evt in stalled)
+        {
+            Assert.False(throttler.IsThrottled(evt, 5), $"{evt.ThrottleSubject} swallowed by another loop's slot");
+            throttler.Record(evt, 5);
+        }
+    }
+
     // ---- 9: max-size=-1 is json-file's "unlimited", not a rotation limit -----------------------------------------------
     [Theory]
     [InlineData("-1", false)]
