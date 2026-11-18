@@ -49,7 +49,7 @@ The installer installs exactly that release, generates the vault key on a new in
 image signature if cosign is installed, writes `./whiskers/` and waits until healthy. The UI is at
 `http://127.0.0.1:5100`. Flags: `install.sh --help`. <!-- claim:RM-09 -->
 
-`docker run`, Compose, Helm, PostgreSQL, a reverse proxy, Tailscale, the hardened profile and verifying the image
+`docker run`, Compose, Helm, a reverse proxy, Tailscale, the hardened profile and verifying the image
 signature: [installation guide](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md). <!-- claim-free:pointer -->
 
 ## First sign-in
@@ -100,8 +100,9 @@ All keys: [configuration](https://github.com/LupusMalusDeviant/Whiskers/blob/mai
 
 Whiskers 1.0 has deliberate limits: an Admin is root on every managed host, it runs as a single instance, roles are
 global, terminal sessions are not transcribed, changes made outside Whiskers are not attributed, and local accounts
-have no second factor. Read them, and the remaining risks of the compose exposure checks, in the
-[production checklist](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md#accepted-limits-10). <!-- claim-free:limit -->
+have no second factor. Read the [accepted limits](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md#accepted-limits-10)
+and the [remaining risks of the compose exposure checks](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md#compose-exposure-checks-remaining-risks)
+in the production checklist. <!-- claim-free:limit -->
 
 [Upgrade and rollback](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/upgrade-and-rollback.md) ·
 [Backup and recovery](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/backup-and-recovery.md) ·

@@ -37,7 +37,7 @@ the static docker CLI (the local web terminal's `docker exec`; every other Docke
 `tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` for the health probe. Until
 R1-52 it installed Ubuntu's `docker.io` package, which also brought `dockerd`, `containerd` and `runc` — never
 started, but scanned, patched and shipped. Base images are pinned by digest (see
-[`../deploy/README.md`](../../deploy/README.md#pinned-build-inputs-r1-52)). `ImageRuntimeToolsTests` checks the list
+[`../../deploy/README.md`](../../deploy/README.md#pinned-build-inputs-r1-52)). `ImageRuntimeToolsTests` checks the list
 against the source and a built image. Root and `privileged` in the full profile are unchanged and intended, for the
 reasons above.
 

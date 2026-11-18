@@ -118,13 +118,13 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `edf4bc7be19b` | policy | **Status: 1.0.0 in preparation.** No 1.0 |
 | `README.md` | `941b3da88f96` | history | **Scope of this README:** `main`, i.e. t |
 | `README.md` | `323ff41f5965` | advice | ```bash VER=X.Y.Z # a release from https |
-| `README.md` | `94d427f5b74e` | pointer | `docker run`, Compose, Helm, PostgreSQL, |
+| `README.md` | `2bf9fe4cfb10` | pointer | `docker run`, Compose, Helm, a reverse p |
 | `README.md` | `5e10ca319749` | advice | ```bash docker exec whiskers cat /app/da |
 | `README.md` | `92d3708115e3` | advice | ```bash export WHISKERS_MCP_API_KEY=… cl |
 | `README.md` | `7b6ff0ec096d` | advice | Everything is optional. Where a setting |
 | `README.md` | `272aa341265e` | advice | - **`docker run`:** nothing is set; pass |
 | `README.md` | `699d892653f9` | pointer | All keys: [configuration](https://github |
-| `README.md` | `ead6efa0398e` | limit | Whiskers 1.0 has deliberate limits: an A |
+| `README.md` | `802a3aee6ae8` | limit | Whiskers 1.0 has deliberate limits: an A |
 | `README.md` | `f7af4d73bc43` | advice | Requires the .NET SDK version in `global |
 | `README.md` | `cf22ef5c911f` | advice | ```bash dotnet build Whiskers.slnx -c Re |
 | `README.md` | `be8d5be2f302` | pointer | Pull requests: [CONTRIBUTING.md](https:/ |
@@ -145,9 +145,9 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `docs/architecture/security-architecture.md` | `7daa853142a0` | pointer | None of them uses SSH in steady state, a |
 | `docs/architecture/security-architecture.md` | `597e2b99ff77` | limit | **The Docker-API and host-control planes |
 | `docs/architecture/security-architecture.md` | `e89aa1cb46e5` | history | Every published release image is, from v |
-| `docs/architecture/security-architecture.md` | `72010146a518` | history | The verify command is in the [README](.. |
+| `docs/architecture/security-architecture.md` | `c564424134e8` | history | The verify command is in the [installati |
 | `docs/operations/production-checklist.md` | `f7f263e36e2f` | advice | Go through this list before Whiskers man |
-| `docs/operations/production-checklist.md` | `d380c7f4ee0f` | pointer | Read [Accepted limits](#accepted-limits- |
+| `docs/operations/production-checklist.md` | `d584d8fda2c4` | pointer | Read [Accepted limits](#accepted-limits- |
 | `docs/operations/production-checklist.md` | `64e87685a443` | advice | - [ ] **MCP keys with the least level** |
 | `docs/operations/production-checklist.md` | `ae163255d9f4` | advice | - [ ] **A copy of `VAULT_KEY` off the ho |
 | `docs/operations/production-checklist.md` | `80af1fda07b6` | advice | - [ ] **No plaintext credentials left:** |

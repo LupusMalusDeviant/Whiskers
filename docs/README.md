@@ -19,7 +19,7 @@ The docs are sorted by reader. Start with the [README](../README.md) for the fac
 
 | Document | What |
 |---|---|
-| [operations/installation.md](operations/installation.md) | Every install path: installer, `docker run`, Compose, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
+| [operations/installation.md](operations/installation.md) | Every install path: installer, `docker run`, Compose, verifying the image signature, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
 | [operations/configuration.md](operations/configuration.md) | All environment variables, runtime details, tech stack |
 | [operations/container-hardening.md](operations/container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
 | [operations/README.md](operations/README.md) | **Operator guides**: production checklist (with the accepted limits of 1.0), upgrade and rollback, backup and recovery, troubleshooting, observability, and one guide per feature that needs host-side setup |
@@ -35,6 +35,7 @@ The docs are sorted by reader. Start with the [README](../README.md) for the fac
 | [architecture/project-structure.md](architecture/project-structure.md) | Source layout and code conventions |
 | [architecture/adr/](architecture/adr/) | Architecture decision records |
 | [contracts/](contracts/README.md) | Accepted contracts: every change is specified and accepted here before it is built |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) · [../SECURITY.md](../SECURITY.md) · [../CHANGELOG.md](../CHANGELOG.md) | How to contribute, how to report a vulnerability, what changed |
 
 ## Checking the promises — [v1/](v1/README.md)
 

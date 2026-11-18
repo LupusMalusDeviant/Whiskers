@@ -4,7 +4,8 @@ Go through this list before Whiskers manages hosts that matter. Each item names 
 The in-app counterpart is *Settings → Production-ready?*: every line there should be OK or a decision you made on
 purpose. That card is informational; it gates nothing. <!-- claim-free:advice -->
 
-Read [Accepted limits](#accepted-limits-10) at the end first: they say what Whiskers 1.0 does **not** protect, so the
+Read [Accepted limits](#accepted-limits-10) and the
+[compose remaining risks](#compose-exposure-checks-remaining-risks) at the end first: they say what Whiskers 1.0 does **not** protect, so the
 rest of the list is not mistaken for more than it is. <!-- claim-free:pointer -->
 
 ## Install

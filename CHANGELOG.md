@@ -419,9 +419,11 @@ Earlier changes:
   `checks.pause`. "Scan started" is shown only for a scan that started; with the CVE module off a manual scan is
   recorded as not run.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
-  settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
-  `docs/guide/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
-  `security-architecture.md`, `screenshots.md`, `roadmap.md` and `project-structure.md` (indexed in `docs/README.md`).
+  settings and a summary of the accepted limits stay in it; it points onward for the rest. The docs are sorted by
+  reader: `docs/guide/` (features, governance, MCP, agent, modules), `docs/operations/` (installation with `docker run`
+  and image verification, configuration, the production checklist with the accepted limits and the compose remaining
+  risks), `docs/architecture/` (architecture, security architecture, ADRs) and `docs/reference/history/`, indexed in
+  `docs/README.md`. Links to the old `docs/*.md` paths no longer resolve.
 - **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
   publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
   weakens a security option, shares a namespace with another container or carries a route label (Tailscale

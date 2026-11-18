@@ -6,7 +6,7 @@ Guides for running Whiskers in production.
 
 | Guide | Covers |
 |---|---|
-| [installation.md](installation.md) | Every install path: installer, `docker run`, Compose, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
+| [installation.md](installation.md) | Every install path: installer, `docker run`, Compose, verifying the image signature, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |
 | [configuration.md](configuration.md) | All environment variables, runtime details, tech stack |
 | [container-hardening.md](container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
 

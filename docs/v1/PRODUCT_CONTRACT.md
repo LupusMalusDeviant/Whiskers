@@ -85,7 +85,7 @@ Each stage lists the target behaviour and the invariants that make it testable.
 ## 5. Scope and stated limits
 
 These are deliberate. They must appear in the product documentation (WP11b) so nobody reads more into the
-contract than it says. Since R1-51 they do: README "Accepted limits (1.0)", SECURITY.md (threat model) and
+contract than it says. Since R1-51 they do: README "Before production" (summary), SECURITY.md (threat model) and
 `docs/operations/production-checklist.md`.
 
 1. **Whiskers is root-equivalent by design.** The host-control plane runs commands as host root. Docker create

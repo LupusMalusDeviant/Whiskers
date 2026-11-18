@@ -12,4 +12,4 @@ their product language from here so README, website and in-app help stay consist
 
 > These are the source of truth for *how we talk about Whiskers*, not a feature backlog. Product
 > work items are tracked in the maintainer's planning list; architecture and security live in
-> [../ARCHITECTURE.md](../architecture/ARCHITECTURE.md) and [../../SECURITY.md](../../SECURITY.md).
+> [../architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) and [../../SECURITY.md](../../SECURITY.md).

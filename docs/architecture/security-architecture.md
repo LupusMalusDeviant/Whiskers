@@ -59,6 +59,6 @@ Every published release image is, from v0.12.1 on: <!-- claim-free:history -->
   release workflow's GitHub OIDC identity and recorded in the public Rekor transparency log; no signing key is held by
   anyone. <!-- claim:SA-12 -->
 
-The verify command is in the [README](../../README.md#verifying-the-image). A valid result means the image was built by
+The verify command is in the [installation guide](../operations/installation.md#verifying-the-image). A valid result means the image was built by
 this repository's release workflow from a tag — not rebuilt or tampered with. Images published before v0.12.1 are
 provenance-attested but not cosign-signed. <!-- claim-free:history -->

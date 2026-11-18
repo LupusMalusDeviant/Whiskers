@@ -417,11 +417,11 @@ jobs:
           echo "published ${IMAGE}:${VER} = ${DIGEST} (amd64 ${AMD64_IMAGE}, arm64 ${ARM64_IMAGE})"
 
       # Keyless-sign the published index by digest (Sigstore/cosign). The signature is bound to this workflow's
-      # GitHub OIDC identity (release.yml@refs/tags/vX.Y.Z) and logged in Rekor. See README "Verifying the image".
+      # GitHub OIDC identity (release.yml@refs/tags/vX.Y.Z) and logged in Rekor. See docs/operations/installation.md "Verifying the image".
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
-          # cosign v2 on purpose: v3 writes signatures in a new format that `cosign verify` as documented in the README
+          # cosign v2 on purpose: v3 writes signatures in a new format that `cosign verify` as documented in installation.md
           # would not find with an older client. Moving to v3 is its own change.
           cosign-release: v2.6.1
       - name: Sign the image (keyless)
