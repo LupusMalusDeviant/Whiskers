@@ -21,7 +21,7 @@ The guardrail engine, the approvals and their pages (`guardrails`, `approvals`) 
 (PRODUCT_CONTRACT PC-D8): they govern direct MCP calls when this module is off, and the `GuardrailStore` warm-up (80)
 is core too. AI triggers have an owner like every automation; when the owner can no longer run them, an Admin takes
 them over or hands them on (contract 0020). The agent gets `add_server` but not `onboard_server` (contract 0018), and
-a LAN network or any other exposure change needs a confirmation on its path like a published port (contract 0021).
+a LAN network is a `host`-class exposure and needs a confirmation like the host network (contract 0021).
 
 ## When disabled
 

@@ -207,13 +207,13 @@ public sealed class HelpContentService : IHelpContentService
                     Hetzner-API-Key über die exakte IP des Servers, startet das Rescue-System, spielt einen
                     einmaligen Schlüssel ein, liest den echten Host-Key von der Platte und pinnt ihn, dann geht
                     das Onboarding wie oben weiter. Der Server **startet dabei zweimal neu**, deshalb läuft das nur
-                    für einen Server, der noch nie onboardet wurde; der Dialog nennt die Neustarts, bevor du
-                    bestätigst.
+                    für einen Server ohne gepinnten Host-Key und ohne mTLS-Stand; der Dialog nennt die Neustarts,
+                    bevor du bestätigst.
 
-                    **Host-Key**: Auf jedem Weg wird der SSH-Host-Key des Servers vor dem ersten Befehl gepinnt, im
-                    Audit-Log festgehalten und angezeigt. Ein geänderter Key wird abgelehnt; nur ein angemeldeter
-                    Admin kann den Pin ersetzen. Über MCP gibt es dasselbe als `add_server` und `onboard_server`
-                    (nur Admin-Keys; ein Rescue-Bootstrap braucht immer eine Freigabe).
+                    **Host-Key**: Bei jedem Onboarding wird der SSH-Host-Key des Servers vor dem ersten Befehl
+                    gepinnt, im Audit-Log festgehalten und angezeigt. Ein geänderter Key wird abgelehnt; nur ein
+                    angemeldeter Admin kann den Pin ersetzen. Über MCP gibt es dasselbe als `add_server` und
+                    `onboard_server` (nur Admin; ein Rescue-Bootstrap braucht immer eine Freigabe).
                     """),
                 new("Cloud, Netzwerke, Backups", """
                     - **Cloud**: Power on/off, Reboot, Snapshots und Metriken direkt beim Provider, selbst wenn
@@ -434,14 +434,14 @@ public sealed class HelpContentService : IHelpContentService
                     automatisch.
                     """),
                 new("Im Dialog freigeben", """
-                    Braucht **deine eigene Aktion** in der Oberfläche eine Freigabe (etwa das Onboarding eines
-                    Servers, Neustart oder Update eines geschützten Containers, ein mTLS-Schritt oder ein Deploy,
+                    Braucht **deine eigene Aktion** in der Oberfläche eine Freigabe (etwa das erneute Onboarding
+                    eines Servers, Neustart oder Update eines geschützten Containers, ein mTLS-Schritt oder ein Deploy,
                     der Whiskers selbst berührt), bekommt ein Admin einen eigenen Dialog: Zusammenfassung prüfen,
                     dann **Freigeben und ausführen** klicken (nach 1,5 Sekunden aktiv). Die Aktion läuft als eine
                     Operation mit einer Audit-Spur weiter; das Audit vermerkt, dass im Dialog freigegeben wurde.
 
                     Schließt du den Dialog, bleibt die Freigabe auf der Seite **Freigaben** **offen**, aber ohne
-                    Dialog läuft nichts mehr: Wiederhole die Aktion. Ist **„zweiter Genehmiger erforderlich“**
+                    Dialog läuft nichts mehr: Wiederhole die Aktion. Ist **„Zweite Person muss freigeben“**
                     eingeschaltet, wartet der Dialog auf einen anderen Admin. Container entfernen, ein
                     Self-Backup zurückspielen und einen Host-Key ersetzen gibst du weiter auf der Seite Freigaben frei.
                     """),
@@ -517,11 +517,12 @@ public sealed class HelpContentService : IHelpContentService
                     AutoPatch **laufen als das Konto, dem sie gehören**. Wird dieses Konto gelöscht oder verliert
                     es seine Rechte, **halten sie an**.
 
-                    Unter **Einstellungen > Besitzer der Automatisierung** übernimmt ein Admin sie selbst oder
-                    übergibt sie an eine andere Person, die die nötigen Rechte hat. Sie bleiben **aus** (eine
-                    Git-Deploy-App bleibt angehalten), bis jemand sie wieder einschaltet; die Übergabe steht im
-                    Audit-Log, und der nächste Lauf nennt sie. Wer sich mit derselben Adresse wieder anmeldet,
-                    bekommt sie nie automatisch zurück.
+                    Unter **Einstellungen > Besitzer der Automatisierung** übergibt ein Admin sie an eine andere
+                    Person, die die nötigen Rechte hat, oder an sich selbst. Übergebene Einträge bleiben **aus**
+                    (eine Git-Deploy-App bleibt angehalten), bis jemand sie wieder einschaltet; die Übergabe steht
+                    im Audit-Log, und der nächste Lauf nennt sie. Ein einzelnes **Übernehmen** macht dich zum
+                    Besitzer und schaltet eine Flotten-Funktion wie AutoPatch sofort wieder ein. Wer sich mit
+                    derselben Adresse wieder anmeldet, bekommt sie nie zurück.
                     """),
             }),
 

@@ -20,7 +20,7 @@ shows a "module disabled" notice (via `ModuleGuard`). No Core service depends on
 nothing else is affected — no no-op default is needed.
 
 **Owner.** Every task stores its owner and runs as that owner; each run re-checks the owner's authority, and a task
-whose owner can no longer run it is suspended and the Admins are notified (PC-D6, INV-04). An Admin takes it over or
+whose owner can no longer run it is refused, suspended once that is certain, and the Admins are notified (PC-D6, INV-04). An Admin takes it over or
 hands it to another person (contract 0020, INV-66); it stays off until someone switches it on, and *Run now* of a
 handed-over task is refused until then (`AutomationHeld`).
 

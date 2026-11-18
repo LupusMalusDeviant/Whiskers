@@ -22,11 +22,12 @@ Features:deployment:Enabled=true …)" — by the tool and by the gateway's targ
 image searches return empty.
 
 **Exposure and approvals.** Every deploy path is decided by the compose runner's exposure check (contract 0006,
-INV-62): published ports, host namespaces, route labels and LAN networks (macvlan, ipvlan and every driver other than
-`bridge`, `host`, `none`, `overlay`; contract 0021) need a confirmation for an agent or key, and send a notification
-for a person. A deploy that touches a protected container raises an approval; a signed-in Admin can approve it in the
-dialog (contract 0019, wave 2). Git-deploy apps have an owner; a handed-over app is held until someone switches it on
-(contract 0020).
+INV-62): exposures of the classes in `ExposureConfirmClasses` (default `public` and `host`: route labels to the
+internet, the host network, host namespaces and privileges, LAN networks — macvlan, ipvlan and every driver other than
+`bridge`, `host`, `none`, `overlay`, `null`; contract 0021) need a confirmation for an agent or key; for a person, a
+`public` or `host` exposure sends an `exposure_change` notification. A deploy that touches a protected container
+raises an approval; a signed-in Admin can approve it in the dialog (contract 0019, wave 2). Git-deploy apps have an
+owner; a handed-over app is held until it is resumed (saved on the Git deploy page; contract 0020).
 
 **`compose` stays Core:** the `/compose` editor uses only Docker + host-command services, so it isn't part of
 this module. `ImageUpdate`/`AutoUpdate` are also out of scope (separate concerns).

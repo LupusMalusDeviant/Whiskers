@@ -23,7 +23,8 @@ vault; a key kept in a disabled or locked vault makes the cloud tools fail with 
 
 **Onboarding (contract 0018).** The one-step onboarding of a fresh Hetzner server reuses a stored per-server Hetzner
 key by reference: Whiskers finds it by the VM's exact public IP (or the caller names it with `cloudCredentialFrom`), and
-no secret is copied. The rescue bootstrap binds the record to the VM id (`CloudServerId`); the other cloud tools keep
+no secret is copied. The record is bound to the VM id (`CloudServerId`) at registration or at the first bootstrap,
+and the rescue bootstrap acts only on that id; the other cloud tools keep
 their IP-then-name resolution. The MCP tools `add_server` / `onboard_server` are Admin only and live in the Core
 server tools, not in this module.
 

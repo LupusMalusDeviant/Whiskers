@@ -91,7 +91,7 @@ talk its way past it.
 | In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses the run until a human approves the exact action + parameters | Agent History |
 
 Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs. When a
-signed-in Admin's own action in the UI raises an approval (onboarding, container start / stop / restart / update /
+signed-in Admin's own action in the UI raises an approval (re-onboarding a server, container start / stop / restart / update /
 rollback, the mTLS steps, control-plane backups, queries and deploys), Whiskers opens a separate dialog: its "Approve
 and run" button is armed after 1.5 seconds, the same rules as on the page apply (with `RequireSecondApprover` the
 dialog waits for a second Admin), and the original operation continues with the same audit chain. Closing the dialog

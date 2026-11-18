@@ -34,8 +34,8 @@ to disclose regardless. <!-- claim-free:policy -->
 
 ## Supported versions
 
-Whiskers is currently **stable** (`1.0.x`). 1.0.0 is in preparation and no 1.0 release is published yet (an
-earlier 1.0.0 and 1.0.1 were withdrawn); until it is, `main` receives security fixes, after it only the latest
+This source tree is the **stable** (`1.0.x`) line. Its first release, 1.0.0, is in preparation and not published yet
+(an earlier 1.0.0 and 1.0.1 were withdrawn); until it is, `main` receives security fixes, after it only the latest
 release / `main`. There is no long-term-support branch yet. <!-- claim:SEC-01 -->
 
 | Version | Supported |

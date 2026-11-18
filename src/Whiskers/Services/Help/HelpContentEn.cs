@@ -203,13 +203,13 @@ internal static class HelpContentEn
                     **A fresh Hetzner server** needs only **name and IP**: Whiskers finds the stored Hetzner
                     API key by the server's exact IP, boots the rescue system, injects a one-time key, reads
                     the real host key from disk and pins it, then onboards as above. This **reboots the server
-                    twice**, so it runs only for a server that was never onboarded; the dialog names the
-                    reboots before you confirm.
+                    twice**, so it runs only for a server with no pinned host key and no mTLS state yet; the
+                    dialog names the reboots before you confirm.
 
-                    **Host key**: on every path the server's SSH host key is pinned before the first command,
-                    recorded in the audit log and shown. A changed key is refused; only a signed-in admin can
-                    replace the pin. Over MCP the same is available as `add_server` and `onboard_server`
-                    (admin keys only; a rescue bootstrap always needs an approval).
+                    **Host key**: on every onboarding the server's SSH host key is pinned before the first
+                    command, recorded in the audit log and shown. A changed key is refused; only a signed-in
+                    admin can replace the pin. Over MCP the same is available as `add_server` and
+                    `onboard_server` (Admin only; a rescue bootstrap always needs an approval).
                     """),
                 new("Cloud, Networks, Backups", """
                     - **Cloud**: power on/off, reboot, snapshots and metrics straight at the provider —
@@ -425,7 +425,7 @@ internal static class HelpContentEn
                     automatically.
                     """),
                 new("Approving in the Dialog", """
-                    When **your own action** in the UI needs an approval (for example onboarding a server,
+                    When **your own action** in the UI needs an approval (for example re-onboarding a server,
                     restarting or updating a protected container, an mTLS step or a deploy that touches
                     Whiskers itself), an admin gets a separate dialog: check the summary, then click
                     **Approve and run** (armed after 1.5 seconds). The action continues as one operation
@@ -508,10 +508,12 @@ internal static class HelpContentEn
                     such as AutoPatch **run as the account that owns them**. When that account is deleted
                     or loses its rights, they **stop**.
 
-                    Under **Settings > Automation owners** an admin takes them over or hands them to another
-                    person who holds the rights they need. They stay **off** (a Git deploy app stays held)
-                    until someone switches them on; the handover is recorded in the audit log, and the next
-                    run names it. Signing in again with the same address never gives them back.
+                    Under **Settings > Automation owners** an admin hands them over, to another person who
+                    holds the rights they need or to themselves. Handed-over items stay **off** (a Git deploy
+                    app stays held) until someone switches them on; the handover is recorded in the audit log,
+                    and the next run names it. A per-item **Take over** makes you the owner, and for a fleet
+                    feature such as AutoPatch switches it on at once. Signing in again with the same address
+                    never gives them back.
                     """),
             }),
 
