@@ -871,7 +871,7 @@ tests exist and are listed under *Open invariants* until then.
 
 ## Amendment 2 (implementation of PR 3, 18 November 2026)
 
-**Status: awaiting maintainer acceptance.** What PR 3 (part E) built differently from the text above, or added to it.
+**Status: accepted by the maintainer on 18 November 2026.** What PR 3 (part E) built differently from the text above, or added to it.
 
 - a) **Policy name of the tool.** The policy sees a capability by its MCP tool name once it has one
   (`MutationPolicy`: `McpTool ?? Id`). `ControlPlaneResources.CapabilitiesWhenStateExists` therefore lists

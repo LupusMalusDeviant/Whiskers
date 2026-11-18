@@ -483,14 +483,6 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
     }
 
     /// <summary>
-    /// <c>server.onboard</c> (INV-59, #187): onboarding works on a server that is already in the inventory, so the
-    /// decision is on exactly that server — by its id, then by its id in another case — never on the default server or
-    /// a display name, and an unknown or ambiguous id is refused. The onboarding then runs on the canonical id, so
-    /// policy and execution cannot name two different servers. The resolver records whether the server already holds
-    /// mTLS state (<see cref="Whiskers.Services.Certificates.MtlsOnboardingState"/>): re-onboarding it is a control-plane
-    /// change.
-    /// </summary>
-    /// <summary>
     /// Contract 0018 part E (review r1): <c>onboard_server</c> names its server <c>server</c>; when a call also passes
     /// <c>serverId</c> (which decides), a <c>server</c> naming another server is refused, never silently ignored. Only on
     /// the MCP surface, where <c>server</c> is the tool's argument; a page passes <c>serverId</c> only.
@@ -506,6 +498,14 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             : Refuse($"The arguments name two servers: server '{named}' and serverId '{target.Id}'; name one.");
     }
 
+    /// <summary>
+    /// <c>server.onboard</c> (INV-59, #187): onboarding works on a server that is already in the inventory, so the
+    /// decision is on exactly that server — by its id, then by its id in another case — never on the default server or
+    /// a display name, and an unknown or ambiguous id is refused. The onboarding then runs on the canonical id, so
+    /// policy and execution cannot name two different servers. The resolver records whether the server already holds
+    /// mTLS state (<see cref="Whiskers.Services.Certificates.MtlsOnboardingState"/>): re-onboarding it is a control-plane
+    /// change.
+    /// </summary>
     private TargetResolution OnboardTarget(MutationTarget target)
     {
         var id = NullIfEmpty(target.Id) ?? target.ServerId;
