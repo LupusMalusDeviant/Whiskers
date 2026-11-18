@@ -54,6 +54,8 @@ public static class SelfBackupLayout
         Rel(Probe.CertificateAlertsJson),
         Rel(Probe.AiTriggersJson),
         Rel(Probe.AutomationOwnersJson),
+        Rel(Probe.AutomationHandoversJson),         // contract 0020
+        Rel(Probe.AutomationHandoverNoticesJson),   // contract 0020 (D13)
         Rel(Probe.AuditCheckpointJson),
         Rel(Probe.KnownLocalAccountsJson),
         Rel(Probe.IdentityBindingsJson),   // R1-27

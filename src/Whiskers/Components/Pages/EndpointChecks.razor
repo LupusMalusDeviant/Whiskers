@@ -8,6 +8,7 @@
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
+@inject IAutomationHandover Handover
 @inject ISnackbar Snackbar
 @inject ILogger<EndpointChecks> Logger
 @inject IStringLocalizer<SharedResource> L
@@ -142,6 +143,11 @@ else
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Default">@(context.SuspendedReason is null ? L["Checks_State_Off"] : L["Checks_State_Suspended"])</MudChip>
                     @if (context.SuspendedReason is { } why && _role >= AppRole.Admin) { <MudText Typo="Typo.caption">@why</MudText> }
+                    @if (context.SuspendedReason is not null && _role >= AppRole.Admin)
+                    {
+                        @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                        <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
+                    }
                 }
                 else if (result is null)
                 {
@@ -161,6 +167,12 @@ else
                     @* Review n1: a switched-off or suspended check has nothing to run. *@
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" title="@L["Checks_Button_RunNow"]"
                                    Class="sw-check-run-now" Disabled="@(_busy || !context.Enabled)" OnClick="() => RunNowAsync(context)" />
+                    @if (context.SuspendedReason is EndpointCheckStore.HandoverReason or EndpointCheckStore.HoldReason)
+                    {
+                        @* Contract 0020 (D7): Resume keeps the owner; it never re-owns (saving would). *@
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="() => ResumeAsync(context)"
+                                   Class="sw-check-resume">@L["Checks_Button_Resume"]</MudButton>
+                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="@L["Checks_Button_Edit"]"
                                    OnClick="() => Edit(context)" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" title="@L["Checks_Button_Delete"]"
@@ -336,6 +348,34 @@ else
         catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Error); }
         catch (KeyNotFoundException ex) { Snackbar.Add(ex.Message, Severity.Error); }
         catch (Exception ex) { ShowFailure("save endpoint check", ex); }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Contract 0020 (D7): resumes a handed-over or held check with its owner kept. Refused when the run's own
+    /// judgment does not clear the recorded owner: then the Admin can only take it over (save) as today.</summary>
+    private async Task ResumeAsync(EndpointCheckDefinition c)
+    {
+        var owner = c.OwnerId;
+        var arguments = new { serverId = c.ServerId, checkId = c.Id, resume = true };
+        if (!await RequireAsync("endpointcheck.save", arguments)) return;
+        _busy = true;
+        try
+        {
+            var item = (await Handover.OwnedByAsync(owner)).FirstOrDefault(i => i.Ref == new AutomationItemRef(AutomationKind.EndpointCheck, c.Id));
+            if (item is not { Eligibility: HandoverEligibility.RunsOnOwner })
+            {
+                await Mutations.RefuseAsync("endpointcheck.save", arguments,
+                    $"Its recorded owner cannot run it ({item?.Why ?? "not judged"}); take it over instead.");
+                Snackbar.Add(L["Checks_Snackbar_ResumeRefused"].Value, Severity.Warning);
+                return;
+            }
+            var resumed = await Mutations.RunAsync("endpointcheck.save", arguments, (ResolvedTarget rt, CancellationToken ct) =>
+                Store.ResumeAsync(rt is ResolvedRecord r ? r.RecordId : throw new InvalidOperationException("The check was not resolved."), owner, ct));
+            Snackbar.Add(L[resumed ? "Checks_Snackbar_Resumed" : "Checks_Snackbar_ResumeChanged"].Value, resumed ? Severity.Success : Severity.Warning);
+            Reload();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("resume endpoint check", ex); }
         finally { _busy = false; }
     }
 

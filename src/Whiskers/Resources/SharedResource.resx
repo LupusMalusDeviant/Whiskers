@@ -6806,4 +6806,178 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ApprovalsView_InDialog" xml:space="preserve">
     <value>in the dialog</value>
   </data>
+  <data name="AutomationHandover_Title" xml:space="preserve">
+    <value>Hand over automation of {0}</value>
+  </data>
+  <data name="AutomationHandover_LoadError" xml:space="preserve">
+    <value>The automation could not be read: {0}</value>
+  </data>
+  <data name="AutomationHandover_Result_Title" xml:space="preserve">
+    <value>Result of the handover</value>
+  </data>
+  <data name="AutomationHandover_WasOn" xml:space="preserve">
+    <value>was on</value>
+  </data>
+  <data name="AutomationHandover_WasOff" xml:space="preserve">
+    <value>was off</value>
+  </data>
+  <data name="AutomationHandover_On" xml:space="preserve">
+    <value>on</value>
+  </data>
+  <data name="AutomationHandover_Off" xml:space="preserve">
+    <value>off</value>
+  </data>
+  <data name="AutomationHandover_Step_Items" xml:space="preserve">
+    <value>1. Items: eligible items are preselected; greyed items cannot be handed over.</value>
+  </data>
+  <data name="AutomationHandover_Step_Owner" xml:space="preserve">
+    <value>2. New owner: a person who can act now. Items this person cannot hold are deselected.</value>
+  </data>
+  <data name="AutomationHandover_NoCandidates" xml:space="preserve">
+    <value>No person who can act now is available.</value>
+  </data>
+  <data name="AutomationHandover_Label_NewOwner" xml:space="preserve">
+    <value>New owner</value>
+  </data>
+  <data name="AutomationHandover_Summary" xml:space="preserve">
+    <value>{0} items from {1} to {2}. All of them will be off; switch each on to resume. Recorded in the audit log; {2} is notified.</value>
+  </data>
+  <data name="AutomationHandover_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="AutomationHandover_Button_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="AutomationHandover_Button_Back" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="AutomationHandover_Button_Next" xml:space="preserve">
+    <value>Next</value>
+  </data>
+  <data name="AutomationHandover_Button_HandOver" xml:space="preserve">
+    <value>Hand over</value>
+  </data>
+  <data name="AutomationHandover_Button_Open" xml:space="preserve">
+    <value>Hand over…</value>
+  </data>
+  <data name="AutomationHandover_Why_Key" xml:space="preserve">
+    <value>owned or created by an MCP key: take it over on its page</value>
+  </data>
+  <data name="AutomationHandover_Why_CannotJudge" xml:space="preserve">
+    <value>cannot be judged: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Refused" xml:space="preserve">
+    <value>Only an Admin can hand automation over.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_CheckFailed" xml:space="preserve">
+    <value>The handover was refused: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Done" xml:space="preserve">
+    <value>{0} items handed over; every item is off until switched on.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Error" xml:space="preserve">
+    <value>The handover failed: {0}</value>
+  </data>
+  <data name="AutomationHandover_Status_HandedOver" xml:space="preserve">
+    <value>handed over</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedOwnerChanged" xml:space="preserve">
+    <value>skipped: its owner changed meanwhile</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedGone" xml:space="preserve">
+    <value>skipped: it was deleted meanwhile</value>
+  </data>
+  <data name="AutomationHandover_Status_Failed" xml:space="preserve">
+    <value>failed: unchanged</value>
+  </data>
+  <data name="AutomationHandover_Status_NotAttempted" xml:space="preserve">
+    <value>not attempted</value>
+  </data>
+  <data name="AutomationHandover_Kind_ScheduledTask" xml:space="preserve">
+    <value>Scheduled tasks</value>
+  </data>
+  <data name="AutomationHandover_Kind_Webhook" xml:space="preserve">
+    <value>Webhooks</value>
+  </data>
+  <data name="AutomationHandover_Kind_GitDeployApp" xml:space="preserve">
+    <value>Git deploy apps</value>
+  </data>
+  <data name="AutomationHandover_Kind_AiTrigger" xml:space="preserve">
+    <value>AI triggers</value>
+  </data>
+  <data name="AutomationHandover_Kind_EndpointCheck" xml:space="preserve">
+    <value>Endpoint checks</value>
+  </data>
+  <data name="AutomationHandover_Kind_FleetFeature" xml:space="preserve">
+    <value>Fleet features</value>
+  </data>
+  <data name="AutomationHandover_Section_Title" xml:space="preserve">
+    <value>Owners who can no longer act</value>
+  </data>
+  <data name="AutomationHandover_Section_Intro" xml:space="preserve">
+    <value>Owners whose automation can no longer run on their authority. An Admin hands it over to another person who can act now; every item stays off until someone switches it on.</value>
+  </data>
+  <data name="AutomationHandover_Section_None" xml:space="preserve">
+    <value>Every owner can still act.</value>
+  </data>
+  <data name="AutomationHandover_Link" xml:space="preserve">
+    <value>Hand over in Settings → Automation owners</value>
+  </data>
+  <data name="AutomationOwners_State_Active" xml:space="preserve">
+    <value>can act, but lacks a level its items need</value>
+  </data>
+  <data name="AutomationOwners_Button_ResumeAs" xml:space="preserve">
+    <value>Resume as {0}</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Resumed" xml:space="preserve">
+    <value>{0} resumed; its owner is unchanged.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Not resumed: its owner or state changed meanwhile.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Its recorded owner cannot run it; take it over instead.</value>
+  </data>
+  <data name="Checks_Button_Resume" xml:space="preserve">
+    <value>Resume</value>
+  </data>
+  <data name="Checks_Snackbar_Resumed" xml:space="preserve">
+    <value>Check resumed; its owner is unchanged.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Not resumed: its owner or state changed meanwhile.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Its recorded owner cannot run it; take it over by saving it instead.</value>
+  </data>
+  <data name="GitDeployView_Chip_Held" xml:space="preserve">
+    <value>held</value>
+  </data>
+  <data name="GitDeployView_Button_Resume" xml:space="preserve">
+    <value>Resume</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Resumed" xml:space="preserve">
+    <value>'{0}' resumed; its owner is unchanged.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>'{0}' was not resumed: its recorded owner cannot run it; take it over instead.</value>
+  </data>
+  <data name="HandoverNotice_Text" xml:space="preserve">
+    <value>{0} handed you {1} automations from {2} on {3}. They are off until switched on.</value>
+  </data>
+  <data name="HandoverNotice_Button_Show" xml:space="preserve">
+    <value>Show</value>
+  </data>
+  <data name="HandoverNotice_Button_Acknowledge" xml:space="preserve">
+    <value>Acknowledge</value>
+  </data>
+  <data name="HandoverNotice_Snackbar_Error" xml:space="preserve">
+    <value>The notice could not be acknowledged: {0}</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_OwnedAutomation" xml:space="preserve">
+    <value>This account owned {0} automations; they stop now. Hand them over in Settings → Automation owners.</value>
+  </data>
+  <data name="Mutation_Refused_AutomationHeld" xml:space="preserve">
+    <value>The automation was handed over or held and waits for an Admin to resume it; nothing ran.</value>
+  </data>
 </root>

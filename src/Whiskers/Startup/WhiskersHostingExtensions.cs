@@ -206,6 +206,12 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService<Whiskers.Services.Certificates.CertificateMonitor>();
         // R1-57 (contract 0004): endpoint checks run on the managed host, through the gateway as the check's owner.
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckStore, Whiskers.Services.EndpointChecks.EndpointCheckStore>();
+        // Contract 0020 (INV-66): the handover of an unusable owner's automation, the account.create hold, the first-run
+        // ledger and the new owner's personal notices. Interface-first; the scope guard wraps the marked ones.
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IHandoverLedger, Whiskers.Services.Mutations.HandoverLedger>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IHandoverNotices, Whiskers.Services.Mutations.HandoverNotices>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IAutomationHandover, Whiskers.Services.Mutations.AutomationHandover>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IAutomationHold, Whiskers.Services.Mutations.AutomationHold>();
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckSlots, Whiskers.Services.EndpointChecks.EndpointCheckSlots>();
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckRunner, Whiskers.Services.EndpointChecks.EndpointCheckRunner>();
         builder.Services.AddHostedService<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>();

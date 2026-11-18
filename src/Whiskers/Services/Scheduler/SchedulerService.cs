@@ -19,6 +19,11 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     // A restore is being staged (F3): nothing starts until the restart — its audit events would land in the database
     // the restore replaces, after the pre-restore safety backup was taken.
     private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
+    // Contract 0020: the first-run ledger of handed-over tasks (resume, takeover and delete keep it current).
+    private readonly Whiskers.Services.Mutations.IHandoverLedger? _handovers;
+
+    private static Whiskers.Services.Mutations.AutomationItemRef ItemOf(string taskId) =>
+        new(Whiskers.Services.Mutations.AutomationKind.ScheduledTask, taskId);
 
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -26,8 +31,10 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         ILogger<SchedulerService> logger,
         Whiskers.Services.Mutations.IShutdownDrain? drain = null,
-        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null)
+        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null,
+        Whiskers.Services.Mutations.IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
         _scopeFactory = scopeFactory;
         _executor = executor;
         _selfMetrics = selfMetrics;
@@ -384,6 +391,9 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var existing = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == task.TaskId);
         if (existing == null) return;
         var cron = ParseOrThrow(task.CronExpression);   // before anything changes
+        // Contract 0020 (D7): switching a handed-over task on is its resume; the owner stays, the resumer is recorded.
+        if (!existing.Enabled && task.Enabled)
+            Whiskers.Services.Mutations.HandoverNotes.RecordResumeInScope(_handovers, ItemOf(existing.TaskId), _logger);
 
         existing.Name = task.Name;
         existing.CronExpression = task.CronExpression;
@@ -410,9 +420,12 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         tasks = string.IsNullOrWhiteSpace(expectedOwnerId)
             ? tasks.Where(t => t.CreatedBy == null || t.CreatedBy == "")
             : tasks.Where(t => t.CreatedBy == expectedOwnerId);
-        return await tasks.ExecuteUpdateAsync(s => s
+        var taken = await tasks.ExecuteUpdateAsync(s => s
             .SetProperty(t => t.CreatedBy, ownerId)
             .SetProperty(t => t.CreatedVia, via)) == 1;
+        // A takeover as today ends a handover's first-run note: the task is the taker's now.
+        if (taken) Whiskers.Services.Mutations.HandoverNotes.ForgetQuietly(_handovers, ItemOf(taskId), _logger);
+        return taken;
     }
 
     public async Task DeleteTaskAsync(string taskId)
@@ -424,7 +437,47 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         {
             db.ScheduledTasks.Remove(task);
             await db.SaveChangesAsync();
+            Whiskers.Services.Mutations.HandoverNotes.ForgetQuietly(_handovers, ItemOf(taskId), _logger);
         }
+    }
+
+    public Task<Whiskers.Services.Mutations.HandoverWrite> HandOverAsync(string taskId, string fromOwnerId,
+        string toOwnerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromOwnerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toOwnerId);
+        return SwitchOffAsync(taskId, fromOwnerId, toOwnerId, ct);
+    }
+
+    public Task<Whiskers.Services.Mutations.HandoverWrite> HoldAsync(string taskId, string ownerId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return SwitchOffAsync(taskId, ownerId, ownerId, ct);
+    }
+
+    /// <summary>Contract 0020: one conditional update — owner <paramref name="from"/> → <paramref name="to"/> (the same
+    /// for a hold), switched off, provenance unchanged (D5). Conditional on the state read, so "was on" is what it
+    /// replaced; a toggle in between is read again.</summary>
+    private async Task<Whiskers.Services.Mutations.HandoverWrite> SwitchOffAsync(string taskId, string from, string to,
+        CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var before = await db.ScheduledTasks.AsNoTracking().FirstOrDefaultAsync(t => t.TaskId == taskId, ct);
+            if (before is null)
+                return new(Whiskers.Services.Mutations.HandoverItemStatus.SkippedGone, taskId, false);
+            if (before.CreatedBy != from)
+                return new(Whiskers.Services.Mutations.HandoverItemStatus.SkippedOwnerChanged, before.Name, before.Enabled);
+            var wasOn = before.Enabled;
+            var changed = await db.ScheduledTasks
+                .Where(t => t.TaskId == taskId && t.CreatedBy == from && t.Enabled == wasOn)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.CreatedBy, to).SetProperty(t => t.Enabled, false), ct);
+            if (changed == 1) return new(Whiskers.Services.Mutations.HandoverItemStatus.HandedOver, before.Name, wasOn);
+        }
+        throw new InvalidOperationException("The task kept changing while it was handed over; nothing was written.");
     }
 
     /// <summary>Stable result of <see cref="RunNowAsync"/> while Whiskers stops; the UI shows it translated.</summary>

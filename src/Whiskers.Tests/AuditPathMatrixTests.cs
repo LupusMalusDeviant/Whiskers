@@ -340,6 +340,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         serverId = "local", containerId = "web", name = "web", networkId = "net-1", zone = "example.com", server = "cx-1",
         taskId = "task-1", volumeName = "vol-1", backupId = "bk-1", ruleId = "rule-1", workloadId = "wl-1", appId = "app-1", webhookId = "wh-1",
         section = "general", account = "someone@example.com", binding = "binding-1", checkId = "check-1",
+        fromOwner = "user:gone@example.com", notice = "notice-1",
         // Payloads that must never reach an event (redaction, INV-51).
         password = Probe, token = Probe,
     };
@@ -435,7 +436,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         Assert.Equal(stopped.Outcome == Executed ? 2 : 1, runs);
         if (stopped.Outcome != Denied)
             // Switching the kill switch off, and changing one's own password (read level) stay possible under it.
-            Assert.Contains(capabilityId, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change" });
+            Assert.Contains(capabilityId, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change", "automation.handover_acknowledge" });
     }
 
     /// <summary>
@@ -526,7 +527,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         var killed = Assert.Single(await CallAsync(Ok));
         AssertComplete(killed, killed.Outcome!, capability.Id, "Mcp");
         if (killed.Outcome != Denied)
-            Assert.Contains(capability.Id, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change" });
+            Assert.Contains(capability.Id, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change", "automation.handover_acknowledge" });
     }
 
     /// <summary>M-xx: the MCP server runs every tool call through <see cref="McpGuardrailFilter"/> — the one place the

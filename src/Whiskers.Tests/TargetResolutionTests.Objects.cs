@@ -70,6 +70,8 @@ public sealed partial class TargetResolutionTests
         "volume" => typeof(ResolvedVolumeBackup),
         "log-alert" => typeof(ResolvedLogAlertRule),
         "config" or "account" or "identity" or "whiskers" or "fleet" => typeof(ResolvedRecord),
+        // Contract 0020: the old owner of a handover or hold, and a personal handover notice.
+        "automation-owner" or "handover-notice" => typeof(ResolvedRecord),
         _ => typeof(void),   // a kind without a type: refused above
     };
 

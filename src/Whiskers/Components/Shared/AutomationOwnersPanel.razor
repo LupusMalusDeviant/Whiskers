@@ -7,6 +7,11 @@
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IStringLocalizer<SharedResource> L
+@inject IAutomationHandover Handover
+@inject IDialogService DialogService
+@inject Whiskers.Services.Auth.IRoleService Roles
+@inject Whiskers.Services.Auth.IWhitelistService Whitelist
+@inject Whiskers.Services.Auth.ILocalAccountService LocalAccounts
 
 @* PC-D6 (ADR-0005 step 2.3): the fleet-wide automations have no item of their own to keep an owner on, so an admin
    takes them over here. Every run then uses that admin's authority, re-checked per run. *@
@@ -66,10 +71,49 @@
                     }
                 }
             </div>
+            <MudStack Row="true" Spacing="1">
+            @if (_role >= AppRole.Admin && Owners.GetBlocked(feature.Id) is { OwnerId.Length: > 0 } held
+                 && held.SuspendedReason is AutomationOwnerStore.HandoverReason or AutomationOwnerStore.HoldReason)
+            {
+                @* Contract 0020 (D7): a resume keeps the recorded owner; it never re-owns. *@
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
+                           OnClick="@(() => ResumeFeature(feature, held.OwnerId))">@L["AutomationOwners_Button_ResumeAs", OwnerResolver.Describe(held.OwnerId).Name]</MudButton>
+            }
             @if (_role >= AppRole.Admin && (string.IsNullOrWhiteSpace(_email) || entry?.OwnerId != PrincipalIds.User(_email)))
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
                            OnClick="@(() => TakeOver(feature))">@L["AutomationOwners_Button_TakeOver"]</MudButton>
+            }
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+
+@* Contract 0020: every owner whose items cannot run on that owner, with what each still holds; an Admin hands them
+   over in one decision (automation.handover). *@
+<MudText Typo="Typo.h6" Class="mt-6 mb-2" id="owners-who-can-no-longer-act">@L["AutomationHandover_Section_Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["AutomationHandover_Section_Intro"]</MudText>
+@if (_unusableError is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true">@L["AutomationHandover_LoadError", _unusableError]</MudAlert>
+}
+else if (_unusable.Count == 0)
+{
+    <MudText Typo="Typo.body2">@L["AutomationHandover_Section_None"]</MudText>
+}
+@foreach (var owner in _unusable)
+{
+    <MudPaper Elevation="0" Outlined="true" Class="pa-3 mb-2" data-owner="@owner.OwnerId">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <div>
+                <MudText Typo="Typo.subtitle2">@owner.Description.Name</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.Description.State}"]</MudText>
+                <MudText Typo="Typo.body2">@string.Join(", ", owner.Counts.OrderBy(c => c.Key).Select(c => $"{c.Value} {L[$"AutomationHandover_Kind_{c.Key}"].Value}"))</MudText>
+            </div>
+            @if (_role >= CapabilityCatalog.RoleOf("automation.handover"))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
+                           OnClick="@(() => OpenHandover(owner))" data-action="handover-open">@L["AutomationHandover_Button_Open"]</MudButton>
             }
         </MudStack>
     </MudPaper>
@@ -95,10 +139,111 @@
     private string? _email;
     private bool _busy;
 
+    private IReadOnlyList<UnusableOwner> _unusable = [];
+    private string? _unusableError;
+
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
         _email = await CurrentUser.GetEmailAsync();
+        await LoadUnusableAsync();
+    }
+
+    private async Task LoadUnusableAsync()
+    {
+        try
+        {
+            _unusable = await Handover.UnusableOwnersAsync();
+            _unusableError = null;
+        }
+        catch (Exception ex)
+        {
+            _unusableError = ex.Message;
+        }
+    }
+
+    /// <summary>Persons who can act now: local accounts, role and whitelist entries whose state is Active (D3). Keys are
+    /// never offered.</summary>
+    private async Task<IReadOnlyList<string>> CandidatesAsync()
+    {
+        var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var account in await LocalAccounts.ListAsync()) emails.Add(account.Email);
+        foreach (var entry in Roles.GetRoleData().Roles) emails.Add(entry.Email);
+        foreach (var email in Whitelist.GetWhitelist().Emails) emails.Add(email);
+        var active = new List<string>();
+        foreach (var email in emails.Where(e => !string.IsNullOrWhiteSpace(e) && e.Contains('@')))
+        {
+            var id = PrincipalIds.User(email);
+            try
+            {
+                if (OwnerResolver.Describe(id).State == OwnerState.Active) active.Add(id);
+            }
+            catch (Exception)
+            {
+                // Cannot be read: not offered (fail closed).
+            }
+        }
+        return active;
+    }
+
+    private async Task OpenHandover(UnusableOwner owner)
+    {
+        var parameters = new DialogParameters<AutomationHandoverDialog>
+        {
+            { d => d.FromOwnerId, owner.OwnerId },
+            { d => d.FromName, owner.Description.Name },
+            { d => d.Candidates, await CandidatesAsync() },
+        };
+        var dialog = await DialogService.ShowAsync<AutomationHandoverDialog>(
+            L["AutomationHandover_Title", owner.Description.Name].Value, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true });
+        await dialog.Result;
+        await LoadUnusableAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>Contract 0020 (D7): Resume as {owner} — the block is cleared and the owner kept. Refused when the run's
+    /// own judgment does not clear the recorded owner: then the Admin can only take the feature over as today.</summary>
+    private async Task ResumeFeature(Feature feature, string ownerId)
+    {
+        var featureId = feature.Id;
+        var owner = ownerId;
+        var args = new { feature = featureId, owner, resume = true };
+        if (_role < CapabilityCatalog.RoleOf("automation.owner_set"))
+        {
+            await Mutations.RefuseAsync("automation.owner_set", args,
+                $"Requires the {CapabilityCatalog.RoleOf("automation.owner_set")} role.");
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var item = (await Handover.OwnedByAsync(owner)).FirstOrDefault(i =>
+                i.Ref == new AutomationItemRef(AutomationKind.FleetFeature, featureId));
+            if (item is not { Eligibility: HandoverEligibility.RunsOnOwner })
+            {
+                await Mutations.RefuseAsync("automation.owner_set", args,
+                    $"Its recorded owner cannot run it ({item?.Why ?? "not judged"}); take it over instead.");
+                Snackbar.Add(L["AutomationOwners_Snackbar_ResumeRefused"].Value, Severity.Warning);
+                return;
+            }
+            var resumed = await Mutations.RunAsync("automation.owner_set", args,
+                (ResolvedRecord rt, CancellationToken ct) => Owners.ResumeAsync(rt.Id, owner, ct));
+            Snackbar.Add(resumed ? L["AutomationOwners_Snackbar_Resumed", L[feature.TitleKey].Value].Value
+                : L["AutomationOwners_Snackbar_ResumeChanged"].Value, resumed ? Severity.Success : Severity.Warning);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["AutomationOwners_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task TakeOver(Feature feature)

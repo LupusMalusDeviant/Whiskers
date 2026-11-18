@@ -66,7 +66,9 @@ public static class MutationCompositions
         ("image.assess_update", ["image.pull"]),
         // R1-49 local accounts: creating one gives it its role, deleting one removes the role (and puts it back when the
         // deletion fails halfway). The Identity row itself is the account capability's own write.
-        ("account.create", ["config.roles"]),
+        // Contract 0020 (D11 c): creating an account for an address that still owns automation holds those items in
+        // the same decision, before the account row exists.
+        ("account.create", ["config.roles", "automation.hold"]),
         ("account.delete", ["config.roles"]),
         // Setting a DNS record replaces the records it supersedes (same name and type).
         ("dns.record_set", ["dns.record_delete"]),

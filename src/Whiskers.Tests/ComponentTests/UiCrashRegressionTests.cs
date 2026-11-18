@@ -172,6 +172,7 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(Stub<Whiskers.Services.Cve.ICveFindingsStore>().On("SummarizeServer",
             _ => System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Whiskers.Services.Cve.ICveFindingsStore).GetMethod("SummarizeServer")!.ReturnType)).Object);
         Services.AddSingleton(Null<IEndpointCheckStore>());
+        Services.AddSingleton(Null<Whiskers.Services.Mutations.IAutomationHandover>());
         Services.AddSingleton(Null<IServerConfigService>());
         Services.AddSingleton(Null<Whiskers.Services.Workloads.IWorkloadProviderFactory>());
         Services.AddSingleton(Null<Whiskers.Services.Observability.ILoopSuspensionService>());
@@ -196,6 +197,7 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(Stub<IDockerService>().On(nameof(IDockerService.ListContainersAsync),
             _ => Task.FromException<IList<ContainerInfo>>(new HttpRequestException("host unreachable"))).Object);
         Services.AddSingleton(Null<Whiskers.Services.GitDeploy.IGitDeployService>());
+        Services.AddSingleton(Null<Whiskers.Services.Mutations.IAutomationHandover>());
         Services.AddSingleton(Null<IServerConfigService>());
         Services.AddSingleton(Null<IComposePlanner>());
         Services.AddSingleton(Null<IAutomationOwnerResolver>());
@@ -306,6 +308,7 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
     [Fact]
     public async Task Endpoint_checks_reports_a_delete_the_store_fails()
     {
+        Services.AddSingleton(Null<Whiskers.Services.Mutations.IAutomationHandover>());
         Services.AddSingleton(Stub<IEndpointCheckStore>()
             .On(nameof(IEndpointCheckStore.List), _ => (IReadOnlyList<EndpointCheckDefinition>)[])
             .On(nameof(IEndpointCheckStore.LastResults), _ => (IReadOnlyDictionary<string, EndpointCheckResultEntity>)new Dictionary<string, EndpointCheckResultEntity>())

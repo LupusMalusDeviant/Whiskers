@@ -33,11 +33,20 @@ public class GitDeployService : IGitDeployService
     private GitDeployData _cached = new();
     private bool _loaded;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    // Contract 0020: the first-run ledger of handed-over apps.
+    private readonly IHandoverLedger? _handovers;
+
+    private static AutomationItemRef ItemOf(string appId) => new(AutomationKind.GitDeployApp, appId);
+
+    /// <summary>Contract 0020 (D6): the hold text of a handover and of an <c>account.create</c> hold.</summary>
+    public const string HandoverHeldReason = "handed over: held until an Admin resumes it";
+    public const string HoldHeldReason = "held when a local account was created for its owner's address: held until an Admin resumes it";
 
     public GitDeployService(IHostCommandExecutor executor, IVaultService vault, IComposePlanner planner,
         ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
-        ResourceLocks? locks = null, IComposeRunner? composeRunner = null)
+        ResourceLocks? locks = null, IComposeRunner? composeRunner = null, IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
         _locks = locks ?? new ResourceLocks();
         _composeRunner = composeRunner;
         _executor = executor;
@@ -166,8 +175,17 @@ public class GitDeployService : IGitDeployService
             // Whoever saves the inputs answers for what a webhook later deploys with them (R1-08).
             stored.Owner = ownerId;
             stored.Revision = app.Revision + 1;
+            // Contract 0020 (D6): saving the app clears a handover hold, as today's save re-owns it to the saver.
+            stored.HeldReason = null;
             if (idx >= 0) data.Apps[idx] = stored; else data.Apps.Add(stored);
             await _store.SaveAsync(data);
+            if (previous is not null)
+            {
+                if (!string.Equals(previous.Owner, ownerId, StringComparison.Ordinal))
+                    HandoverNotes.ForgetQuietly(_handovers, ItemOf(stored.Id), _logger);
+                else if (previous.HeldReason is not null)
+                    HandoverNotes.RecordResumeInScope(_handovers, ItemOf(stored.Id), _logger);
+            }
             // The versioned, redacted diff is part of the gateway's event (R1-22).
             Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{stored.Id}",
                 AuditView(previous, previous is { HasToken: true } ? oldToken : null), AuditView(stored, stored.HasToken ? newToken : null));
@@ -214,6 +232,68 @@ public class GitDeployService : IGitDeployService
             await _store.SaveAsync(data);
             Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}",
                 AuditView(existing, Kept(existing)), AuditView(stored, Kept(stored)));   // R1-22
+            HandoverNotes.ForgetQuietly(_handovers, ItemOf(appId), _logger);   // contract 0020: a takeover as today
+            return true;
+        }
+        finally { _lock.Release(); }
+    }
+
+    public Task<HandoverWrite> HandOverAsync(string appId, string fromOwnerId, string toOwnerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromOwnerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toOwnerId);
+        return HoldCoreAsync(appId, fromOwnerId, toOwnerId, HandoverHeldReason);
+    }
+
+    public Task<HandoverWrite> HoldAsync(string appId, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return HoldCoreAsync(appId, ownerId, ownerId, HoldHeldReason);
+    }
+
+    /// <summary>Contract 0020 (D6): owner <paramref name="from"/> → <paramref name="to"/> (the same for a hold), held,
+    /// revision bumped so a deployment decided before is refused; compare-and-set under the store lock.</summary>
+    private async Task<HandoverWrite> HoldCoreAsync(string appId, string from, string to, string reason)
+    {
+        ValidateId(appId);
+        var data = await LoadAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var existing = data.Apps.FirstOrDefault(a => a.Id == appId);
+            if (existing is null) return new(HandoverItemStatus.SkippedGone, appId, false);
+            var wasOn = existing.HeldReason is null;
+            if (!string.Equals(existing.Owner, from, StringComparison.Ordinal))
+                return new(HandoverItemStatus.SkippedOwnerChanged, existing.Name, wasOn);
+            var stored = existing.Clone();
+            stored.Owner = to;
+            stored.HeldReason = reason;
+            stored.Revision = existing.Revision + 1;
+            data.Apps[data.Apps.IndexOf(existing)] = stored;
+            await _store.SaveAsync(data);
+            ConfigChange.Record($"gitdeploy:{appId}", AuditView(existing, Kept(existing)), AuditView(stored, Kept(stored)));   // R1-22
+            return new(HandoverItemStatus.HandedOver, existing.Name, wasOn);
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task<bool> ResumeAsync(string appId, string expectedOwnerId, CancellationToken ct = default)
+    {
+        ValidateId(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedOwnerId);
+        var data = await LoadAsync();
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var existing = data.Apps.FirstOrDefault(a => a.Id == appId);
+            if (existing is null || existing.HeldReason is null
+                || !string.Equals(existing.Owner, expectedOwnerId, StringComparison.Ordinal)) return false;
+            var stored = existing.Clone();
+            stored.HeldReason = null;   // the owner is kept: a resume never re-owns (D7)
+            data.Apps[data.Apps.IndexOf(existing)] = stored;
+            await _store.SaveAsync(data);
+            ConfigChange.Record($"gitdeploy:{appId}", AuditView(existing, Kept(existing)), AuditView(stored, Kept(stored)));   // R1-22
+            HandoverNotes.RecordResumeInScope(_handovers, ItemOf(appId), _logger);
             return true;
         }
         finally { _lock.Release(); }
@@ -296,6 +376,7 @@ public class GitDeployService : IGitDeployService
             data.Apps.RemoveAll(a => a.Id == appId);
             await _store.SaveAsync(data);
             Whiskers.Services.Mutations.ConfigChange.Record($"gitdeploy:{appId}", AuditView(removed, Kept(removed)), null);   // R1-22
+            HandoverNotes.ForgetQuietly(_handovers, ItemOf(appId), _logger);   // contract 0020
         }
         finally { _lock.Release(); }
     }

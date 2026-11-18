@@ -1192,14 +1192,16 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     }
 
     public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7", IWhitelistService? whitelist = null,
-        Func<IServiceProvider, UserManager<AppUser>>? users = null)
+        Func<IServiceProvider, UserManager<AppUser>>? users = null, IAutomationHold? hold = null,
+        IAutomationOwnerResolver? ownerResolver = null)
     {
         var scope = _sp.CreateScope();
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
-            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, whitelist ?? Whitelist);
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, whitelist ?? Whitelist,
+            hold, ownerResolver);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

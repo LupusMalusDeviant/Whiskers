@@ -89,6 +89,8 @@
                 @if (t.SuspendedReason is { } suspended)
                 {
                     <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@L["AiTriggersView_Suspended_Alert", suspended]</MudAlert>
+                    @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                    <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
                 }
 
                 <MudGrid>

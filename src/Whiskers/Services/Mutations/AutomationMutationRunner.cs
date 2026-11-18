@@ -317,10 +317,15 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     private readonly ICapabilityOverrides? _overrides;
     private readonly ILogger<AutomationMutationRunner> _logger;
 
+    // Contract 0020: the first run of a handed-over (or held) item names the handover and the resumer.
+    private readonly IHandoverLedger? _handovers;
+
     public AutomationMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog,
         IAutomationOwnerResolver owners, IOptionsMonitor<AutomationOptions> options,
-        ICapabilityOverrides? overrides = null, ILogger<AutomationMutationRunner>? logger = null)
+        ICapabilityOverrides? overrides = null, ILogger<AutomationMutationRunner>? logger = null,
+        IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
         _overrides = overrides;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AutomationMutationRunner>.Instance;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
@@ -368,9 +373,50 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         // refusal is the run's one event (under its EventKey, INV-45).
         if (UiMutationRunner.TargetTypeMismatch(capability, targetType) is { } mismatch)
             return RefuseMismatchAsync<T>(request with { EventKey = actor.EventKey }, mismatch, ct);
-        // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
-        return _gateway.ExecuteAsync(request,
-            async (context, token) => MutationResults.Report(await action(context, token)), ct);
+        // Contract 0020: before the gateway call, the ledger entry of a handed-over item (never blocks the run).
+        var item = _handovers is null ? null : HandoverNotes.ItemOfRunner(actor.RunnerId);
+        var note = item is null ? null : FirstRunNote(item);
+        if (note is null)
+            // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
+            return _gateway.ExecuteAsync(request,
+                async (context, token) => MutationResults.Report(await action(context, token)), ct);
+        return RunWithNoteAsync(request, item!, note, action, ct);
+    }
+
+    /// <summary>Runs with the first-run note on the event; only a run the gateway executed consumes the entry (a refused
+    /// one keeps it for the next run).</summary>
+    private async Task<MutationOutcome<T>> RunWithNoteAsync<T>(MutationRequest request, AutomationItemRef item, string note,
+        Func<MutationContext, CancellationToken, Task<T>> action, CancellationToken ct)
+    {
+        var outcome = await _gateway.ExecuteAsync(request, async (context, token) =>
+        {
+            MutationScope.Note(note);
+            return MutationResults.Report(await action(context, token));
+        }, ct);
+        if (outcome.Status == MutationStatus.Executed && note != HandoverNotes.Unknown)
+        {
+            try { _handovers!.ConsumeAfterExecuted(item, outcome.OperationId); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "The handover ledger entry of {Kind} {Id} could not be consumed", item.Kind, item.Id);
+            }
+        }
+        return outcome;
+    }
+
+    /// <summary>The note for <paramref name="item"/>'s run, or <c>null</c> when it is no ledger item.</summary>
+    private string? FirstRunNote(AutomationItemRef item)
+    {
+        try
+        {
+            return _handovers!.PeekFirstRun(item) is { } entry ? HandoverNotes.Of(entry) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Context only: the run goes on, and its event says the context is unknown.
+            _logger.LogError(ex, "The handover ledger could not be read for {Kind} {Id}", item.Kind, item.Id);
+            return HandoverNotes.Unknown;
+        }
     }
 
     private async Task<MutationOutcome<T>> RefuseMismatchAsync<T>(MutationRequest request, string reason,

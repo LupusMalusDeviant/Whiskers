@@ -46,6 +46,25 @@ public interface IGitDeployService
     [MutatingOperation("gitdeploy.deploy")]
     Task<(bool Success, string Output)> DeployAsync(GitDeployApp app, ComposePlanGate gate,
         IProgress<string>? progress = null, CancellationToken ct = default);
+
+    /// <summary>Contract 0020: <c>Owner := to</c> only while it is <paramref name="fromOwnerId"/>; <c>Revision + 1</c>;
+    /// <see cref="GitDeployApp.HeldReason"/> := the handover text (D6). Called only from <c>AutomationHandover</c>.</summary>
+    [MutatingOperation("automation.handover")]
+    Task<HandoverWrite> HandOverAsync(string appId, string fromOwnerId, string toOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand an app over.");
+
+    /// <summary>Contract 0020 (D11 c): held (<see cref="GitDeployApp.HeldReason"/>, <c>Revision + 1</c>) only while the
+    /// owner is <paramref name="ownerId"/>; the owner stays. Inside <c>account.create</c> only.</summary>
+    [MutatingOperation("automation.hold")]
+    Task<HandoverWrite> HoldAsync(string appId, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold an app.");
+
+    /// <summary>Contract 0020 (D7): clears <see cref="GitDeployApp.HeldReason"/> only while the owner is
+    /// <paramref name="expectedOwnerId"/>; the owner is kept (a resume never re-owns). False when the app is gone, has
+    /// another owner, or is not held.</summary>
+    [MutatingOperation("gitdeploy.save")]
+    Task<bool> ResumeAsync(string appId, string expectedOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot resume an app.");
 }
 
 /// <summary>The app was changed since it was loaded (R1-08): the save or deployment is refused rather than run with

@@ -64,6 +64,10 @@ public sealed class ResolvedTargetFlowTests
         "ConfigSectionsTests pins the sections the pages pass.";
     private const string SectionEntry =
         "Names an entry inside the decided config section (an e-mail, a tool, a container's preferences), not the section.";
+    private const string HandoverItem =
+        "Contract 0020: names one item of the decided old owner (automation-owner); the store changes it only while that owner is still recorded (compare-and-set).";
+    private const string HoldItem =
+        "Contract 0020 (D11 c): nested in account.create, whose decided target is the new account; the item is held only while the address still owns it.";
     private const string OwnAccount = "Acts on the signed-in account itself; the call names no account.";
     private const string ProviderTransport =
         "Provider transport below ICloudControlService, which marks the decided cloud server; it takes the provider's " +
@@ -80,6 +84,19 @@ public sealed class ResolvedTargetFlowTests
 
     private static readonly IReadOnlyDictionary<string, string> WithoutTargetParameter = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["Whiskers.Services.Agent.Triggers.IAiTriggerStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Agent.Triggers.IAiTriggerStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.EndpointChecks.IEndpointCheckStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.EndpointChecks.IEndpointCheckStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.GitDeploy.IGitDeployService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.GitDeploy.IGitDeployService.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Mutations.IAutomationHold.HoldAllAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Mutations.IAutomationOwnerStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Mutations.IAutomationOwnerStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Scheduler.ISchedulerService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Scheduler.ISchedulerService.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Webhooks.IWebhookService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Webhooks.IWebhookService.HoldAsync (automation.hold)"] = HoldItem,
         ["Whiskers.Services.Agent.IAgentSettingsStore.SaveAsync (config.agent)"] = WholeSection,
         ["Whiskers.Services.Auth.ILocalAccountService.ChangeOwnPasswordAsync (account.password_change)"] = OwnAccount,
         ["Whiskers.Services.Auth.IRoleService.RemoveRoleAsync (config.roles)"] = SectionEntry,

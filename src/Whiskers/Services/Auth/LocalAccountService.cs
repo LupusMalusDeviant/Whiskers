@@ -41,14 +41,20 @@ public sealed class LocalAccountService : ILocalAccountService
     // Contract 0017 H2/H3: the whitelist entries of the accounts an Admin creates and deletes.
     private readonly IWhitelistService? _whitelist;
     private readonly Whiskers.Services.Guardrails.IGuardrailStore _guardrails;
+    // Contract 0020 (D11 c): the hold of automation still recorded on an address that gets an account again, judged with
+    // the resolver the runs use.
+    private readonly IAutomationHold? _hold;
+    private readonly IAutomationOwnerResolver? _ownerResolver;
 
     /// <param name="bindings">R1-27: an Admin with an active Google/OIDC binding can sign in (last-Admin rule).</param>
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
         ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
         IClientAddress client, IConfiguration configuration, Whiskers.Services.Guardrails.IGuardrailStore guardrails,
         TimeProvider? time = null, ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null,
-        IWhitelistService? whitelist = null)
+        IWhitelistService? whitelist = null, IAutomationHold? hold = null, IAutomationOwnerResolver? ownerResolver = null)
     {
+        _hold = hold;
+        _ownerResolver = ownerResolver;
         _bindings = bindings;
         _whitelist = whitelist;
         // Contract 0009 (E5): the kill switch may block recovery-code redemption. Required: without it the check could not fail closed.
@@ -153,6 +159,11 @@ public sealed class LocalAccountService : ILocalAccountService
             var explicitRole = _roles.HasExplicitRole(email);
             if (explicitRole && _roles.GetRole(email) != role) return LocalAccountResult.Refused(LocalAccountErrors.RoleConflict);
 
+            // Contract 0020 (D11 c): after the refusals, before the Identity row exists (StateOf reads it directly): an
+            // owner that cannot act now has its automation held, so nothing it still owns runs again without someone
+            // switching it on. A hold that fails creates no account (it throws out of the decision).
+            await HoldUnusableOwnerAsync(email, ct);
+
             var user = new AppUser { UserName = email, Email = email, EmailConfirmed = true };
             var created = await _users.CreateAsync(user);   // no password: the owner sets one with the code
             if (!created.Succeeded)
@@ -212,6 +223,28 @@ public sealed class LocalAccountService : ILocalAccountService
             return new LocalAccountResult(true) { RecoveryCode = code, RecoveryExpiresUtc = expires };
         }
         finally { AdminGate.Release(); }
+    }
+
+    /// <summary>Contract 0020 (D11 c): holds every item recorded on <paramref name="email"/> unless its owner state,
+    /// read now with the runs' resolver, is <see cref="OwnerState.Active"/>. A state that cannot be read is not Active
+    /// (fail closed): the items are held.</summary>
+    private async Task HoldUnusableOwnerAsync(string email, CancellationToken ct)
+    {
+        if (_hold is null) return;
+        var ownerId = PrincipalIds.User(email);
+        OwnerState state;
+        try
+        {
+            state = _ownerResolver?.Describe(ownerId).State ?? OwnerState.Unverified;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "The owner state of {Account} could not be read; its automation is held",
+                Whiskers.Utils.LogSafe.Account(email));
+            state = OwnerState.Unverified;
+        }
+        if (state == OwnerState.Active) return;
+        await _hold.HoldAllAsync(ownerId, ct);
     }
 
     public async Task<LocalAccountResult> ResetPasswordAsync(string email, CancellationToken ct = default)

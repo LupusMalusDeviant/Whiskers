@@ -91,6 +91,8 @@ else
             {
                 <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" Class="ml-2"
                            OnClick="AdoptAll">@L["ScheduledTasksView_Button_AdoptAll"]</MudButton>
+                @* Contract 0020: or hand them to another person in Settings → Automation owners. *@
+                <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption" Class="ml-2">@L["AutomationHandover_Link"]</MudLink>
             }
         </MudAlert>
     }

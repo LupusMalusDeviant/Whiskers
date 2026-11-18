@@ -928,3 +928,38 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 - A tombstone for re-created local accounts (D11 b), unless chosen.
 - MCP or agent access to the handover (D10).
 - Changing the existing per-item takeovers. The rule-set observation for key-owned items in D12 is noted, not changed.
+
+## Amendment (implementation, 18 November 2026)
+
+Status: awaiting maintainer acceptance.
+
+The implementation follows the accepted contract, D11 option (c) included. It differs in these points:
+
+1. **Asynchronous reads.** `IAutomationHandover.UnusableOwners`, `OwnedBy` and `Check` are `UnusableOwnersAsync`,
+   `OwnedByAsync` and `CheckAsync`, because the stores they read (scheduler, webhooks, Git deploy) are asynchronous.
+   The rules are unchanged: anything the check cannot read or judge counts as refused.
+2. **No `[MutationTarget]` on the store methods.** The six store `HandOverAsync` and `HoldAsync` methods take no
+   target parameter. The decision's target is the old owner (`automation-owner`). A binding on each item id would never
+   match that target, so each method is pinned in `ResolvedTargetFlowTests.WithoutTargetParameter` instead. Each method
+   is a compare-and-set on the old owner, so it changes nothing that the decision did not cover.
+3. **One event result per item.** The event carries a summary
+   (`handover = { from: <id> (<state>, <level>), to: …, items: N }`, for a hold `hold = { owner, items }`) and one
+   result per item (target type `automation-item`, `kind, id, name, wasOn, status`). A single result is cut at the
+   audit's per-result length (300 characters), and a handover with many items would have lost most of its list. The
+   audit row as a whole stays bounded (4000 characters; its fields shrink to fit, R1-20). The operation log therefore
+   also names every item with its outcome.
+4. **Where the resume is recorded.** `IHandoverLedger.RecordResume` is called from the resume and switch-on methods of
+   the stores themselves (`HandoverNotes.RecordResumeInScope`), inside the decision, with the decision's principal and
+   operation id. It is not called from each page's delegate. This also covers the existing switches of scheduled tasks,
+   webhooks and AI triggers without a change to their pages. A takeover as today and a delete forget the entry
+   (`ForgetQuietly`).
+5. **Ledger pruning.** `Prune` runs with the audit retention in `MetricsCollectorService`. Besides unresumed entries
+   older than 30 days (D14), it removes `Pending` rows that are more than an hour old. A younger `Pending` row may belong
+   to a handover that is still running.
+6. **Notification lists.** `automation_handed_over` is in `AdministrativeEvents` and `UnsuppressibleEvents`, as the
+   suspension events are. Quiet hours never hold it (INV-04, R1-56).
+7. **Deleting an account shows what it owned.** After an account is deleted, *Settings → Local accounts* shows how many
+   automations the account owned and points to the handover. This is a read only, with no gateway call.
+
+Nothing else differs: the capabilities, levels, compositions, persisted fields, invariant text and §7 rows are as
+specified.

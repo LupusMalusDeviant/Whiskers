@@ -82,6 +82,9 @@ public static class MutationTargets
         "config" => "section",
         "account" => "account",
         "identity" => "binding",
+        // Contract 0020: the old owner of a handover (and of a hold), and a personal handover notice.
+        "automation-owner" => "fromOwner",
+        "handover-notice" => "notice",
         // Contract 0018 part E: MCP onboard_server names its server `server` (the Servers page passes `serverId`, which wins
         // when both are given; the tool runs on the decided target either way).
         "server" when capability.Id == "server.onboard" && !Has(args, "serverId") && Has(args, "server") => "server",
@@ -185,7 +188,8 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "webhook" => await WebhookAsync(request, capability, target),
             "volume" => await VolumeAsync(request, capability, target, ct),
             "log-alert" => await LogAlertAsync(capability, target),
-            "config" or "account" or "identity" or "whiskers" or "fleet" => await RecordAsync(request, capability, target, ct),
+            "config" or "account" or "identity" or "whiskers" or "fleet" or "automation-owner" or "handover-notice" =>
+                await RecordAsync(request, capability, target, ct),
             // Contract 0012 (D2): every kind has a branch; one without is refused, never passed through.
             _ => Refuse($"'{capability.Id}' acts on a '{capability.TargetKind}', which Whiskers cannot resolve."),
         };

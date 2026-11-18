@@ -589,6 +589,13 @@ public class MutationGatewayCoverageTests
         ("IWhitelistService.AddLocalAccountEntryAsync", "contract 0017 H2: lists a new local account in an enabled whitelist inside the decided account.create, pinned to LocalAccountService.CreateAsync"),
         ("IWhitelistService.RemoveLocalAccountEntryAsync", "contract 0017 H3: removes the entry H2 added inside the decided account.delete, pinned to LocalAccountService.DeleteAsync"),
         ("IWhitelistService.RestoreLocalAccountEntryAsync", "contract 0017 H3: puts back the entry of a deletion that failed, inside the decided account.delete, pinned to LocalAccountService.DeleteAsync"),
+        // Contract 0020: the handover ledger and notices — Whiskers' own bookkeeping, written only inside the
+        // automation.handover / account.create (hold) / resume decisions and by a run the gateway executed.
+        ("IHandoverLedger.RecordHandover", "contract 0020: the first-run ledger, written inside the automation.handover decision (and the account.create hold) before any item changes"),
+        ("IHandoverLedger.RecordResume", "contract 0020: the first-run ledger remembers the resumer, inside the resume's own decision"),
+        ("IHandoverLedger.ConsumeAfterExecuted", "contract 0020: removes a ledger entry after a run the gateway executed (bookkeeping of that run)"),
+        ("IHandoverLedger.Prune", "contract 0020 (D14): ledger retention, Whiskers' own housekeeping (the handover stays in the audit trail)"),
+        ("IHandoverNotices.RecordNotice", "contract 0020 (D13): the new owner's personal notice, written inside the executed automation.handover decision"),
         ("IIdentityBindingStore.RecordPendingAsync", "R1-27: a refused Google/OIDC sign-in records its binding request for a configured address — nobody exists yet the gateway could decide for; it grants nothing, pinned to FederatedAdmission"),
         ("IIdentityBindingStore.RecordSignInAsync", "R1-27: the day of an admitted sign-in on its binding (housekeeping of the admission), pinned to FederatedAdmission"),
         ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that are no entries, before every decided config.roles / config.whitelist write that adds or removes one and the wizard's first-admin writes (the start-up prune goes through RefreshAsync); it only takes access away"),

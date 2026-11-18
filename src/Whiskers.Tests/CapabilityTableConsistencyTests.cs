@@ -16,8 +16,9 @@ public class CapabilityTableConsistencyTests
     public void Every_mutating_capability_has_one_level_on_every_surface(string id)
     {
         var capability = Catalog.Find(id)!;
-        // R1-49: the own password change is the one read-level capability (own account only, UI only).
-        if (id == "account.password_change")
+        // R1-49: the own password change is a read-level capability (own account only, UI only); contract 0020: so is
+        // acknowledging one's own handover notice (own notices only, UI only).
+        if (id is "account.password_change" or "automation.handover_acknowledge")
         {
             Assert.Equal(McpPermissionLevels.Read, capability.RequiredLevel);
             Assert.Null(capability.McpTool);

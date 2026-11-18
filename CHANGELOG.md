@@ -2344,6 +2344,19 @@ accepted before the work started (#209). They come from the full review of the w
   nullable column `Approvals.DecidedVia`), the audit of the run names it next to the self-approval mark, and the
   Approvals history marks "in the dialog". MCP keys, the agent over MCP, AI triggers, the scheduler and webhooks are
   unchanged (§7.1–§7.4 of the product contract, A-01 included).
+- **Owner handover (contract 0020, INV-66).** *Settings → Automation owners* lists the owners who can no longer act
+  (account deleted, sign-in not allowed or not verified, key gone, level lost) with their scheduled tasks, webhooks,
+  Git deploy apps, AI triggers, endpoint checks and fleet features. An Admin hands them over to another person who can
+  act now (`automation.handover`, root-equivalent, UI only): a three-step dialog (items, new owner, summary) with
+  *Cancel* as the default. Items owned or created by an MCP key, items that cannot be judged and items the new owner
+  cannot hold are not handed over. Every handed-over item is off (a Git deploy app held, its webhook deployments
+  refused as `AutomationHeld`) until someone switches it on again; a resume never changes the owner, and the item's
+  first run names the handover and who resumed it. The new owner sees a notice until they acknowledge it
+  (`automation.handover_acknowledge`, read level); the Admins get one notification with counts only. Creating a local
+  account for an address that still owns automation holds those items first (`automation.hold`), so nothing runs
+  again without an Admin switching it on. An address that signs in again never gets its items back. New files in the
+  data directory: `automation-handovers.json` (entries age out after 30 days) and `automation-handover-notices.json`;
+  both are in the self-backup. New optional field `HeldReason` on Git deploy apps.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from
