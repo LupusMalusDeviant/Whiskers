@@ -9,7 +9,7 @@ rules that fire notifications when a pattern appears, the `/logs` page and the l
 | **Enabled by default** | yes |
 | **Toggle** | `Features:logmonitor:Enabled` (env `Features__logmonitor__Enabled=false`) — restart required |
 | **Depends on** | — (soft dependency on Core via `ILogMonitorService` / `NoopLogMonitorService`) |
-| **Nav** | `logs` — "Log-Suche" (group *Übersicht*) |
+| **Nav** | `logs` — "Log search" (group *Overview*) |
 | **MCP tools** | `search_logs`, `create_log_alert`, `list_log_alerts` |
 | **Services** | `ILogSearchService` + `ILogMonitorService` (hosted `LogMonitorService`) |
 

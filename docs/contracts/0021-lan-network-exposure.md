@@ -6,8 +6,8 @@ The direction was decided by the maintainer on 16 November 2026: a new exposure 
 table of [contract 0006](0006-exposure-changes.md). This contract fixes how it is built. It **amends contract 0006**
 (with contracts 0013 and 0017, which stay binding wherever this contract does not change them) and carries out the
 item that contract 0017 deferred as A3 ("`macvlan` / `ipvlan` networks … a decision of its own (1.1.0)").
-Contract 0006 itself is not edited by this draft; the text that is appended to it when this contract is built is
-given in § 10.
+Contract 0006 was not edited while this contract was a draft; the text in § 10 was appended to it when this
+contract was built.
 
 Scope:
 - **Protected areas, unchanged:** the auth middleware and its order, the OAuth whitelist, the mTLS/WireGuard layer
@@ -449,9 +449,9 @@ As of `ccd5137e`: `ComposeExposure.cs:7-29`, `:83-89`, `:419-497`, `:518-577`; `
 `GuardrailPolicy.cs:93`; `NetworkTools.cs:41-71`, `:100-115`; `NetworkOperations.cs:68-77`; `Networks.razor:106-110`,
 `:172-189`; `CapabilityCatalog.cs:246-248`; `IDockerService.cs:137-142`.
 
-## 10. Amendment text for contract 0006 (appended when built)
+## 10. Amendment text for contract 0006 (appended to it with the build, #244)
 
-> Amended by contract 0021 (1.1.0): the closed list of exposure kinds (Amendment 8, as extended by contract 0017) gains
+> Amended by contract 0021 (built for the next 1.0.0, not 1.1.0 as first planned): the closed list of exposure kinds (Amendment 8, as extended by contract 0017) gains
 > `LanNetwork` (class `host`, key the network's name on the host, value the driver): a service on a network whose
 > driver is `macvlan`, `ipvlan` or any driver other than `bridge`, `overlay`, `host`, `none` and `null` — declared in
 > the files (the implicit `default` network included), resolved by `docker compose config`, or read live for an

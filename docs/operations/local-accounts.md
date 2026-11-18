@@ -62,6 +62,12 @@ listed cannot sign in, just like a Google or OIDC user.
   [Identity bindings](identity-bindings.md)). If the whitelist cannot be written, the account is not created.
 - A **disabled** whitelist is not touched.
 - An address that was **listed before** the account was added stays a manual entry.
+- **Automations of a deleted account** (scheduled tasks, webhooks, AI triggers, endpoint checks, Git-deploy apps,
+  fleet features such as AutoPatch) stop:
+  they run as their owner, and the owner is gone. An Admin takes them over or hands them to another person in
+  *Settings*; they stay off (a Git-deploy app held) until someone switches them on, and the handover is audited with
+  every item. Signing in again with the same address, also through an identity provider, never gives them back
+  (contract 0020, INV-66).
 - **Deleting an account** removes the whitelist entry its creation added (with the identity bindings of that
   address), in the same audited `account.delete` operation. An address that was listed before stays. If an Admin
   removed or re-added the entry by hand in the meantime, the deletion leaves it: it is a manual entry now. If the entry

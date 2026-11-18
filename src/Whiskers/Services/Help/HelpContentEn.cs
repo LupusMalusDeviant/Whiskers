@@ -199,12 +199,26 @@ internal static class HelpContentEn
                     After that the server is **SSH-free** — and the bootstrap credentials are **removed
                     automatically**: the password from memory, the SSH key from disk. No standing access
                     is left behind.
+
+                    **A fresh Hetzner server** needs only **name and IP**: Whiskers finds the stored Hetzner
+                    API key by the server's exact IP, boots the rescue system, injects a one-time key, reads
+                    the real host key from disk and pins it, then onboards as above. This **reboots the server
+                    twice**, so it runs only for a server that was never onboarded; the dialog names the
+                    reboots before you confirm.
+
+                    **Host key**: on every path the server's SSH host key is pinned before the first command,
+                    recorded in the audit log and shown. A changed key is refused; only a signed-in admin can
+                    replace the pin. Over MCP the same is available as `add_server` and `onboard_server`
+                    (admin keys only; a rescue bootstrap always needs an approval).
                     """),
                 new("Cloud, Networks, Backups", """
                     - **Cloud**: power on/off, reboot, snapshots and metrics straight at the provider —
                       even when SSH/Docker happens to be unreachable. Works as soon as a provider + API key
                       is set per server.
-                    - **Networks**: create Docker networks, connect/disconnect containers.
+                    - **Networks**: create Docker networks, connect/disconnect containers. A **macvlan** or
+                      **ipvlan** network puts a container straight onto your LAN without a published port, so
+                      it counts as an exposure change: the agent and API keys need a confirmation, and a
+                      person's action sends a notification.
                     - **Backups**: volume backups as compressed archives; recommended before risky actions.
                     """),
             }),
@@ -410,6 +424,18 @@ internal static class HelpContentEn
                     action continues; if you reject, the agent aborts it cleanly. Expired requests lapse
                     automatically.
                     """),
+                new("Approving in the Dialog", """
+                    When **your own action** in the UI needs an approval (for example onboarding a server,
+                    restarting or updating a protected container, an mTLS step or a deploy that touches
+                    Whiskers itself), an admin gets a separate dialog: check the summary, then click
+                    **Approve and run** (armed after 1.5 seconds). The action continues as one operation
+                    with one audit trail; the audit notes that it was approved in the dialog.
+
+                    Closing the dialog leaves the approval **pending** on the Approvals page, but nothing runs
+                    once the dialog is gone: repeat the action. With **"require a second approver"** on, the
+                    dialog waits for another admin. Removing a container, restoring a self-backup and
+                    replacing a host key are still approved on the Approvals page.
+                    """),
             }),
 
         new("agent-history", "Agent History", "Policy",
@@ -477,6 +503,16 @@ internal static class HelpContentEn
                     Settings are writable by **admins** only.
                     """,
                     Shot("Settings page with groups and metric thresholds")),
+                new("Deleting an Account and Its Automations", """
+                    Scheduled tasks, webhooks, AI triggers, endpoint checks, Git deploy apps and features
+                    such as AutoPatch **run as the account that owns them**. When that account is deleted
+                    or loses its rights, they **stop**.
+
+                    Under **Settings > Automation owners** an admin takes them over or hands them to another
+                    person who holds the rights they need. They stay **off** (a Git deploy app stays held)
+                    until someone switches them on; the handover is recorded in the audit log, and the next
+                    run names it. Signing in again with the same address never gives them back.
+                    """),
             }),
 
         new("mcp", "MCP Server (AI Integration)", "Hub",

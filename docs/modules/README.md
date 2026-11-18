@@ -1,7 +1,7 @@
 # Module catalog
 
-Per-module reference for the module system — see [`src/Whiskers/Modules/README.md`](../../src/Whiskers/Modules/README.md)
-and the framework overview in [`src/Whiskers/Modules/README.md`](../../src/Whiskers/Modules/README.md).
+Per-module reference for the module system. The framework overview (module contract, registration, `ModuleGuard`) is
+in [`src/Whiskers/Modules/README.md`](../../src/Whiskers/Modules/README.md).
 
 Toggle a module with `Features:{id}:Enabled` (e.g. `Features__terminal__Enabled=false`), restart-only.
 
@@ -18,7 +18,7 @@ Toggle a module with `Features:{id}:Enabled` (e.g. `Features__terminal__Enabled=
 | [Cve](cve.md) | `cve` | on | `cves` | `get_cve_summary`, `list_cve_groups`, `get_container/server_cves` |
 | [CloudControl](cloud-control.md) | `cloud-control` | on | `cloud` | `list_cloud_servers`, `cloud_*`, `hetzner_*` |
 | [ImageUpdate](image-updates.md) | `image-updates` | on | — (Dashboard) | — (`check_updates`/`update_container` in Core `ContainerTools`) |
-| [Agent](agent.md) | `agent` | on | `agent`, `guardrails`, `approvals`, `ai-triggers` | `instruct_agent` |
+| [Agent](agent.md) | `agent` | on | `agent`, `ai-operations`, `ai-triggers` (guardrails and approvals are core) | `instruct_agent` |
 | [Dns](dns.md) | `dns` | on | — (Settings panel) | `list_dns_records`, `set_dns_record`, `delete_dns_record` |
 | [HelloWorld](../../src/Whiskers/Modules/HelloWorld/README.md) | `hello-world` | **off** | `hello-world` | — |
 

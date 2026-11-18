@@ -393,7 +393,7 @@ A source that starts with `.` or `~` cannot be resolved and counts as unanalysab
 8. Every Python call named above is replaced in 1.0.1.
 9. INV-40 stays ✅ with the precise wording of part J.
 
-## Amendment 2 — review round 2 (15 November 2026)
+## Amendment 2 — review round 2 (15 November 2026, accepted by the maintainer on 18 November 2026)
 
 Wording only: no new decision and no new protected area. Where it differs, this amendment wins over Amendment 1.
 
@@ -452,7 +452,7 @@ the change for both.
   still refused.
 - **J.** The INV-40 row drops "cannot hold a slot indefinitely".
 
-## Amendment 3 (2026-11-15, from the S2 review, rounds 2 to 4)
+## Amendment 3 (2026-11-15, from the S2 review, rounds 2 to 4; accepted by the maintainer on 18 November 2026)
 
 The reviews of the B implementation found bypasses through forms Docker accepts. Rounds 3 and 4 close them by class,
 not by instance, and fail closed. Where it differs, this amendment wins over Amendments 1 and 2 for part B.

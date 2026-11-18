@@ -8,7 +8,14 @@ What Whiskers does, grouped by area. Docker, Kubernetes and the rest are targets
 - **Code-enforced guardrails** — per-tool **Allow / Confirm / Block**, evaluated at the tool boundary (not in the
   prompt), "most-restrictive wins".
 - **Human-in-the-loop approvals** — a `Confirm` tool pauses execution until an authorized user approves the exact
-  action + parameters.
+  action + parameters. A signed-in Admin who hits an approval in the UI (onboarding, container actions, mTLS steps,
+  control-plane backups and deploys) can approve it in a separate dialog and the action continues; the
+  Approvals page, `RequireSecondApprover` and the audit apply unchanged (contract 0019).
+- **Automation owners** — scheduled tasks, webhooks, AI triggers, endpoint checks, Git-deploy apps and fleet features
+  such as AutoPatch run as the account that
+  owns them. When the owner can no longer run them (account deleted or disabled, authority lost), they stop; an Admin
+  takes them over or hands them to another person, and they stay off until someone switches them on. A returning
+  address never gets them back by signing in (contract 0020).
 - **Agent History** — every agent tool call recorded: actor/key, redacted parameters, decision, result, duration,
   target.
 - **Audit Log** — every user action recorded, with a filterable history.
@@ -21,6 +28,10 @@ Details: [governance.md](governance.md).
   stats, health reports; grouping by server, Compose project and free-form **tags**.
 - **Kubernetes** — add a k3s/Kubernetes cluster via kubeconfig (stored encrypted in the vault); pods appear next to
   containers with owner grouping, logs and scale/rollout actions.
+- **Adding servers** — enter name and IP; a fresh Hetzner server is bootstrapped through its rescue system with the
+  stored Hetzner token, its host key pinned from disk, and onboarded onto the mesh in one step. Over MCP `add_server` and
+  `onboard_server` (Admin only; a bootstrap always needs an approval). Other servers are onboarded with an SSH key
+  once (contract 0018).
 - **Host management** — firewall (ufw), Nginx sites, systemd services, SSL certificates and an integrated web terminal
   (host and container).
 - **Deployments** — a deploy form, Compose upload, curated app templates, image search across registries, and **git
@@ -31,12 +42,14 @@ Details: [governance.md](governance.md).
 A compose deployment that changes how a service is reachable or what it may do on its host is decided **as such**
 (contract 0006, INV-62): a published port, the host network, `privileged`, added capabilities, host namespaces
 (`pid`/`ipc`/`uts`/`userns_mode`/`cgroup`), devices, unconfined security options, device cgroup rules, a namespace
-shared with another container, route labels — Tailscale Funnel/serve (DockTail), every `traefik.` label except
+shared with another container, a LAN network (macvlan, ipvlan or any driver other than `bridge`, `host`, `none` and
+`overlay`, which puts a container on the LAN without a published port; contract 0021), route labels — Tailscale Funnel/serve (DockTail), every `traefik.` label except
 `traefik.enable=false`, caddy-docker-proxy (`ExposureLabelPrefixes` in the guardrail policy) — and proxies or tunnels
 without a label (contract 0013): a Traefik with `exposedByDefault` in the deployment or already on the host, cloudflared,
 Tailscale serve/Funnel; one whose configuration cannot be read refuses the plan. This holds for the Compose editor, the app
 templates, the Deploy page (form and compose tab), MCP `deploy_app` and `deploy_compose`, `set_container_env`, the container
-page's `.env` save, compose webhooks and Git deploy. The Deploy page's form and `deploy_app` are written as a compose project
+page's `.env` save, compose webhooks and Git deploy; creating a LAN network or connecting a container to one
+(Networks page, MCP `create_network` / `connect_container_to_network`) is decided the same way. The Deploy page's form and `deploy_app` are written as a compose project
 in `/opt/deployments/<name>` (contract 0013, U1): no deployment path creates a container outside the compose runner.
 
 - **Agents and API keys** need a confirmation for the classes in `ExposureConfirmClasses` (default `public` and
@@ -75,7 +88,8 @@ The remaining risks of this check are listed in the [README](../README.md#compos
   webhook's log and named in one combined `automation_refused` notification at the next start; until then a repeat
   is answered busy (or, before the stop completes, as a duplicate). One that was running when Whiskers stopped stays
   "interrupted" and does not run again.
-- **SSH host-key verification** (trust-on-first-use) on every ssh path.
+- **SSH host-key verification** on every ssh path: the first key is pinned, recorded in the audit and shown; a changed
+  key is refused, and only a signed-in Admin can replace a pin.
 - **Mesh + mTLS** steady-state operation (see [security-architecture.md](security-architecture.md)).
 
 ## Resilience

@@ -9,7 +9,7 @@ a target. The `/webhooks` management page, the `IWebhookService`, and (in Core) 
 | **Enabled by default** | yes |
 | **Toggle** | `Features:webhooks:Enabled` (env `Features__webhooks__Enabled=false`) — restart required |
 | **Depends on** | — (the Core inbound endpoint uses a Core no-op default) |
-| **Nav** | `webhooks` — "Webhooks" (group *Automatisierung*) |
+| **Nav** | `webhooks` — "Webhooks" (group *Automation*) |
 | **MCP tools** | — |
 | **Services** | `IWebhookService` |
 
@@ -20,6 +20,10 @@ inbound `POST /api/webhooks/{id}` answers **400** (`{"status":"rejected"}`) inst
 service) and resolves `IWebhookService` per request, so it can't be gated by the module the way a page is. A
 `NoopWebhookService` default keeps that resolution working when the module is off — its `AcceptAsync` rejects
 every delivery (400, not a 500 from an unresolved service).
+
+**Owner (R1-09, PC-D6).** A webhook stores its owner, and every delivery runs as that owner after re-checking its
+authority. When the owner can no longer run it, the webhook is suspended; an Admin takes it over or hands it to
+another person, and it stays off until someone switches it on (contract 0020, INV-66).
 
 **Secrets (R1-31).** A webhook's signing secret is shown once, when it is created or regenerated, and stored in the
 database encrypted with a key derived from the vault's (bound to the webhook). Creating a webhook or regenerating its

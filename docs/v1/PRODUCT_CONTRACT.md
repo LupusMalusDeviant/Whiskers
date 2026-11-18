@@ -5,6 +5,7 @@
 | Status | **Accepted** (WP11a). Decisions PC-D1…PC-D8 accepted by the maintainer on 2026-10-26. |
 | Baseline | `main` @ `498e70d` (0.15.0) + PR #41 (WP1) |
 | Date | 2026-10-26 |
+| Kept current | through contract 0021 (2026-11-18); the baseline above is where the audit started, not the code this text describes |
 | Companion | [`SECURITY_INVARIANTS.md`](SECURITY_INVARIANTS.md) (INV-xx), [`TECHNICAL_AUDIT.md`](TECHNICAL_AUDIT.md) (TA-xx), [`audit/B-mutations.md`](audit/B-mutations.md) (path inventory) |
 
 ## 1. The promise
