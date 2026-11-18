@@ -123,9 +123,16 @@ The procedure, its undo and the order of hosts are in
 ## Onboarding a new server
 
 Adding a server starts from a single SSH **bootstrap** connection (the only time SSH is used),
-launched straight from the add/edit-server dialog (**„Speichern & Onboarden"**). The bootstrap
+launched straight from the add/edit-server dialog (**Save & Onboard**). The bootstrap
 authenticates with **either an uploaded SSH key or a transient root/SSH password** (fed to `sshpass`
 via the `SSHPASS` env var; `ServerConfig.SshPassword` is `[JsonIgnore]`, so it lives in memory only).
+For a fresh Hetzner server, name and IP are enough (contract 0018): Whiskers finds the stored Hetzner token by the
+VM's exact IP, boots the rescue system, injects a one-time key, reads the real host key from disk and pins it, then
+boots the server normally (two reboots, so it runs only for a record with no pin and no mTLS state; over MCP it always
+needs an Admin's approval). On every onboarding path the host key is pinned before the first command, recorded in the
+audit and shown; a mismatch is refused, and only a signed-in Admin can replace a pin. Outside onboarding, a first
+SSH contact still trusts the first key (`accept-new`). MCP offers the same as `add_server` and
+`onboard_server` (Admin only; the in-process agent gets `add_server` only).
 The onboarding orchestrator then runs, end to end, with live progress in the UI:
 
 1. install Tailscale, bring it up, and **surface the interactive login link in the app** (the user

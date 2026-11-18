@@ -402,7 +402,7 @@ Deviations found while implementing; none weakens a decision.
   `ISshKeyLeases.AcquireAsync` are listed as write-named but not gated (`MutationGatewayCoverageTests`): the first is a
   storage step inside its caller's decision or the start-up migration, the second a short-lived copy with no state.
 
-## Amendment 2 (merge of main, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 2 (merge of main, 10 November 2026) — accepted by the maintainer on 18 November 2026
 
 - **A7 — Principal of the rotation row (contract 0014).** Since INV-01 every audit row carries a structured principal
   from a closed list. The row `vault.key_rotated` is written as the system component `system:vault-rotation` (actor

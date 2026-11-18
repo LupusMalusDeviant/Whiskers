@@ -9,7 +9,7 @@ Scheduler module) run them on a cron. The `/backups` page and `IVolumeBackupServ
 | **Enabled by default** | yes |
 | **Toggle** | `Features:volumebackups:Enabled` (env `Features__volumebackups__Enabled=false`) — restart required |
 | **Depends on** | — (consumed by the Scheduler module via a Core no-op default) |
-| **Nav** | `backups` — "Backups" (group *Infrastruktur*) |
+| **Nav** | `backups` — "Backups" (group *Infrastructure*) |
 | **MCP tools** | — |
 | **Services** | `IVolumeBackupService` |
 
@@ -20,6 +20,10 @@ tasks. A `NoopVolumeBackupService` default keeps that graph resolvable when this
 backup/restore operations **throw** instead of faking success, so a scheduled volume backup fails visibly
 rather than silently doing nothing. Scheduled `DbBackup` tasks are unaffected (they use the database service +
 host-file retention, not this module).
+
+**Control plane.** Backing up or restoring a volume of Whiskers itself (or of its database or socket proxy) raises an
+approval (INV-59); a signed-in Admin can approve it in the dialog (contract 0019). Deleting such a backup is still
+approved on the *Approvals* page only.
 
 No settings section (backups are created/managed on the `/backups` page).
 

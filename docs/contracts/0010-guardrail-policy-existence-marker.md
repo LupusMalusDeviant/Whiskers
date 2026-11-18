@@ -161,7 +161,7 @@ All four questions were decided as recommended.
 - **Q4 — Restore validator: unchanged**; the start fails closed and says why. Not chosen: a validator that refuses a
   SQLite archive whose database holds the marker but which holds no `guardrails.json`.
 
-## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 1 (implementation, 10 November 2026) — accepted by the maintainer on 18 November 2026
 
 Details the implementation had to fix; none relaxes a decision above.
 

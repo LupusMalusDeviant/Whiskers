@@ -1,6 +1,6 @@
 # Contributing to Whiskers
 
-Thanks for your interest in Whiskers! It's an early-stage (`0.x`) project, so issues, ideas
+Thanks for your interest in Whiskers! It is preparing its 1.0.0 release, and issues, ideas
 and pull requests are very welcome.
 
 ## Ground rules

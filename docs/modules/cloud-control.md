@@ -9,7 +9,7 @@ servers through provider APIs (Hetzner, Hostinger). The `/cloud` page + the clou
 | **Enabled by default** | yes |
 | **Toggle** | `Features:cloud-control:Enabled` (env `Features__cloud-control__Enabled=false`) — restart required |
 | **Depends on** | — |
-| **Nav** | `cloud` — "Cloud" (group *Infrastruktur*) |
+| **Nav** | `cloud` — "Cloud" (group *Infrastructure*) |
 | **MCP tools** | `list_cloud_servers`, `cloud_status/reboot/shutdown/power_on/hard_reset/metrics/create_snapshot` (`CloudTools`) + `hetzner_*` (`HetznerTools`) |
 | **Services** | `ICloudControlService` (+ provider clients `IHetznerService`, `IHostingerService`) |
 
@@ -20,6 +20,13 @@ Credentials: per-server cloud provider + API key are configured under *Server* (
 R1-29 the API key is stored encrypted in the vault (saving one needs a usable `VAULT_KEY`); servers.json only names
 its vault key (`CloudKeyRef`). A plaintext key from before is moved into the vault at the first start with a usable
 vault; a key kept in a disabled or locked vault makes the cloud tools fail with that reason.
+
+**Onboarding (contract 0018).** The one-step onboarding of a fresh Hetzner server reuses a stored per-server Hetzner
+key by reference: Whiskers finds it by the VM's exact public IP (or the caller names it with `cloudCredentialFrom`), and
+no secret is copied. The record is bound to the VM id (`CloudServerId`) at registration or at the first bootstrap,
+and the rescue bootstrap acts only on that id; the other cloud tools keep
+their IP-then-name resolution. The MCP tools `add_server` / `onboard_server` are Admin only and live in the Core
+server tools, not in this module.
 
 **Deferred:** the §3.6 C10 `ICloudProvider` seam (Hetzner/Hostinger as pluggable providers behind a common
 contract) is a separate refactor of destructive power/snapshot dispatch — this module PR is a byte-identical

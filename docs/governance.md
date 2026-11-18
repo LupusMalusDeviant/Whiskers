@@ -90,5 +90,12 @@ talk its way past it.
 | Signed-in web user calling `/mcp` | ✅ by role (Viewer → Read, Operator → Write, Admin → Admin) | ✅ same as above | Agent History |
 | In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses the run until a human approves the exact action + parameters | Agent History |
 
-Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs. The guardrail
+Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs. When a
+signed-in Admin's own action in the UI raises an approval (re-onboarding a server, container start / stop / restart / update /
+rollback, the mTLS steps, control-plane backups, queries and deploys), Whiskers opens a separate dialog: its "Approve
+and run" button is armed after 1.5 seconds, the same rules as on the page apply (with `RequireSecondApprover` the
+dialog waits for a second Admin), and the original operation continues with the same audit chain. Closing the dialog
+leaves the approval pending, and nothing runs after it is gone. The audit records the channel (`page`, `dialog`) and a
+self-approval (contract 0019). Irreversible actions (container remove, self-backup restore, volume-backup delete,
+retiring the shared mTLS client) and replacing a host-key pin are still approved on the page only. The guardrail
 engine and approvals are core: they also govern direct MCP calls when the agent module is switched off.

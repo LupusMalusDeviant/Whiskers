@@ -10,7 +10,7 @@ configurable severity. The `/cves` page + the CVE MCP tools.
 | **Enabled by default** | yes |
 | **Toggle** | `Features:cve:Enabled` (env `Features__cve__Enabled=false`) — restart required |
 | **Depends on** | — (soft dependency on Core via no-op defaults; uses `INotificationService` which has its own Core no-op) |
-| **Nav** | `cves` — "CVE-Monitor" (group *Übersicht*) |
+| **Nav** | `cves` — "CVE monitor" (group *Overview*) |
 | **MCP tools** | `get_cve_summary`, `list_cve_groups`, `get_container_cves`, `get_server_cves` (dedicated `CveTools`) |
 | **Services** | `ICveFindingsStore`, `ICveAgeStore`, `IOsCveScanner`, `ITrivyScanner`, hosted `ICveMonitorService` |
 

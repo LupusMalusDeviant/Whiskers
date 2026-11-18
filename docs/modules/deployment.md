@@ -11,7 +11,7 @@ Hub / GHCR / Harbor).
 | **Enabled by default** | yes |
 | **Toggle** | `Features:deployment:Enabled` (env `Features__deployment__Enabled=false`) — restart required |
 | **Depends on** | — (the AppStore page uses Core no-op defaults) |
-| **Nav** | `deploy` — "Bereitstellen", `apps` — "App Store" (group *Deployment*) |
+| **Nav** | `deploy` — "Deploy", `apps` — "App store" (group *Deployment*) |
 | **MCP tools** | — of its own; `deploy_app`/`deploy_compose` stay in the Core, mixed `ContainerTools` |
 | **Services** | `ITemplateService` + `IImageSearchService` (+ 3 providers); the form's mapper `DeploymentCompose` and `DeploymentPathPlanner` need no registration |
 
@@ -20,6 +20,14 @@ When **disabled**: the `deploy` + `apps` nav entries disappear and both pages sh
 Features:deployment:Enabled=true …)" — by the tool and by the gateway's target resolution, on every surface
 (`DeploymentModuleGate`). `deploy_compose` and the `/compose` editor stay Core and keep working. Template lookups /
 image searches return empty.
+
+**Exposure and approvals.** Every deploy path is decided by the compose runner's exposure check (contract 0006,
+INV-62): exposures of the classes in `ExposureConfirmClasses` (default `public` and `host`: route labels to the
+internet, the host network, host namespaces and privileges, LAN networks — macvlan, ipvlan and every driver other than
+`bridge`, `host`, `none`, `overlay`, `null`; contract 0021) need a confirmation for an agent or key; for a person, a
+`public` or `host` exposure sends an `exposure_change` notification. A deploy that touches a protected container
+raises an approval; a signed-in Admin can approve it in the dialog (contract 0019, wave 2). Git-deploy apps have an
+owner; a handed-over app is held until it is resumed (saved on the Git deploy page; contract 0020).
 
 **`compose` stays Core:** the `/compose` editor uses only Docker + host-command services, so it isn't part of
 this module. `ImageUpdate`/`AutoUpdate` are also out of scope (separate concerns).

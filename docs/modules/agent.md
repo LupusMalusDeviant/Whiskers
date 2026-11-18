@@ -8,19 +8,24 @@ detail in [`src/Whiskers/Modules/Agent/README.md`](../../src/Whiskers/Modules/Ag
 | **Id** | `agent` |
 | **Default** | on |
 | **Toggle** | `Features:agent:Enabled` (env `Features__agent__Enabled=false`), restart-only |
-| **Nav** | `agent`, `guardrails`, `approvals`, `ai-triggers` (Automatisierung) |
+| **Nav** | `agent`, `ai-operations`, `ai-triggers` (Automation group) |
 | **MCP tools** | `instruct_agent` (`AgentTools`) |
 
 ## What it owns
 
-The multi-provider agent, its inescapable guardrails, human approvals, the read-only AI-chat advisor widget,
-and the event-driven AI triggers — the DI wiring for ~17 services + `AiChat` + the two `IInitializable`
-warm-ups (`GuardrailStore` 80, `AiTriggerStore` 90), all moved **verbatim** from `Program.cs`. The service
-implementations stay under `Services/Agent/` + `Services/AiChat/`.
+The multi-provider agent, the read-only AI-chat advisor widget and the event-driven AI triggers: the DI wiring
+for the agent services + `AiChat` + the `AiTriggerStore` warm-up (order 90). The service implementations stay under
+`Services/Agent/` + `Services/AiChat/`.
+
+The guardrail engine, the approvals and their pages (`guardrails`, `approvals`) are **core** since ADR-0005 step 2.1
+(PRODUCT_CONTRACT PC-D8): they govern direct MCP calls when this module is off, and the `GuardrailStore` warm-up (80)
+is core too. AI triggers have an owner like every automation; when the owner can no longer run them, an Admin takes
+them over or hands them on (contract 0020). The agent gets `add_server` but not `onboard_server` (contract 0018), and
+a LAN network is a `host`-class exposure and needs a confirmation like the host network (contract 0021).
 
 ## When disabled
 
-- Agent/AI-chat services unregistered; the four pages show the `ModuleGuard` "disabled" notice (their `*View`
+- Agent/AI-chat services unregistered; the module's pages show the `ModuleGuard` "disabled" notice (their `*View`
   is never instantiated, so no `@inject` DI error).
 - The global `<AiChat/>` widget is gated out of `MainLayout` app-wide; the `AI-Chat (Berater)` `Settings.razor`
   panel is gated too.
