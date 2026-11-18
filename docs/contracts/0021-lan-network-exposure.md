@@ -462,7 +462,7 @@ As of `ccd5137e`: `ComposeExposure.cs:7-29`, `:83-89`, `:419-497`, `:518-577`; `
 
 ## Amendment (implementation, 18 November 2026)
 
-Status: **awaiting maintainer acceptance.** What the implementation does where this contract is silent, or where it
+Status: **accepted by the maintainer on 18 November 2026.** What the implementation does where this contract is silent, or where it
 had to be read one way; nothing here weakens a rule of §§ 1–3.
 
 1. **Line references and totals, re-verified at `fcfa43cf`** (main after contracts 0017–0020). Unchanged: `ComposeExposure.cs:7-29`,
