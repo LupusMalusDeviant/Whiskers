@@ -33,4 +33,4 @@ real services win by last-registration when enabled. The template/search reads r
 [`../../Services/Templates/`](../../Services/Templates/) and
 [`../../Services/ImageSearch/`](../../Services/ImageSearch/).
 
-See [`docs/modules/deployment.md`](../../../../docs/modules/deployment.md).
+See [`docs/guide/modules/deployment.md`](../../../../docs/guide/modules/deployment.md).

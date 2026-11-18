@@ -1682,7 +1682,7 @@ public sealed class PerHostCredentialTests
     [Fact]
     public void The_architecture_and_the_invariant_document_the_blast_radius_per_host_after_migration()
     {
-        var architecture = DeploymentScripts.ReadRepoFile("docs", "ARCHITECTURE.md");
+        var architecture = DeploymentScripts.ReadRepoFile("docs", "architecture", "ARCHITECTURE.md");
         Assert.Contains("## Blast radius", architecture);
         Assert.Contains("whiskers-client-", architecture);
 

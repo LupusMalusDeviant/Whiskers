@@ -26,4 +26,4 @@ that injects `IVolumeBackupService` lives in the child
 [`VolumeBackupsView.razor`](../../Components/Pages/VolumeBackupsView.razor). Service code stays in
 [`../../Services/Backup/`](../../Services/Backup/).
 
-See [`docs/modules/volumebackups.md`](../../../../docs/modules/volumebackups.md).
+See [`docs/guide/modules/volumebackups.md`](../../../../docs/guide/modules/volumebackups.md).

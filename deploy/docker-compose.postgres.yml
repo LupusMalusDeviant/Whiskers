@@ -7,7 +7,7 @@
 # SQLite stays the zero-config default whenever this overlay is NOT used.
 # Set WHISKERS_DB_PASSWORD in your .env; the other DB_* values have defaults. A ';' in it is fine; put it in single
 # quotes in .env when it starts or ends with a space or holds a '$' (compose trims and interpolates unquoted values).
-# See docs/adr/0004-postgres-provider-support.md for the provider architecture.
+# See docs/architecture/adr/0004-postgres-provider-support.md for the provider architecture.
 #
 # PostgreSQL 18. Coming from the PostgreSQL 17 overlay (volume whiskers-db-data)? Follow
 # docs/operations/postgres-18-upgrade.md. Until you do, db-upgrade-guard keeps the database (and so Whiskers) from

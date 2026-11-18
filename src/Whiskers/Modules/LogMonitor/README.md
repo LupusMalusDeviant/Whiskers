@@ -32,4 +32,4 @@ and never hits a missing-service DI error. Service code stays in
 even when the module is off (fails at call time, never at boot) — the AgentToolRegistry→ModuleRegistry change
 is a separate roadmap item.
 
-See [`docs/modules/logmonitor.md`](../../../../docs/modules/logmonitor.md).
+See [`docs/guide/modules/logmonitor.md`](../../../../docs/guide/modules/logmonitor.md).

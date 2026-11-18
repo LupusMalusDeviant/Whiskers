@@ -34,4 +34,4 @@ return empty.)
 `IWebhookService` lives in the child [`WebhooksView.razor`](../../Components/Pages/WebhooksView.razor). Service
 code stays in [`../../Services/Webhooks/`](../../Services/Webhooks/).
 
-See [`docs/modules/webhooks.md`](../../../../docs/modules/webhooks.md).
+See [`docs/guide/modules/webhooks.md`](../../../../docs/guide/modules/webhooks.md).

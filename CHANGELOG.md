@@ -190,7 +190,7 @@ Earlier changes:
   entry is still one self-contained file (WAL folded in, rollback journal); it is no longer compacted, which gzip
   absorbs.
 
-- **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
+- **CodeQL triage before 1.0 (`docs/reference/history/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
   one line (no value can forge a log line), and an account's address never reaches the application log: the
   redacting logger writes it as a per-process pseudonym `[account:1a2b3c4d]` (contract 0003). The audit rows in the
   database are unchanged and keep the address. A database password detected from a container's environment no
@@ -292,7 +292,7 @@ Earlier changes:
   `Automation`; expired or cancelled approvals name `system:approval-expiry` instead of `system`.
 - **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
   in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
-  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/architecture/security-architecture.md` and
   `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
   fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
   architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
@@ -419,9 +419,11 @@ Earlier changes:
   `checks.pause`. "Scan started" is shown only for a scan that started; with the CVE module off a manual scan is
   recorded as not run.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
-  settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
-  `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
-  `security-architecture.md`, `screenshots.md`, `roadmap.md` and `project-structure.md` (indexed in `docs/README.md`).
+  settings and a summary of the accepted limits stay in it; it points onward for the rest. The docs are sorted by
+  reader: `docs/guide/` (features, governance, MCP, agent, modules), `docs/operations/` (installation with `docker run`
+  and image verification, configuration, the production checklist with the accepted limits and the compose remaining
+  risks), `docs/architecture/` (architecture, security architecture, ADRs) and `docs/reference/history/`, indexed in
+  `docs/README.md`. Links to the old `docs/*.md` paths no longer resolve.
 - **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
   publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
   weakens a security option, shares a namespace with another container or carries a route label (Tailscale
@@ -2489,7 +2491,7 @@ Direct MCP tool calls now pass the same guardrails as the agent. The server ship
   protects `whiskers*` as well as `serverwatch*`. Names that existing installs depend on — the compose
   service/volume `serverwatch`, Prometheus `serverwatch_*` metrics, the Data Protection application name,
   the mTLS client CN, the Trivy cache volume and the host-shell label — stay unchanged on purpose.
-- **Architecture rules moved to `docs/ARCHITECTURE.md`.** Application shape, security-critical areas,
+- **Architecture rules moved to `docs/architecture/ARCHITECTURE.md`.** Application shape, security-critical areas,
   protected layers and engineering rules now live there. `CLAUDE.md` is no longer tracked.
 
 ### Fixed
@@ -2738,7 +2740,7 @@ success without checking, filters that did not filter and pages that crashed on 
   connectors read the tool list once, at session start.
 - **Every MCP tool now declares its permission level in its own source**, via `[McpToolLevel]` next to
   `[McpServerTool]`, and the served surface is pinned in a generated
-  [tool catalog](docs/mcp-tool-catalog.md). Levels were carried over unchanged — this adds enforcement, not
+  [tool catalog](docs/guide/mcp-tool-catalog.md). Levels were carried over unchanged — this adds enforcement, not
   policy.
 - **A server that stops answering now raises an alert.** A host dropping off the fleet was silent: the
   dashboard marked it unreachable, but nothing was sent — and every container alert and log-alert rule
@@ -2763,7 +2765,7 @@ success without checking, filters that did not filter and pages that crashed on 
   reaches the Docker calls *and* the multiplexed read loop, so an expired deadline ends the request on the
   server too. Two more places bounded a per-server call the same abandoning way — the fleet-wide container
   listing and the system-info probe, both of which run for every server on every cycle — and were converted
-  as well. Full analysis in [the incident report](docs/reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md);
+  as well. Full analysis in [the incident report](docs/reference/history/2026-08-26-logmonitor-dockerd-cpu-incident.md);
   the invariants that would have caught it now run in the test suite.
 - **Nothing limited how much Whiskers asked of one server.** Five background loops each policed only
   themselves with their own timeout; the server sees the sum. There is now a per-server load budget at the
@@ -2958,4 +2960,4 @@ scanned by the release pipeline from this version on.
 Pre-publication development (dashboard, MCP server + acting agent with guardrails and
 approvals, CVE scanning with dedup/age tracking, zero-SSH mesh+mTLS onboarding, cloud
 control for Hetzner/Hostinger, terminal, deployments, notifications, audit log, …).
-History: `git log v0.12.0` and `docs/reviews/`.
+History: `git log v0.12.0` and `docs/reference/history/`.

@@ -1,6 +1,6 @@
 # Services/Mutations
 
-The **Mutation Gateway** ([ADR-0005](../../../../docs/adr/0005-mutation-gateway.md)): the one path every
+The **Mutation Gateway** ([ADR-0005](../../../../docs/architecture/adr/0005-mutation-gateway.md)): the one path every
 infrastructure mutation is meant to take. An entry point describes the mutation as a `MutationRequest`; the gateway
 decides, executes the supplied delegate, verifies and records.
 

@@ -35,7 +35,7 @@ health check and automatic rollback, restoring a volume overwrites live data, an
 notifications can flood the one channel that has to stay trustworthy.
 
 Every tool declares its permission level via `[McpToolLevel]` and appears in
-[`docs/mcp-tool-catalog.md`](../../../../docs/mcp-tool-catalog.md); both are build-enforced — see
+[`docs/guide/mcp-tool-catalog.md`](../../../../docs/guide/mcp-tool-catalog.md); both are build-enforced — see
 [`../README.md`](../README.md).
 
 ## Behaviour notes

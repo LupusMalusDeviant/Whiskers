@@ -1074,7 +1074,7 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > runtime initializes in a throwaway container without credentials or host network (iptables changes netfilter,
 > `tailscaled` creates `tailscale0`, runs its router in iptables mode and waits for a login); every pinned base digest
 > is a multi-arch index with linux/amd64 and linux/arm64; the image boots to `/healthz`. The privileged, root full
-> profile is unchanged and stays the documented intent (`docs/container-hardening.md`); the hardened profile is the
+> profile is unchanged and stays the documented intent (`docs/operations/container-hardening.md`); the hardened profile is the
 > non-root alternative. Not pinned: packages from the Ubuntu, Tailscale and PostgreSQL apt repositories (their
 > current version at build time); the compose files' floating tags (`postgres:17-alpine`, telemetry versions) are
 > covered by Dependabot but not digest-pinned.
@@ -1575,7 +1575,7 @@ inventory beyond the existing security-update findings; GPU readings.
 
 - **PocketBase and statistics stored as one JSON field:** Whiskers keeps typed EF Core entities with paired migrations
   (ADR-0004).
-- **SSH as a metrics channel:** contradicts the move away from standing SSH keys to Tailscale + socket-proxy/mTLS (`docs/ARCHITECTURE.md`, `docs/ssh-haertung.md`).
+- **SSH as a metrics channel:** contradicts the move away from standing SSH keys to Tailscale + socket-proxy/mTLS (`docs/architecture/ARCHITECTURE.md`, `docs/reference/history/ssh-hardening-2026-10.md`).
 - **An own agent with access to the Docker socket:** a second attack surface beside docker-socket-proxy and mTLS
   (protected area); `:ro` on the socket protects nothing.
 - **Agent self-update:** would bypass the Mutation Gateway and signature checks.

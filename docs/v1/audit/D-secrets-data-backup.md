@@ -1,3 +1,5 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit D: Secrets, Vault, Persistence, Migrations, Backup/Restore, Update/Rollback, Configuration
 
 Repo: repository @ `498e70d`. Read-only audit; evidence was checked against the source. Anything I could not confirm from code is marked **(uncertain)**.
@@ -255,7 +257,7 @@ Restore validates archive containment (no zip-slip, no symlinks) but has no entr
 - **Evidence:**
   - `Services/Vault/README.md` links `../ConfigExport/`, which does not exist.
   - `Services/Backup/README.md` documents only volume backups, not self-backup, the cipher or restore.
-  - `docs/adr/0002-…md`: the status says "UMGESETZT" (implemented) while the Decision section still says "Option 2 — zurückgestellt" (deferred).
+  - `docs/architecture/adr/0002-…md`: the status says "UMGESETZT" (implemented) while the Decision section still says "Option 2 — zurückgestellt" (deferred).
   - The comment in `VaultService.cs:13` hard-codes `/app/data`.
 - **Recommendation:** Update the READMEs and ADR-0002. Add an operator doc covering what is and is not encrypted (see the inventory above).
 - **Status (R1-51):** fixed. The Vault README links the self-backup instead of the removed `ConfigExport/`; the Backup

@@ -191,7 +191,7 @@ removed. The tool description keeps the promise "sensitive values are masked", a
 - `SECURITY.md`:
   - the two contradictions are corrected (rotation at line 133, plaintext at line 208);
   - `Auth__LocalLogin__Enabled` is described as what it does: it hides the form. This text also changes in
-    `docs/configuration.md` and `.env.example`.
+    `docs/operations/configuration.md` and `.env.example`.
 
 ## Plan triage
 

@@ -171,7 +171,7 @@ to run while any `ServerConfig` still points to the shared paths.
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md` PKI section: one client identity per host, and the blast radius after R1-44.
+- `docs/architecture/ARCHITECTURE.md` PKI section: one client identity per host, and the blast radius after R1-44.
 - `docs/v1/SECURITY_INVARIANTS.md` INV-58 set to ✅, with its tests.
 - `Services/Certificates/README.md`, `deploy/README.md` (ghostunnel flags).
 - An operator guide, "Migrating to per-host client credentials", covering order, undo, and how to verify per host.

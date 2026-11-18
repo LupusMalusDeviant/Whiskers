@@ -9,7 +9,7 @@ using Whiskers.Services.Server;
 
 namespace Whiskers.Tests;
 
-/// <summary>CodeQL #23–#26 (<c>cs/cleartext-storage-of-sensitive-information</c>, docs/security/codeql-triage-2026-11.md):
+/// <summary>CodeQL #23–#26 (<c>cs/cleartext-storage-of-sensitive-information</c>, docs/reference/history/codeql-triage-2026-11.md):
 /// a database password never stands in a host command — not in its text, which is logged and audited, and not in an
 /// argv the host's or the container's process list shows — whatever its length and characters. The command names the
 /// client's variable (<c>docker exec -e PGPASSWORD</c>); the executor delivers the value beside it: the environment of

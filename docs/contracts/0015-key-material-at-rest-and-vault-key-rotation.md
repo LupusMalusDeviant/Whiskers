@@ -414,5 +414,5 @@ Deviations found while implementing; none weakens a decision.
 - **A9 — Readiness lines (contract 0011).** The two lines of this contract have the ids `keys-sealed` and
   `vault-rotation`; their texts are `Readiness_keysSealed_*` / `Readiness_vaultRotation_*` (and
   `Readiness_vault_WrongAfterRotation`) in `SharedResource.resx` / `.de.resx`. The vault line now says the keys are
-  sealed; README, SECURITY.md, `docs/security-architecture.md` and the production checklist say the same, and
+  sealed; README, SECURITY.md, `docs/architecture/security-architecture.md` and the production checklist say the same, and
   `CLAIMS.md` registers it (RM-07, SA-10, PC-13 changed; SEC-29 to SEC-32 new).

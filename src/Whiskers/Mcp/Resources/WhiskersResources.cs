@@ -10,7 +10,7 @@ namespace Whiskers.Mcp.Resources;
 
 /// <summary>
 /// Read-only MCP resources a client can attach as context. Both describe the MCP surface itself and contain no
-/// secrets: the tool catalog is the same information as <c>docs/mcp-tool-catalog.md</c>, and the permissions
+/// secrets: the tool catalog is the same information as <c>docs/guide/mcp-tool-catalog.md</c>, and the permissions
 /// resource only tells callers what they themselves may do. Neither exposes infrastructure data — that stays
 /// behind the scoped, guardrailed tools.
 /// </summary>

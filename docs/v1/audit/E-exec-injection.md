@@ -1,9 +1,11 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit E — Command execution, injection surfaces, remote-access transports
 
 Scope: `HostCommandExecutor` + callers, `ShellUtils`, `Services/Docker/**`, `Onboarding/**`,
 `Certificates/**`, `Deployment` + `GitDeploy`, `Workloads/Kubernetes`, `Database`, `Terminal` + Hubs,
 firewall/nginx/systemd/SSL, `Dns`, `Registries`/`ImageSearch`, `Notifications`/`Webhooks`, `Cve/TrivyScanner`,
-`Vpn`, `docs/ssh-haertung.md`, `docs/adr/0002`.
+`Vpn`, `docs/reference/history/ssh-hardening-2026-10.md`, `docs/architecture/adr/0002`.
 
 READ-ONLY review. No repository files were modified.
 
@@ -197,7 +199,7 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   (`SshHostKeyPolicy.Options`, SshHostKeyPolicy.cs) applied at all three ssh spawn sites (tunnel, executor,
   terminal): `StrictHostKeyChecking=accept-new` (TOFU, not disabled) with a persistent `UserKnownHostsFile`
   under the data dir. `BatchMode=yes`, `ExitOnForwardFailure`, keepalives on the tunnel (SshTunnelManager.cs:118-131).
-  TOFU (not full pre-seeded verification) is an accepted, documented trade-off in `docs/adr/0002` — this matches.
+  TOFU (not full pre-seeded verification) is an accepted, documented trade-off in `docs/architecture/adr/0002` — this matches.
 - **Name/argument validators that DO prevent option injection** — systemd service (SystemdService.cs:22,124),
   SSL cert (SslCertService.cs:28,154), firewall port/proto/action/CIDR allow-lists (FirewallService.cs:389-407),
   compose project name incl. explicit `..` rejection (McpInputValidation.cs:14-18).

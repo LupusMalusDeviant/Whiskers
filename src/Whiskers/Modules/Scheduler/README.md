@@ -31,4 +31,4 @@ scheduler tools by assembly reflection, so it lists them even when the module is
 cleanly at call time (never at boot). Filtering the catalog by `IModuleRegistry` is a separate roadmap item
 (RoadToSAP §2.3), not this PR.
 
-See [`docs/modules/scheduler.md`](../../../../docs/modules/scheduler.md).
+See [`docs/guide/modules/scheduler.md`](../../../../docs/guide/modules/scheduler.md).
