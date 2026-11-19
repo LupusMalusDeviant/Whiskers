@@ -5,39 +5,56 @@ Canonical product screenshots, mapped to the three pillars of the positioning
 in [docs/guide/screenshots.md](../guide/screenshots.md) and on the project website.
 
 Capture conventions: **1440×900**, device-scale 1, **English UI** (the product default), dark theme,
-against the anonymized demo dataset from [demo-script.md](demo-script.md).
+against an isolated demo Docker daemon that runs only demo containers.
 
 | File | Route | Pillar | Shows |
 |---|---|---|---|
-| `governance-guardrails.png` | `/guardrails` | Enforced governance | Code-enforced, non-bypassable policy at the tool boundary: read-only kill switch, max autonomous level, protected resources, forbidden argument patterns. |
-| `governance-agent-history.png` | `/agent-history` | Controlled access | Every agent/MCP tool call — actor, level (read/write/admin), verdict (Allow/Confirm/Deny), duration, status — including an admin call denied by policy. |
-| `governance-audit-log.png` | `/audit-log` | Complete accountability | The approval + execution trail: `approval.granted`, `guardrail.denied`, `container.restart`. |
-| `governance-ai-operations.png` | `/ai-operations` | Governed setup | Connect a client, mint a least-privilege read-only key, activate a starter guardrail preset. |
-| `dashboard-overview.png` | `/` | Reach | Container overview (total/running/stopped/unhealthy) + a connected Docker host with live CPU/memory charts. |
+| `governance-ai-operations.png` | `/ai-operations` | Governed setup | Connect a client, mint a least-privilege key, activate a starter guardrail preset. |
+| `governance-guardrails.png` | `/guardrails` | Enforced governance | Code-enforced policy at the tool boundary: read-only kill switch, max autonomous level, protected resources, forbidden argument patterns. |
+| `governance-approvals.png` | `/approvals` | Controlled access | A *pending* `update_container` (write) from the `Demo agent` key, held by the *Safe operations* preset, with risk, target and redacted parameters; below it the approved `restart_container`. |
+| `governance-agent-history.png` | `/agent-history` | Controlled access | Every MCP tool call — actor, level (read/write/admin), verdict (Allow/Confirm/Deny), duration, status — including an admin call denied by policy. |
+| `governance-audit-log.png` | `/audit-log` | Complete accountability | The approval + execution trail: approval requested/granted, guardrail denied, container restarted. |
+| `dashboard-overview.png` | `/` | Reach | Container overview (total/running/stopped/unhealthy) and the expanded summary of the local Docker host. |
+| `topology.png` | `/topology` | Reach | The containers of the local host as a graph. |
 
 ## Reproducing
 
-1. Seed the demo dataset and boot the app — see [demo-script.md](demo-script.md).
-2. Set the UI language to English via the top-right switcher.
-3. For the static pages (`/guardrails`, `/agent-history`, `/audit-log`, `/ai-operations`), a
-   server-rendered capture at 1440×900 is sufficient — Blazor Server prerenders the content.
-4. For the **dashboard**, a live circuit is needed for the host to report as connected, so drive a
-   real browser (the shipped headless Chrome via CDP works): navigate to `/`, wait for the local host
-   to show connected, expand its summary panel, and capture the top region. The per-container list is
-   **not** captured — it would show real container names on the capture host.
+The history on these images is not seeded: it is produced by real MCP calls against a fresh instance,
+so every row went through the guardrails exactly as it would in production.
+
+1. **Demo Docker daemon.** Start a throwaway `docker:29-dind` container with its API on
+   `tcp://127.0.0.1:23750` and load demo images into it (`nginx:alpine`, `busybox`, `postgres:17-alpine`,
+   `alpine`). Create the containers `web`, `cache`, `postgres`, `worker` and `payments-api`, the last one
+   with a healthcheck that always fails. Never point a capture instance at a daemon that runs anything
+   else.
+2. **Fresh instance.** Boot Whiskers with an empty `WHISKERS_DATA_DIR`, `Docker__SocketPath` set to the
+   demo daemon, and a seeded local admin (`WHISKERS_ADMIN_EMAIL=admin@acme.example`,
+   `WHISKERS_ADMIN_PASSWORD_FILE`, `VAULT_KEY_FILE`, all throwaway).
+3. **Browser.** Drive headless Chrome over CDP with the viewport fixed at 1440×900, device-scale 1 and
+   `prefers-color-scheme: dark`. Log in as the admin.
+4. **Story**, in this order:
+   1. Capture `/ai-operations`, then activate the *Safe operations* preset.
+   2. Settings → MCP permissions: create the key `Demo agent` (level Admin; the preset decides what runs).
+   3. With that key over `/mcp`: `list_containers`, `get_container_logs` and `get_container_metrics` for
+      `payments-api` (read, allowed), then `restart_container` (write, held for confirmation).
+   4. Approve it under `/approvals`, call `restart_container` again (runs), then
+      `get_container_details`.
+   5. `execute_command` with `docker system prune -af --volumes` (admin, denied), then
+      `update_container` for `web` (write, left pending).
+5. Capture `/approvals`, `/agent-history`, `/audit-log`, `/guardrails`, `/topology`, and `/` with the
+   local host's summary expanded.
 
 ## Anonymization
 
-- Governance history is fully synthetic (`Whiskers Agent`, `admin@acme.example`, `prod-eu-*`,
-  `staging-1`, `payments-api`, `orders`, `web`). No real hosts, users or secrets.
-- The dashboard shows only the connected-host **summary** (OS / CPU / memory / charts). Never capture
-  the container list on a machine that also runs unrelated containers.
+- Only demo actors and resources appear: `Demo agent`, `admin@acme.example`, `local`, and the five demo
+  containers. No real hosts, users or secrets.
+- The host summary shows the capture machine's kernel and the demo daemon's container ID as hostname;
+  neither identifies real infrastructure.
 - Re-check every image for real hostnames, IPs, emails or tokens before committing.
 
 ## Not yet captured
 
-- **Live approval card** (a *pending* confirmation) — needs a real agent run against a configured LLM
-  provider. The approval flow is currently evidenced through Agent History + Audit Log instead.
+- **CVE monitor** with findings and the **deploy / exposure plan** — both run host commands (`nsenter`,
+  the deployment directory) and need Whiskers on a Linux host, e.g. the container image.
+- The **second-approver** rule on a pending approval (the switch is on `/guardrails`, below the fold).
 - **Light-theme variants** and a short **demo video** of the full hero loop.
-- A clean **per-container list** view (running-only), which needs a capture host with only demo
-  containers present.
