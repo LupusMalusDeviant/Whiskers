@@ -425,7 +425,7 @@ public sealed class HelpContentService : IHelpContentService
                     Wenn der Agent eine Aktion auslöst, die laut Guardrail eine **Bestätigung** braucht,
                     entsteht eine **Freigabe**: Was, von welchem Agenten/Akteur, welches Werkzeug, mit welchen
                     Parametern, plus optionalem Diff. Du bekommst eine Push-Benachrichtigung an die Glocke
-                    (und ggf. Mattermost/Matrix).
+                    (und an jeden eingerichteten Kanal, siehe **Benachrichtigungen**).
                     """,
                     Shot("Freigaben-Seite mit ausstehenden Anfragen")),
                 new("Genehmigen / Ablehnen", """
@@ -496,7 +496,8 @@ public sealed class HelpContentService : IHelpContentService
                     """,
                     Shot("Geöffnete Benachrichtigungs-Liste")),
                 new("Kanäle & Deep-Links", """
-                    Neben der In-App-Glocke kann Whiskers zusätzlich an **Mattermost** oder **Matrix** senden.
+                    Neben der In-App-Glocke kann Whiskers zusätzlich an **Mattermost**, **Matrix**, **Telegram**, **ntfy**,
+                    **Discord**, **Slack**, **E-Mail** oder einen **allgemeinen Webhook** senden.
                     Viele Benachrichtigungen sind **klickbar** und springen direkt zur richtigen Stelle, 
                     z. B. ein Image-Update direkt zum betroffenen Container.
                     """),
