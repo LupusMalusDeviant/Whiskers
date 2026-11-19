@@ -7,7 +7,7 @@ their product language from here so README, website and in-app help stay consist
 | Document | What |
 |---|---|
 | [POSITIONING.md](POSITIONING.md) | Canonical one-liner, elevator pitch, target audience, problem, value proposition, the three product pillars, the hero workflow, approved/avoided wording, and the glossary. |
-| [demo-script.md](demo-script.md) | The hero-workflow demo (Observe → Propose → Check policy → Approve → Execute → Verify → Audit) and how to build the anonymized demo dataset. |
+| [demo-script.md](demo-script.md) | The hero-workflow demo (Observe → Propose → Check policy → Approve → Execute → Verify → Audit) and how to reproduce it against a demo Docker daemon. |
 | [screenshots.md](screenshots.md) | Canonical product screenshots mapped to the three pillars, capture conventions, and anonymization rules. Images live in [screenshots/](screenshots/). |
 
 > These are the source of truth for *how we talk about Whiskers*, not a feature backlog. Product

@@ -10,12 +10,12 @@ against an isolated demo Docker daemon that runs only demo containers.
 | File | Route | Pillar | Shows |
 |---|---|---|---|
 | `governance-ai-operations.png` | `/ai-operations` | Governed setup | Connect a client, mint a least-privilege key, activate a starter guardrail preset. |
-| `governance-guardrails.png` | `/guardrails` | Enforced governance | Code-enforced policy at the tool boundary: read-only kill switch, max autonomous level, protected resources, forbidden argument patterns. |
-| `governance-approvals.png` | `/approvals` | Controlled access | A *pending* `update_container` (write) from the `Demo agent` key, held by the *Safe operations* preset, with risk, target and redacted parameters; below it the approved `restart_container`. |
+| `governance-guardrails.png` | `/guardrails` | Enforced governance | Code-enforced policy at the tool boundary: read-only kill switch and its fixed exceptions, max autonomous level, writes need confirmation, second-approver switch, protected resources, forbidden argument patterns. |
+| `governance-approvals.png` | `/approvals` | Controlled access | A *pending* `update_container` (write) from the `Demo agent` key, held by the *Safe operations* preset, with risk, target and a collapsed panel of redacted parameters; below it the approved `restart_container`. |
 | `governance-agent-history.png` | `/agent-history` | Controlled access | Every MCP tool call — actor, level (read/write/admin), verdict (Allow/Confirm/Deny), duration, status — including an admin call denied by policy. |
-| `governance-audit-log.png` | `/audit-log` | Complete accountability | The approval + execution trail: approval requested/granted, guardrail denied, container restarted. |
-| `dashboard-overview.png` | `/` | Reach | Container overview (total/running/stopped/unhealthy) and the expanded summary of the local Docker host. |
-| `topology.png` | `/topology` | Reach | The containers of the local host as a graph. |
+| `governance-audit-log.png` | `/audit-log` | Complete accountability | Every change with actor and outcome: the held and the denied calls as failed (`Container updated`, `host.exec`, first `Container restarted`), the approved restart as succeeded, plus key creation, guardrail save and login. A held call is logged under its action name with a failed status — it did not run. |
+| `dashboard-overview.png` | `/` | Reach | Container overview (total/running/stopped/unhealthy), the "add your first server" card, and the expanded summary of the local Docker host. |
+| `topology.png` | `/graph` | Reach | The containers of the local host as nodes; edges appear for shared networks and links (none in the demo). |
 
 ## Reproducing
 
@@ -41,8 +41,8 @@ so every row went through the guardrails exactly as it would in production.
       `get_container_details`.
    5. `execute_command` with `docker system prune -af --volumes` (admin, denied), then
       `update_container` for `web` (write, left pending).
-5. Capture `/approvals`, `/agent-history`, `/audit-log`, `/guardrails`, `/topology`, and `/` with the
-   local host's summary expanded.
+5. Capture `/approvals`, `/agent-history`, `/audit-log`, `/guardrails` (scrolled to the kill switch),
+   `/graph`, and `/` with the local host's summary expanded.
 
 ## Anonymization
 
@@ -56,5 +56,5 @@ so every row went through the guardrails exactly as it would in production.
 
 - **CVE monitor** with findings and the **deploy / exposure plan** — both run host commands (`nsenter`,
   the deployment directory) and need Whiskers on a Linux host, e.g. the container image.
-- The **second-approver** rule on a pending approval (the switch is on `/guardrails`, below the fold).
+- A pending approval under the **second-approver** rule (the switch itself is on the Guardrails image).
 - **Light-theme variants** and a short **demo video** of the full hero loop.
