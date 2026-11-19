@@ -416,7 +416,7 @@ internal static class HelpContentEn
                     When the agent triggers an action that the guardrail says needs a **confirmation**,
                     an **approval** is created: what, by which agent/actor, which tool, with which
                     parameters, plus an optional diff. You get a push notification at the bell
-                    (and, if configured, Mattermost/Matrix).
+                    (and on every configured channel, see **Notifications**).
                     """,
                     Shot("Approvals page with pending requests")),
                 new("Approve / Reject", """
@@ -487,9 +487,10 @@ internal static class HelpContentEn
                     """,
                     Shot("Opened notification list")),
                 new("Channels & Deep Links", """
-                    Besides the in-app bell, Whiskers can additionally send to **Mattermost** or
-                    **Matrix**. Many notifications are **clickable** and jump straight to the right
-                    place — an image update, for example, straight to the affected container.
+                    Besides the in-app bell, Whiskers can additionally send to **Mattermost**, **Matrix**,
+                    **Telegram**, **ntfy**, **Discord**, **Slack**, **email** or a **generic webhook**. Many
+                    notifications are **clickable** and jump straight to the right place — an image update,
+                    for example, straight to the affected container.
                     """),
             }),
 
