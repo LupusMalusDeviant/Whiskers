@@ -23,12 +23,13 @@ Execute → Verify → Audit.**
    The operator approves it.
 5. **Execute — once.** The *same* call instance runs exactly once. The correlation id ties the
    proposal, the approval and the execution together.
-6. **Verify.** The agent re-reads the container's health: back to healthy.
+6. **Verify.** The agent re-reads the container's health: back to healthy. (In the reproduced
+   screenshot demo the healthcheck is rigged to keep failing, so `payments-api` stays unhealthy.)
 7. **Audit.** **Agent History** shows every step with its verdict; **Audit Log** shows the attempt
    that was held (failed) and the approved restart (succeeded), each with the agent as actor.
 
 Then show the guardrail *biting*: the agent attempts a destructive `execute_command`
-(`docker system prune -af --volumes`) on a production host. It never runs — the guardrail denies it,
+(`docker system prune -af --volumes`) on a host. It never runs — the guardrail denies it,
 and the denial is recorded in both **Agent History** (verdict `Deny`) and **Audit Log** (a failed
 `host.exec`).
 
