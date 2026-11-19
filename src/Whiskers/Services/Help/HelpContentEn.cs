@@ -489,7 +489,8 @@ internal static class HelpContentEn
                 new("Channels & Deep Links", """
                     Besides the in-app bell, Whiskers can additionally send to **Mattermost**, **Matrix**,
                     **Telegram**, **ntfy**, **Discord**, **Slack**, **email** or a **generic webhook**. Many
-                    notifications are **clickable** and jump straight to the right place — an image update, for example, straight to the affected container.
+                    notifications are **clickable** and jump straight to the right place — an image update,
+                    for example, straight to the affected container.
                     """),
             }),
 
