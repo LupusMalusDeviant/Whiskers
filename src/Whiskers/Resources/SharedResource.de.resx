@@ -6071,6 +6071,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_TrustedScripts_Added" xml:space="preserve">
     <value>„{0}“ eingetragen (SHA-256 {1}). Zum Übernehmen speichern.</value>
   </data>
+  <data name="GuardrailsView_TrustedScripts_NeedsSecondAdmin" xml:space="preserve">
+    <value>Ein freigegebenes Skript einzutragen braucht einen zweiten Admin. Die Anfrage wartet unter „Freigaben“. Hat ein anderer Admin sie freigegeben, noch einmal speichern.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_ChangedMeanwhile" xml:space="preserve">
+    <value>Die freigegebenen Skripte haben sich seit der Freigabe geändert. Nichts wurde gespeichert. Seite neu laden und noch einmal speichern.</value>
+  </data>
   <data name="GuardrailsView_TrustedScripts_AuditFailed" xml:space="preserve">
     <value>Gespeichert, aber die Änderung der freigegebenen Skripte ließ sich nicht ins Audit-Log schreiben.</value>
   </data>

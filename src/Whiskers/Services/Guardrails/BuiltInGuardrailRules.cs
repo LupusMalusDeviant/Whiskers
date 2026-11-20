@@ -156,6 +156,15 @@ public sealed class ProtectedResourceRule : IGuardrailRule
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
         var policy = request.Context.Policy.ProtectedResources;
+        // Contract 0017 (D-1): the additions a guardrails save lists are what the trusted-script list protects, not
+        // resources the save acts on.
+        if (string.Equals(request.ToolName, TrustedScripts.SaveCapability, StringComparison.Ordinal)
+            && request.Arguments.ContainsKey(TrustedScripts.AdditionsArgument))
+            request = request with
+            {
+                Arguments = request.Arguments.Where(a => a.Key != TrustedScripts.AdditionsArgument)
+                    .ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal),
+            };
         // A read changes nothing: the control plane is protected from changes, the policy's patterns as before.
         var change = !string.Equals(McpPermissionLevels.Normalize(request.RequiredLevel), McpPermissionLevels.Read,
             StringComparison.Ordinal);
@@ -252,6 +261,30 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         && context.Principal.Kind == AgentPrincipalKind.WebUser
         && string.Equals(McpPermissionLevels.Normalize(context.Principal.PermissionLevel), McpPermissionLevels.Admin,
             StringComparison.Ordinal);
+}
+
+/// <summary>Contract 0017, D-1: a save of the guardrails that adds a trusted script or changes its hash needs a second
+/// Admin's approval while the policy requires a second approver. The gateway binds the approval to the call's
+/// arguments, so to exactly these additions; <c>ApprovalEligibility</c> keeps the requester from deciding it.</summary>
+public sealed class TrustedScriptApprovalRule : IGuardrailRule
+{
+    public const string RuleId = "trusted-script-approval";
+
+    public string Id => RuleId;
+
+    public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
+    {
+        if (string.Equals(request.ToolName, TrustedScripts.SaveCapability, StringComparison.Ordinal)
+            && request.Context.Policy.RequireSecondApprover
+            && request.Arguments.TryGetValue(TrustedScripts.AdditionsArgument, out var added)
+            && (added.ValueKind != System.Text.Json.JsonValueKind.String || !string.IsNullOrEmpty(added.GetString())))
+        {
+            reason = "Adding a trusted script or changing its hash needs a second Admin's approval.";
+            return GuardrailVerdict.Confirm;
+        }
+        reason = "";
+        return GuardrailVerdict.Allow;
+    }
 }
 
 /// <summary>Forbidden argument patterns (regex) against destructive shell/SQL — match → Deny.</summary>

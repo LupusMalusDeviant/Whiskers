@@ -33,5 +33,9 @@ public sealed class GuardrailRuleCatalog : IGuardrailRuleCatalog
         new GuardrailRuleDescriptor("confirmation", "Confirmation required",
             "Actions above the autonomous level require a UI confirmation.",
             GuardrailVerdict.Confirm, EmptySchema),
+        new GuardrailRuleDescriptor(TrustedScriptApprovalRule.RuleId, "Trusted script approval",
+            "Adding a trusted script or changing its hash needs a second Admin's approval while the policy requires a " +
+            "second approver (contract 0017).",
+            GuardrailVerdict.Confirm, EmptySchema),
     };
 }

@@ -104,6 +104,26 @@ public static class TrustedScripts
         return string.Equals(CallPath(command.GetString()), parts[1], StringComparison.Ordinal) ? parts[1] : null;
     }
 
+    /// <summary>D-1: the argument of <c>guardrails.save</c> that names the entries a save adds or whose hash it changes.</summary>
+    public const string AdditionsArgument = "trustedScriptsAdded";
+
+    /// <summary>D-1: the capability whose <see cref="AdditionsArgument"/> is read.</summary>
+    public const string SaveCapability = "guardrails.save";
+
+    /// <summary>D-1: the entries <paramref name="next"/> adds to <paramref name="stored"/> or whose hash it changes, in
+    /// any preset, one line each (<c>preset | server | path | sha256</c>), sorted; empty when there are none. Removals
+    /// are not listed: they narrow trust.</summary>
+    public static string Additions(GuardrailConfig stored, GuardrailConfig next)
+    {
+        static IEnumerable<string> Lines(GuardrailConfig config) =>
+            (config.Presets ?? []).Where(p => p?.Policy is not null)
+                .SelectMany(p => (p.Policy.TrustedScripts ?? []).Where(s => s is not null)
+                    .Select(s => $"{p.Name} | {s.ServerId} | {s.Path} | {s.Sha256}"));
+        var before = Lines(stored).ToHashSet(StringComparer.Ordinal);
+        return string.Join('\n', Lines(next).Where(l => !before.Contains(l)).Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal));
+    }
+
     /// <summary>Every listed path, on any server: protected from changes (point 5).</summary>
     public static IReadOnlyList<string> PathsOf(GuardrailPolicy policy) =>
         policy.TrustedScripts?.Where(s => s is not null && !string.IsNullOrEmpty(s.Path)).Select(s => s.Path)

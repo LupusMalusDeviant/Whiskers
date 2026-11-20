@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Whiskers.Configuration;
+using Whiskers.Models;
+using Whiskers.Services.Approvals;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Server;
@@ -263,6 +265,85 @@ public sealed class TrustedScriptTests
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Other}"), policy));      // other hash
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"web\u001f{Dump}\u001f{Approved}"), policy));      // other server
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f/opt/x.sh\u001f{Approved}"), policy)); // not listed
+    }
+
+    // ---------------------------------------------------------------- D-1: a second Admin for additions
+
+    private static string Line(string sha, string server = "local") => $"Standard | {server} | {Dump} | {sha}";
+
+    private static Task<MutationOutcome<int>> SaveAsync(ProtectionHarness h, string? added) =>
+        h.RunAsync("guardrails.save", added is null
+                ? new Dictionary<string, string> { ["section"] = "guardrails" }
+                : new Dictionary<string, string> { ["section"] = "guardrails", [TrustedScripts.AdditionsArgument] = added },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui);
+
+    [Fact]
+    public void Additions_list_new_and_rehashed_entries_but_not_removals()
+    {
+        GuardrailConfig With(params TrustedScript[] scripts)
+        {
+            var config = GuardrailConfig.SafeDefault();
+            config.Presets[0].Policy.TrustedScripts = [.. scripts];
+            return config;
+        }
+        var a = new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved };
+        var b = new TrustedScript { ServerId = "web", Path = Dump, Sha256 = Approved };
+
+        Assert.Equal(Line(Approved), TrustedScripts.Additions(With(), With(a)));
+        Assert.Equal(Line(Other), TrustedScripts.Additions(With(a), With(new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Other })));
+        Assert.Equal("", TrustedScripts.Additions(With(a, b), With(a)));     // a removal
+        Assert.Equal("", TrustedScripts.Additions(With(a), With(a)));
+    }
+
+    [Fact]
+    public async Task With_a_second_approver_required_an_addition_waits_for_another_Admin_and_then_saves()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+
+        var first = await SaveAsync(h, Line(Approved));
+        Assert.Equal(MutationStatus.PendingApproval, first.Status);
+        Assert.Contains(TrustedScriptApprovalRule.RuleId, first.MatchedRules);
+        var approval = Assert.Single(h.Approvals.GetPending());
+        Assert.Equal(ApprovalDecisionResult.RequesterCannotDecide, await h.Approvals.DecideAsync(approval.Id, true,
+            ApprovalResolver.User("admin@example.com", AppRole.Admin)));
+        Assert.Equal(0, h.Runs);
+
+        Assert.Equal(ApprovalDecisionResult.Decided, await h.Approvals.DecideAsync(approval.Id, true,
+            ApprovalResolver.User("second@example.com", AppRole.Admin)));
+        Assert.Equal(MutationStatus.Executed, (await SaveAsync(h, Line(Approved))).Status);
+        Assert.Equal(1, h.Runs);
+    }
+
+    [Fact]
+    public async Task An_approval_covers_exactly_the_additions_it_was_raised_for()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        await SaveAsync(h, Line(Approved));
+        await h.Approvals.DecideAsync(Assert.Single(h.Approvals.GetPending()).Id, true,
+            ApprovalResolver.User("second@example.com", AppRole.Admin));
+
+        var other = await SaveAsync(h, Line(Other));
+
+        Assert.Equal(MutationStatus.PendingApproval, other.Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Theory]
+    [InlineData(false, "add")]   // the setting is off: a single Admin saves as before
+    [InlineData(true, null)]     // nothing added (a removal, or no change of the list)
+    public async Task Without_an_addition_or_without_the_setting_a_save_runs_at_once(bool secondApprover, string? add)
+    {
+        // The listed path in the additions is no finding of its own (D-1, point 5).
+        var h = new ProtectionHarness(p =>
+        {
+            p.RequireSecondApprover = secondApprover;
+            p.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved }];
+        });
+
+        var outcome = await SaveAsync(h, add is null ? null : Line(Other));
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(1, h.Runs);
     }
 
     [Fact]

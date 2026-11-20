@@ -25,6 +25,8 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         // Contract 0006: agent and API keys only (PC-D1 keeps it out of CreateForHumans).
         new ExposureChangeRule(),
         new ConfirmationRule(),
+        // Contract 0017 (D-1): additions to the trusted scripts need a second Admin.
+        new TrustedScriptApprovalRule(),
     });
 
     /// <summary>
@@ -37,6 +39,8 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new PrincipalCeilingRule(),
         new ReadOnlyModeRule(),
         new ProtectedResourceRule(),
+        // Contract 0017 (D-1): a person adding a trusted script is asked for a second Admin when the policy says so.
+        new TrustedScriptApprovalRule(),
     });
 
     public GuardrailDecision Evaluate(GuardrailRequest request)

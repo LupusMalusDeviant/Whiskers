@@ -437,10 +437,24 @@
         {
             var principal = await BuildPrincipalAsync();
             var trustedBefore = TrustedEntries(GuardrailStore.Config);
-            await Mutations.RunAsync("guardrails.save", new { section = "guardrails" },
-                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal));
+            // Contract 0017 (D-1): the trusted scripts this save adds (or re-hashes) are part of the call, so a second
+            // Admin's approval binds to exactly them; the save checks them again right before it writes.
+            var added = TrustedScripts.Additions(GuardrailStore.Config, _config);
+            var arguments = new Dictionary<string, object> { ["section"] = "guardrails" };
+            if (added.Length > 0) arguments[TrustedScripts.AdditionsArgument] = added;
+            await Mutations.RunAsync("guardrails.save", arguments, (ResolvedRecord rt, CancellationToken _) =>
+            {
+                if (!string.Equals(TrustedScripts.Additions(GuardrailStore.Config, _config), added, StringComparison.Ordinal))
+                    throw new InvalidOperationException(L["GuardrailsView_TrustedScripts_ChangedMeanwhile"].Value);
+                return GuardrailStore.SaveConfigAsync(_config, principal);
+            });
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
             await AuditTrustedScriptsAsync(trustedBefore, TrustedEntries(GuardrailStore.Config));
+        }
+        catch (MutationRefusedException ex) when (ex.Status == MutationStatus.PendingApproval
+                                                 && ex.MatchedRules.Contains(TrustedScriptApprovalRule.RuleId))
+        {
+            Snackbar.Add(L["GuardrailsView_TrustedScripts_NeedsSecondAdmin"].Value, Severity.Info);
         }
         catch (MutationRefusedException ex)
         {

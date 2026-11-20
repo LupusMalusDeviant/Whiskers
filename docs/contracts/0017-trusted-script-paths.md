@@ -2,7 +2,9 @@
 
 Status: **Accepted** · 20 November 2026 by the maintainer, with the answers below on the two open questions
 (hash pinning: yes; redirection protection: trusted script paths only). The interfaces section was added after the
-approval without changing behaviour. **Deviation D-1** (second approver, below) needs a fresh approval.
+approval without changing behaviour. **D-1** (second approver, below) was approved as drafted on 20 November 2026.
+With a single Admin and *Require a second approver* on, an addition stays pending. The Admin can switch the setting off
+on their own, as for every approval today, and both saves are on record.
 
 ## Purpose
 
@@ -71,12 +73,37 @@ script on one server.
   command is that trusted call is judged with the command's argument words in place of the command. Every request is
   then checked against the listed paths (point 5).
 
-## Deviation D-1 (needs approval)
+## D-1 — Second approver for additions (approved)
 
-The draft said: "With *Require a second approver* switched on, a second Admin must approve the change." Whiskers has
-no second-approver flow for `guardrails.save`. `RequireSecondApprover` applies to approval requests only, and no
-policy change goes through one today. Building such a flow is a feature of its own and is **not** part of this step.
-Until it exists, one Admin can change the list. The audit row of point 2 records who did it.
+The draft said: "With *Require a second approver* switched on, a second Admin must approve the change." The first
+build left this out; the maintainer asked for it on 20 November 2026. It reuses the existing approval flow instead of
+a new one:
+
+1. **What needs it.** A `guardrails.save` that **adds** an entry or **changes** an entry's hash, in any preset,
+   compared with the stored configuration. Removing an entry narrows trust and needs no approval.
+2. **When.** Only while the **stored, active** policy has *Require a second approver* on. With it off, a single Admin
+   saves as today (single-admin installs), and the audit row records who did it.
+3. **How.** The page passes the additions as the argument `trustedScriptsAdded` of `guardrails.save`: one line per
+   entry, `preset | server | path | sha256`, sorted. A new rule `TrustedScriptApprovalRule`, in the human engine and
+   the agent engine, answers `Confirm` when that argument is not empty and the policy requires a second approver.
+   - The gateway raises an approval bound to the call's arguments, so to exactly these additions. The approver sees
+     server, path and hash on the Approvals page.
+   - With *Require a second approver* on, the requesting Admin cannot decide it (`ApprovalEligibility`). A second
+     Admin must.
+   - The first Admin then saves again with the same additions. The approved request is used once, and the save runs.
+     Different additions raise a new request.
+4. **Binding at run time.** The save recomputes the additions from the stored configuration and what it is about to
+   write. If they differ from the approved argument (someone saved in between), nothing is written.
+5. **No path finding on the argument itself.** For `guardrails.save` only, `ProtectedResourceRule` leaves
+   `trustedScriptsAdded` out of its matching. Its paths are what the list protects, and they are not acted on. Every
+   other argument and every other capability is matched as before.
+
+Tests (once approved):
+- With the setting on: adding an entry is pending approval, the requester cannot approve it, and after a second
+  Admin approves, the retry saves it.
+- Changing a hash also needs approval. Removing an entry does not.
+- With the setting off, saving works as before.
+- Other additions than the approved ones raise a new request.
 
 ## Tests
 
