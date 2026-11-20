@@ -155,6 +155,74 @@ public sealed partial class ProtectedResourceResolutionTests
         Assert.Equal(McpPermissionLevels.Admin, Assert.Single(h.Approvals.GetPending()).Level);
     }
 
+    // A fixed command — a program by its absolute path, with literal arguments — is analysable and runs.
+    [Theory]
+    [InlineData("/usr/local/sbin/burgcloud-db-dump")]
+    [InlineData("/usr/local/bin/check-disk-usage 80")]
+    [InlineData("df -h / /var/lib/mysql")]
+    public async Task A_fixed_command_with_literal_arguments_runs(string command)
+    {
+        var h = Protecting("whiskers-db");
+        var args = new { serverId = "local", command };
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, "host.exec", args)).Status);
+        Assert.Equal(MutationStatus.Executed,
+            (await h.RunAsync("host.exec", args, ProtectionHarness.AdminsTask(), MutationSurface.Automation)).Status);
+    }
+
+    // What the shell expands at run time stays refused, and the reason says so.
+    [Theory]
+    [InlineData("/usr/local/bin/gitlab-backup-$(date +%s)")]
+    [InlineData("/usr/local/bin/check-disk-usage $THRESHOLD")]
+    [InlineData("/usr/local/bin/check-disk-usage `cat /etc/threshold`")]
+    [InlineData("/usr/local/bin/check-disk-usage \"${THRESHOLD}\"")]
+    public async Task A_command_built_at_run_time_is_refused_as_built_at_run_time(string command)
+    {
+        var h = Protecting("whiskers-db");
+        var args = new { serverId = "local", command };
+
+        var key = await AsKey(h, "host.exec", args);
+        var task = await h.RunAsync("host.exec", args, ProtectionHarness.AdminsTask(), MutationSurface.Automation);
+
+        Assert.Equal(MutationStatus.Denied, key.Status);
+        Assert.Equal(MutationStatus.Denied, task.Status);
+        Assert.Contains("builds what it acts on at run time", task.Reason);
+        Assert.Equal(0, h.Runs);
+    }
+
+    // A script by its path or an interpreter's inline code is literal, but its content is not shown here, so it stays
+    // refused (INV-24). The reason must say that — not that the command is built at run time (BurgCloud DB dump,
+    // 2026-11-20).
+    [Theory]
+    [InlineData("/usr/local/sbin/burgcloud-db-dump.sh")]
+    [InlineData("/usr/local/bin/check-disk-usage.sh 80")]
+    [InlineData("python3 -c \"print(1)\"")]
+    [InlineData("bash /opt/x")]
+    public async Task A_script_or_interpreter_is_refused_as_hidden_code_not_as_built_at_run_time(string command)
+    {
+        var h = Protecting("whiskers-db");
+        var args = new { serverId = "local", command };
+
+        var task = await h.RunAsync("host.exec", args, ProtectionHarness.AdminsTask(), MutationSurface.Automation);
+
+        Assert.Equal(MutationStatus.Denied, task.Status);
+        Assert.Contains("runs a script, an interpreter or a recipe", task.Reason);
+        Assert.DoesNotContain("run time", task.Reason);
+        Assert.Equal(0, h.Runs);
+    }
+
+    // A script that is also fed something built at run time is reported as built at run time.
+    [Fact]
+    public async Task A_script_with_a_run_time_argument_is_refused_as_built_at_run_time()
+    {
+        var h = Protecting("whiskers-db");
+        var task = await h.RunAsync("host.exec", new { serverId = "local", command = "/opt/backup.sh $(date +%s)" },
+            ProtectionHarness.AdminsTask(), MutationSurface.Automation);
+
+        Assert.Equal(MutationStatus.Denied, task.Status);
+        Assert.Contains("builds what it acts on at run time", task.Reason);
+    }
+
     // ---------------------------------------------------------------- mounts
 
     [Fact]

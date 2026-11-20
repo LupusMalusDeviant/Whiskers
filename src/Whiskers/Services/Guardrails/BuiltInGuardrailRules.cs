@@ -232,7 +232,10 @@ public sealed class ProtectedResourceRule : IGuardrailRule
 
     private static string Describe(ProtectedResourceMatcher.Hit hit) =>
         hit.UnanalyzableArgument is { } argument
-            ? $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
+            ? hit.RunsHiddenCode
+                ? $"The '{argument}' cannot be checked for protected resources (it runs a script, an interpreter or " +
+                  "a recipe whose content is not shown here)."
+                : $"The '{argument}' cannot be checked for protected resources (it builds what it acts on at run time)."
             : hit.InFreeText
                 ? $"The '{hit.Argument}' touches a protected resource (pattern '{hit.Pattern}')."
                 : $"'{hit.Value}' is a protected resource (pattern '{hit.Pattern}').";

@@ -52,6 +52,11 @@ public static class ProtectedResourceMatcher
     {
         public string? Argument { get; init; }
         public bool InFreeText { get; init; }
+
+        /// <summary>For an unanalysable command: true when nothing in its text is built at run time, but it runs
+        /// code this text does not show (a script by its path, an interpreter, a build tool, a compose file). Only the
+        /// reason differs; the verdict is the same.</summary>
+        public bool RunsHiddenCode { get; init; }
     }
 
     /// <summary>The first protected resource the request touches, or <c>null</c>. <paramref name="patterns"/> are
@@ -114,7 +119,8 @@ public static class ProtectedResourceMatcher
                         if (!word.StartsWith('/') && ProtectedSegment(word, pathPatterns) is { } segment)
                             return new Hit(word, segment) { Argument = key, InFreeText = true };
                     }
-                if (shell.Unanalyzable) return new Hit("", null, key) { Argument = key, InFreeText = true };
+                if (shell.Unanalyzable)
+                    return new Hit("", null, key) { Argument = key, InFreeText = true, RunsHiddenCode = shell.RunsHiddenCode };
                 continue;
             }
             // A compose file is read as compose reads it: ${VAR:-default} becomes its default, an unset variable empty.
@@ -494,7 +500,12 @@ public static class ProtectedResourceMatcher
 
     /// <summary>What the shell makes of a command: its literal words (quotes and escapes removed, with the words of
     /// quoted text that is run again), the words it expands as globs, and whether anything is built at run time.</summary>
-    public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable);
+    /// <remarks><see cref="RunsHiddenCode"/> tells why an unanalysable command is so: true when every word is literal
+    /// but a command word runs code the text does not show; false when something is built at run time.</remarks>
+    public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable)
+    {
+        public bool RunsHiddenCode { get; init; }
+    }
 
     private const int MaxShellDepth = 4;
 
@@ -511,22 +522,26 @@ public static class ProtectedResourceMatcher
         var globs = new List<string>();
         var commands = new List<int>();
         var unanalyzable = Tokenize(text, words, globs, commands, 0);
+        // Set below wherever a literal command runs code the text does not show (not built at run time).
+        var hidden = false;
         foreach (var i in commands)
         {
             if (unanalyzable) break;
             var word = words[i];
             var name = Path.GetFileName(word);
             var next = i + 1 < words.Count ? words[i + 1] : null;
-            if (ShellRunTime.Contains(name) || BuildTools.Contains(name) || name == "."
+            if (ShellRunTime.Contains(name))
+                unanalyzable = true;
+            else if (BuildTools.Contains(name) || name == "."
                 || word.StartsWith("./", StringComparison.Ordinal) || word.StartsWith("../", StringComparison.Ordinal)
                 || word.StartsWith("~/", StringComparison.Ordinal)
                 || (word.StartsWith('/') && ScriptFile.IsMatch(word))
                 || IsInterpreter(name))
-                unanalyzable = true;
+                unanalyzable = hidden = true;
             else if ((Shells.Contains(name) || name == "su") && !IsCommandFlag(next))
-                unanalyzable = true;
+                unanalyzable = hidden = true;
             else if (ComposeWrite(words, i, name))
-                unanalyzable = true;
+                unanalyzable = hidden = true;
             else if (name == "find" && words.Skip(i + 1).Any(w => w is "-exec" or "-execdir" or "-ok" or "-okdir" or "-delete"))
             {
                 // What it acts on comes from the file system: analysable only when every starting point is a plain
@@ -543,13 +558,15 @@ public static class ProtectedResourceMatcher
             var name = Path.GetFileName(words[w]);
             var next = w + 1 < words.Count ? words[w + 1] : null;
             if (ShellRunTime.Contains(name)) unanalyzable = true;
-            else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = true;
+            else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = hidden = true;
             else if (IsInterpreter(name) && next is not null && (next.StartsWith('-') || next.Contains('.') || next.Contains('/')))
-                unanalyzable = true;
+                unanalyzable = hidden = true;
         }
-        try { unanalyzable |= ShellUnanalyzable.IsMatch(text); }
-        catch (RegexMatchTimeoutException) { unanalyzable = true; }
-        return new ShellText(words, globs, unanalyzable);
+        // Decoding or escapes build the text at run time, whatever else the command runs.
+        bool decoded;
+        try { decoded = ShellUnanalyzable.IsMatch(text); }
+        catch (RegexMatchTimeoutException) { decoded = true; }
+        return new ShellText(words, globs, unanalyzable || decoded) { RunsHiddenCode = hidden && !decoded };
     }
 
     /// <summary>A compose or stack command that changes containers (<c>docker compose down</c>, <c>docker-compose up</c>,
