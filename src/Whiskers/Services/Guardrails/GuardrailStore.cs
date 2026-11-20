@@ -550,6 +550,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile));
         if (expected is null && added.Length > 0 && held.ActivePolicy().RequireSecondApprover)
             throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover));
+        // Amendment 2 (B2): the setting may have been switched on after a decision that needed no approval; only a
+        // guardrails.save whose used approval covered the trusted-script rule adds entries while it is on.
+        if (added.Length > 0 && held.ActivePolicy().RequireSecondApprover && !InApprovedSave())
+            throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover,
+                Value: GuardrailConfigProblem.SettingChangedMeanwhile));
         if (added.Length == 0 && removed.Length == 0) return;
 
         var details = string.Join("; ",
@@ -574,6 +579,10 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         if (!written)
             throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsAuditFailed));
     }
+
+    private static bool InApprovedSave() =>
+        Whiskers.Services.Mutations.MutationScope.Current is { CapabilityId: TrustedScripts.SaveCapability } scope
+        && scope.ApprovedRules.Contains(TrustedScriptApprovalRule.RuleId);
 
     private static void RecordChange(State before, GuardrailConfig after) =>
         Whiskers.Services.Mutations.ConfigChange.Record("guardrails", before.LoadError is null ? before.Config : null, after);

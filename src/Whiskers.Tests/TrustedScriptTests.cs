@@ -475,10 +475,161 @@ public sealed class TrustedScriptTests
             Assert.Null(store.Current.TrustedScripts);
             Assert.DoesNotContain(audit.Entries, e => e.Action == GuardrailStore.TrustedScriptsAuditAction);
 
-            await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
+            using (ApprovedSave())
+                await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
             Assert.NotNull(store.Current.TrustedScripts);
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    /// <summary>The scope the gateway opens for a <c>guardrails.save</c> that used a second Admin's approval.</summary>
+    private static MutationScope ApprovedSave(string capability = TrustedScripts.SaveCapability,
+        string rule = TrustedScriptApprovalRule.RuleId)
+    {
+        var scope = MutationScope.Begin(capability, "op-" + Guid.NewGuid().ToString("N")[..8]);
+        scope.ApprovedRules = new HashSet<string>(StringComparer.Ordinal) { rule };
+        return scope;
+    }
+
+    // ---------------------------------------------------------------- amendment 2
+
+    [Theory]
+    [InlineData("cd /usr/local/sbin && cp /tmp/e burgcloud-db-dump.sh")]
+    [InlineData("cd /usr/local/sbin && echo x > burgcloud-db-dump.sh")]
+    [InlineData("cd /usr/local/sbin && tee burgcloud-db-dump.sh")]
+    [InlineData("cd /usr/local/sbin && sed -i s/a/b/ burgcloud-db-dump.sh")]
+    [InlineData("cp /tmp/e/burgcloud-db-dump.sh /tmp/other/")]
+    [InlineData("cp /tmp/e /usr/local/sbin/")]
+    [InlineData("tar -xf /tmp/a.tar -C /usr/local/sbin")]
+    [InlineData("unzip -o /tmp/a.zip -d /usr/local/sbin")]
+    [InlineData("cd /usr/local/sbin && tar -xf /tmp/a.tar")]
+    [InlineData("cd /usr/local && cp /tmp/e sbin")]
+    [InlineData("cd /usr && cp -r /tmp/tree local/sbin")]
+    [InlineData("tar -xf /tmp/a.tar -C .")]
+    [InlineData("cp -r /tmp/tree/ /")]
+    [InlineData("install --target-directory=/usr/local/sbin /tmp/e")]
+    public async Task B1_every_spelling_of_a_listed_script_or_its_directory_is_a_finding(string command)
+    {
+        var h = new ProtectionHarness(
+            p => p.TrustedScripts = [new TrustedScript { ServerId = "burgcloud", Path = Dump, Sha256 = Approved }],
+            host: new HashHost());
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, command)).Status);
+        Assert.Equal(MutationStatus.PendingApproval,
+            (await h.RunAsync("host.exec", new { serverId = "local", command }, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Theory]
+    [InlineData("ls -l /usr/local/sbin")]
+    [InlineData("df -h /")]
+    [InlineData("du -sh /usr/local")]
+    [InlineData("ls . && grep -c dump sbin/burgcloud-db-dump.sh")]
+    [InlineData("cp /tmp/a /tmp/b")]
+    [InlineData("systemctl restart nginx")]
+    public async Task B1_reading_the_directory_and_unrelated_changes_stay_possible(string command)
+    {
+        var h = new ProtectionHarness(
+            p => p.TrustedScripts = [new TrustedScript { ServerId = "burgcloud", Path = Dump, Sha256 = Approved }],
+            host: new HashHost());
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, command)).Status);
+    }
+
+    [Fact]
+    public async Task B1_a_trusted_call_still_runs_next_to_the_wider_protection()
+    {
+        var host = new HashHost();
+        var h = Trusting(host);
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, Dump + " --keep 7")).Status);
+    }
+
+    [Theory]
+    [InlineData("echo x > /proc/self/root/usr/local/sbin/burgcloud-db-dump.sh")]
+    [InlineData("cat /proc/1/root/var/run/docker.sock")]
+    [InlineData("ls /proc/self/cwd/")]
+    [InlineData("cat /proc/123/fd/3")]
+    public void B1_a_proc_alias_makes_the_command_unanalysable(string command) =>
+        Assert.True(ProtectedResourceMatcher.AnalyseShell(command).Unanalyzable);
+
+    [Theory]
+    [InlineData("cat /proc/meminfo")]
+    [InlineData("cat /proc/self/status")]
+    public void B1_other_proc_files_stay_readable(string command) =>
+        Assert.False(ProtectedResourceMatcher.AnalyseShell(command).Unanalyzable);
+
+    [Fact]
+    public async Task B2_the_store_saves_additions_under_a_second_approver_only_within_an_approved_save()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: true);
+        try
+        {
+            var approved = TrustedScripts.Additions(store.Config, Adding(store));
+            // The setting was switched on after a decision that needed no approval: no scope, another capability's
+            // scope, or a scope whose approval covered another rule.
+            var outside = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
+            GuardrailConfigException other, otherRule;
+            using (ApprovedSave(capability: "host.exec"))
+                other = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
+            using (ApprovedSave(rule: "protected-resource"))
+                otherRule = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
+
+            foreach (var refused in new[] { outside, other, otherRule })
+                Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover, refused.Problem.Kind);
+            Assert.Null(store.Current.TrustedScripts);
+
+            using (ApprovedSave())
+                await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
+            Assert.NotNull(store.Current.TrustedScripts);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task B2_the_gateway_records_the_rules_a_used_approval_covered()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        await SaveAsync(h, Line(Approved));
+        await h.Approvals.DecideAsync(Assert.Single(h.Approvals.GetPending()).Id, true,
+            ApprovalResolver.User("second@example.com", AppRole.Admin));
+        IReadOnlySet<string>? seen = null;
+
+        var outcome = await h.RunAsync("guardrails.save",
+            new Dictionary<string, string> { ["section"] = "guardrails", [TrustedScripts.AdditionsArgument] = Line(Approved) },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui, during: () => seen = MutationScope.Current?.ApprovedRules);
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.NotNull(seen);
+        Assert.Contains(TrustedScriptApprovalRule.RuleId, seen!);
+
+        // A save without an approval runs with none recorded.
+        var plain = new ProtectionHarness();
+        IReadOnlySet<string>? none = null;
+        await plain.RunAsync("guardrails.save", new Dictionary<string, string> { ["section"] = "guardrails" },
+            ProtectionHarness.UiAdmin, MutationSurface.Ui, during: () => none = MutationScope.Current?.ApprovedRules);
+        Assert.NotNull(none);
+        Assert.Empty(none!);
+    }
+
+    [Fact]
+    public async Task B3_a_trusted_script_the_caller_set_on_the_target_is_dropped()
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved }];
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var resolver = new MutationTargetResolver(new TestServices(new FakeDocker([]) { DefaultServerId = "local" },
+            new FakeServerConfig(ProtectionHarness.Local), store, new HashHost()));
+        var request = new MutationRequest("host.exec", ProtectionHarness.AdminKey, MutationSurface.Mcp,
+            new MutationTarget("host", "local", ServerId: "local") { TrustedScript = policy.TrustedScripts[0] },
+            ProtectionHarness.Args(new { serverId = "local", command = "uptime" }));
+
+        var resolved = await resolver.ResolveAsync(request, new CapabilityCatalog().Find("host.exec")!, default);
+
+        Assert.NotNull(resolved.Target);
+        Assert.Null(resolved.Target!.TrustedScript);
     }
 
     // ---------------------------------------------------------------- D-1: a second Admin for additions

@@ -350,6 +350,10 @@ public sealed class MutationScope : IDisposable
     /// deployment later runs, so the provisioning tools make them its owner.</summary>
     public string? ApprovedBy { get; internal set; }
 
+    /// <summary>Contract 0017, amendment 2 (B2): the rules of this operation's decision that a used approval covered,
+    /// set by the gateway for this scope only; empty when it ran without one.</summary>
+    public IReadOnlySet<string> ApprovedRules { get; internal set; } = new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>
     /// Reports on the current scope that the mutation failed although the code returns normally — for tools that
     /// answer with an error text instead of throwing. The gateway then records the operation as <c>Failed</c> and

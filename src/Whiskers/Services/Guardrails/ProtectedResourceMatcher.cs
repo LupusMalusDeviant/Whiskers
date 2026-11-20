@@ -295,6 +295,72 @@ public static class ProtectedResourceMatcher
         FirstHit(arguments, [NoName], [], analyseFreeText: true, trustedCall: trustedCall)
             is { UnanalyzableArgument: not null } hit ? hit : null;
 
+    /// <summary>
+    /// Contract 0017, amendment 2 (B1): a command that reaches a listed script by another spelling than its full path.
+    /// A word whose last segment is a listed script's file name, or a word naming its directory or one above it
+    /// (absolute, relative to any of those directories, <c>.</c> or <c>..</c>), is a hit — unless every command of
+    /// the text only reads (<see cref="ReadOnlyCommands"/>). The command word of a trusted call is not a word here.
+    /// </summary>
+    public static Hit? ListedScriptHit(IReadOnlyDictionary<string, JsonElement> arguments, IReadOnlyList<string> listed,
+        string? trustedCall = null)
+    {
+        if (listed.Count == 0) return null;
+        var byName = new Dictionary<string, string>(StringComparer.Ordinal);
+        var directories = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in listed)
+        {
+            var normal = NormalizePath(path);
+            byName.TryAdd(LastSegment(normal), path);
+            for (var dir = Parent(normal); dir is not null; dir = Parent(dir)) directories.TryAdd(dir, path);
+        }
+        foreach (var (key, element) in arguments)
+        {
+            if (!ShellArguments.Contains(key) || element.ValueKind != JsonValueKind.String) continue;
+            var shell = AnalyseShell(element.GetString() ?? "", key == "command" ? trustedCall : null);
+            if (shell.CommandWords.Count > 0 && shell.CommandWords.All(w => ReadOnlyCommands.Contains(LastSegment(w))))
+                continue;
+            foreach (var word in shell.TrustedCall ? shell.Words.Skip(1) : shell.Words)
+            {
+                // An option's value (--target-directory=/usr/local/sbin) is read on its own as well.
+                var candidates = word.IndexOf('=') is var eq and > 0 ? new[] { word, word[(eq + 1)..] } : [word];
+                foreach (var candidate in candidates)
+                    if (ListedTarget(candidate, byName, directories) is { } path)
+                        return new Hit(word, path) { Argument = key, InFreeText = true };
+            }
+        }
+        return null;
+    }
+
+    private static string? ListedTarget(string word, Dictionary<string, string> byName, Dictionary<string, string> directories)
+    {
+        if (word.Length == 0 || word.StartsWith('-')) return null;
+        // The working directory is not known: '.' and '..' could be any directory above a listed script.
+        if (word is "." or "..") return directories.Values.First();
+        var normal = NormalizePath(word);
+        if (normal.Length > 0 && byName.TryGetValue(LastSegment(normal), out var named)) return named;
+        if (word.StartsWith('/')) return directories.GetValueOrDefault(normal);
+        foreach (var dir in directories.Keys)
+            if (directories.TryGetValue(NormalizePath(dir.TrimEnd('/') + "/" + word), out var above)) return above;
+        return null;
+    }
+
+    private static string LastSegment(string path) => path[(path.LastIndexOf('/') + 1)..];
+
+    // The directory a normalised absolute path is in; null above the root.
+    private static string? Parent(string path)
+    {
+        if (path == "/") return null;
+        var slash = path.LastIndexOf('/');
+        return slash <= 0 ? "/" : path[..slash];
+    }
+
+    // Commands that only read: a line made of nothing else may look into a listed script's directory (B1).
+    private static readonly HashSet<string> ReadOnlyCommands = new(StringComparer.Ordinal)
+    {
+        "ls", "cat", "stat", "head", "tail", "wc", "du", "df", "file", "sha256sum", "md5sum", "test", "[", "realpath",
+        "readlink", "grep",
+    };
+
     /// <summary>Contract 0017: a command name that can never be trusted — a shell, an interpreter, a container runtime,
     /// a build or scheduling tool, a command prefix or one that builds its arguments from data.</summary>
     public static bool IsUntrustableCommandName(string name) =>
@@ -536,6 +602,10 @@ public static class ProtectedResourceMatcher
         /// <summary>Contract 0017: the text is exactly a call of the trusted script it was analysed with; its command
         /// word (<c>Words[0]</c>) was spared the hidden-code verdict.</summary>
         public bool TrustedCall { get; init; }
+
+        /// <summary>The command word of every command in the text (after prefixes such as <c>sudo</c>), nested
+        /// <c>sh -c '…'</c> text included.</summary>
+        public IReadOnlyList<string> CommandWords { get; init; } = [];
     }
 
     private const int MaxShellDepth = 4;
@@ -605,9 +675,12 @@ public static class ProtectedResourceMatcher
         bool decoded;
         try { decoded = ShellUnanalyzable.IsMatch(text); }
         catch (RegexMatchTimeoutException) { decoded = true; }
-        var result = unanalyzable || decoded;
+        // Contract 0017, amendment 2 (B1): /proc/<pid>/root, cwd and fd reach any file under another spelling.
+        var aliased = words.Any(w => ProcAlias.IsMatch(w));
+        var result = unanalyzable || decoded || aliased;
         return new ShellText(words, globs, result)
         {
+            CommandWords = commands.Select(i => words[i]).ToList(),
             RunsHiddenCode = hidden && !decoded,
             // Only a call that stayed analysable counts as trusted (nothing else in it was a finding).
             TrustedCall = trusted && !result,
@@ -646,6 +719,9 @@ public static class ProtectedResourceMatcher
         Interpreters.Contains(name) || InterpreterVersion.IsMatch(name);
 
     private static readonly Regex InterpreterVersion = new(@"^(python|pypy)\d*(\.\d+)?$|^(perl|ruby|php|lua|node)\d+(\.\d+)?$",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static readonly Regex ProcAlias = new(@"^/+proc/+[^/]+/+(root|cwd|fd)(/|$)",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
     private static readonly Regex ScriptFile = new(@"\.(sh|bash|zsh|ksh|py|pl|rb|js|mjs|cjs|ts|php|lua|ps1)$",

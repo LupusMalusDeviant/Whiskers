@@ -300,6 +300,8 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
     private async Task<TargetResolution> HostAsync(MutationRequest request, Capability capability, MutationTarget target,
         CancellationToken ct)
     {
+        // Contract 0017, amendment 2 (B3): only this resolver vouches for a script; a caller's own claim is dropped.
+        target = target with { TrustedScript = null };
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
         // Contract 0012 (D11): an nginx site, a systemd unit or a firewall rule on the server, against the host's listing.
         if (resolution.Target is { } onServer && CapabilityCatalog.HostObjects.Contains(capability.Id))

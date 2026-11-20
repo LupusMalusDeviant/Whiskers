@@ -89,7 +89,7 @@ internal sealed class ProtectionHarness
 
     /// <summary>Runs <paramref name="capabilityId"/> as <paramref name="who"/> on <paramref name="surface"/>.</summary>
     public async Task<MutationOutcome<int>> RunAsync(string capabilityId, object arguments, MutationPrincipal who,
-        MutationSurface surface, AgentOrigin? origin = null)
+        MutationSurface surface, AgentOrigin? origin = null, Action? during = null)
     {
         var catalog = new CapabilityCatalog();
         var capability = catalog.Find(capabilityId)!;
@@ -98,7 +98,11 @@ internal sealed class ProtectionHarness
         {
             AgentOrigin = origin,
         };
-        return await Gateway.ExecuteAsync(request, (_, _) => Task.FromResult(++Runs));
+        return await Gateway.ExecuteAsync(request, (_, _) =>
+        {
+            during?.Invoke();
+            return Task.FromResult(++Runs);
+        });
     }
 }
 

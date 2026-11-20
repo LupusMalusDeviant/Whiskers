@@ -154,6 +154,62 @@ Tests for the amendment:
   while the second approver is required, writes nothing.
 - An audit row that cannot be written refuses the save. Preset activation that drops entries writes the row.
 
+## Amendment 2 — second review (approved 20 November 2026)
+
+From the review of 20 November 2026 on `139dd5b3...83cc6de6` (findings M1, L1, L2). All three make the contract
+stricter. None of them widens what can run.
+
+- **B1 (M1, point 5): the write protection follows every spelling of a listed script, not only its full path.**
+  - Today a listed path is a finding only where the command spells it out in full, e.g. `rm /usr/local/sbin/x.sh`.
+    These spellings get through:
+    - a relative one: `cd /usr/local/sbin && cp /tmp/e x.sh`, also with `>`, `tee` or `sed -i`;
+    - a directory as the target: `cp /tmp/x.sh /usr/local/sbin/`, `tar -xf a.tar -C /usr/local/sbin`;
+    - an alias: `/proc/self/root/usr/local/sbin/x.sh`.
+  - The hash pin still refuses the next call. But the protection is meant to keep the accepted window between the last
+    hash read and the start hard to use.
+  - New, for a changing request and only for the listed paths (built-in protected paths are judged as before):
+    1. **File name.** A word whose last segment is a listed script's file name is a finding, whatever its directory,
+       unless the line is read-only (see 2). This covers relative operands, `./x.sh`, `sbin/x.sh` and a source
+       copied under its own name into the directory. The full path stays a finding for every command, as before.
+    2. **Directory.** A word that names a listed script's directory, or any directory above it, is a finding. That
+       covers an absolute word (`/usr/local/sbin`, `/usr`, `/`) and a relative one read against each of those directories
+       (`sbin`, `local/sbin`, `../sbin`). So do `.` and `..`, since the working directory is not known.
+       - The exception is a line whose commands are all read-only: `ls`, `cat`, `stat`, `head`, `tail`, `wc`, `du`,
+         `df`, `file`, `sha256sum`, `md5sum`, `test`, `[`, `realpath`, `readlink` and `grep`. A plain look into the
+         directory stays possible; `cd`, `cp`, `tar`, `unzip`, `install` and every other command do not.
+    3. **Aliases.** A word starting with `/proc/<anything>/root`, `/proc/<anything>/cwd` or `/proc/<anything>/fd`
+       makes the command unanalysable. This applies to every protected path, not only the listed ones, because the
+       same alias reaches the Docker socket.
+  - Known limit: a command that picks its target names itself without naming them is not caught. An example is
+    `tar -xf a.tar` with no `-C` while the start directory happens to be `/`. The hash pin catches such a change before
+    the next run, and closing the window entirely is the separate topic of the private copy.
+- **B2 (L1, D-1 point 4): the store checks that the second Admin really decided.**
+  - The gateway decides with the setting *Require a second approver* as it is at decision time. Someone can switch
+    the setting on between the decision and the store's write. A save decided without approval would then still go
+    through.
+  - New: the gateway's scope records which rules of its decision were met by a used approval. Under its lock, the
+    store refuses a save with additions while the held active policy requires a second approver, unless the open
+    scope is a `guardrails.save` whose approval covered `trusted-script-approval`.
+  - The refusal text is "The second-approver setting changed while this save waited; save again." It counts as
+    `TrustedScriptsNeedSecondApprover`.
+- **B3 (L2, interfaces): only the resolver sets `MutationTarget.TrustedScript`.** At the start of `HostAsync`, the
+  resolver clears a `TrustedScript` the caller set, before anything else reads the target.
+- **Correction (A5).** The audit row covers every save path through the store. Restoring a self-backup replaces
+  `guardrails.json` outside the store and writes no `guardrails.trusted_scripts` row. That has been true before this
+  contract, and the restore has its own audit entry.
+
+Tests for the amendment:
+- With a listed script, these are findings for an MCP key:
+  - the relative operand after `cd`, with `cp`, `>`, `tee` and `sed -i`;
+  - `cp` into its directory;
+  - `tar -C` and `unzip -d` on that directory;
+  - `cd` into the directory;
+  - `.` with a changing command.
+- `ls` and `cat` on the directory are not findings.
+- `/proc/self/root/…` makes the command unanalysable.
+- Turning the setting on between the decision and the save writes nothing. With the approval used, the save writes.
+- A `TrustedScript` that the caller set on the target is ignored.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.

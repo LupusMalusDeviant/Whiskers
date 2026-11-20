@@ -747,6 +747,9 @@ public sealed class MutationGateway : IMutationGateway
                     // The person whose approval was used for this run (approvers are always people, by email).
                     if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
                         scope.ApprovedBy = PrincipalIds.User(approver);
+                    // Contract 0017, amendment 2 (B2): which rules of the decision that approval covered.
+                    if (approval is { Approved: true })
+                        scope.ApprovedRules = new HashSet<string>(decision.MatchedRules, StringComparer.Ordinal);
                     try
                     {
                         value = await execute(context, deadline.Token);

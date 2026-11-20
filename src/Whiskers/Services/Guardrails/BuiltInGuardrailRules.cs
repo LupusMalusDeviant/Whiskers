@@ -210,6 +210,9 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                       ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
                           analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments), trusted)
                       : null);
+        // Contract 0017, amendment 2 (B1): a listed script reached by its file name or through its directory.
+        if (hit is null && change)
+            hit = ProtectedResourceMatcher.ListedScriptHit(request.Arguments, TrustedScripts.PathsOf(request.Context.Policy), trusted);
         // A capability that changes the control plane by what it is, not by what it names (mTLS material, a restore
         // of Whiskers' own data).
         if (hit is null && change && ControlPlaneResources.ChangesControlPlane(request.ToolName, request.Arguments))

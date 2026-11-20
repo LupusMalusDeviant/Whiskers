@@ -30,6 +30,10 @@ public enum GuardrailConfigProblemKind
 /// is the English text for logs.</summary>
 public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, string? Preset = null, string? Value = null)
 {
+    /// <summary>The <see cref="Value"/> of a <see cref="GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover"/>
+    /// refusal because the setting was switched on while the save waited (contract 0017, amendment 2, B2).</summary>
+    public const string SettingChangedMeanwhile = "setting-changed";
+
     public override string ToString() => Kind switch
     {
         GuardrailConfigProblemKind.NoPresets => "At least one preset is required.",
@@ -42,6 +46,8 @@ public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, str
         GuardrailConfigProblemKind.UnknownKillSwitchExemption => $"Preset '{Preset}': '{Value}' is not a kill-switch exemption that can be blocked.",
         GuardrailConfigProblemKind.InvalidTrustedScript => $"Preset '{Preset}': the trusted script '{Value}' is invalid or listed twice.",
         GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile => "The trusted scripts changed since this save was approved; nothing was saved.",
+        GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover when Value == SettingChangedMeanwhile =>
+            "The second-approver setting changed while this save waited; save again.",
         GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover => "Adding a trusted script needs a second Admin's approval; nothing was saved.",
         GuardrailConfigProblemKind.TrustedScriptsAuditFailed => "The change of the trusted scripts could not be audited; nothing was saved.",
         _ => Kind.ToString(),
