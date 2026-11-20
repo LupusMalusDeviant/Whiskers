@@ -77,8 +77,8 @@ Both are anonymous and answer only a status word.
   the host, not the recovery CLI: put a valid `guardrails.json` into the data directory (repair it, or restore it from a
   self-backup) and restart; or, with both files missing, run
   `docker exec whiskers dotnet Whiskers.dll --reset-guardrails` (installer; with the repository's compose file
-  `docker compose exec serverwatch …`), restart, and let an Admin switch the kill switch off on the Guardrails page (the reset writes the safe default with the kill switch on). Deleting both files is no
-  reset: it stays fail-closed.
+  `docker compose exec serverwatch …`), restart, and let an Admin switch the kill switch off on the Guardrails page
+  (the reset writes the safe default with the kill switch on). Deleting both files is no reset: it stays fail-closed.
 - **"protected" / needs an Admin approval:** the target is a protected resource or Whiskers' own control plane.
   An Admin decides it under *Approvals* (whether the requester may approve their own request follows the approval rules, PC-D4).
 - **An audit intent could not be written; operation refused:** the database cannot take the audit row. Check disk
