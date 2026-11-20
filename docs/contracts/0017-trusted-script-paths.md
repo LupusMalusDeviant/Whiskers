@@ -219,6 +219,57 @@ Tests for the amendment:
 - Turning the setting on between the decision and the save writes nothing. With the approval used, the save writes.
 - A `TrustedScript` that the caller set on the target is ignored.
 
+## Amendment 3 — fourth review (approved 20 November 2026)
+
+From the review of 20 November 2026 on `139dd5b3...a9b447b8`. All changes make the contract stricter. None of them
+widens what can run.
+
+The write protection (point 5, B1) matches spellings in free shell text. That list can never be complete. The guarantee
+remains the hash pin: a changed script does not run. B1 and C1 are defence in depth for the window between the last
+hash read and the start. That window is closed only by running a verified private copy, which is a separate topic.
+
+- **C1 (M, B1): more spellings.**
+  1. **`/proc` aliases.** The alias check reads every option value as well (after `=`, and after the first two
+     characters of a short option). It also covers a thread's alias (`/proc/<x>/task/<y>/root|cwd|fd`).
+     - A `cd` or `pushd` into `/proc`, or below it, makes the command unanalysable. This covers a relative operand
+       whose normalised form starts with `proc` too.
+  2. **`~`.** A word starting with `~` is a finding, like `.`, while a script is listed and the line is not
+     read-only. Its directory is not known.
+  3. **Globs.** A glob word whose last segment could match a listed script's file name (`x.s?`, `*.sh`) is a finding
+     while the line is not read-only.
+  4. **Renaming tools.** `rename`, `prename`, `perl-rename` and `file-rename` as a command make the line a finding
+     while a script is listed. Their targets come from an expression.
+- **C2 (L1, A1): the fixed read refuses a hard link and a writable file.** The read of point 4 also requires one link
+  (`stat -c %h` = 1), owner root (`stat -c %u` = 0), and no write bit for group or others. Otherwise there is no hash,
+  and the call fails closed. The BurgCloud scripts (root, 700) meet this.
+- **C3 (L2, point 1): no line break at the end.** The path, hash and call patterns are anchored at the true end of the
+  text (`\z`). So an entry with a trailing line break is invalid.
+- **C4 (L3, D-1 point 4): the store compares the approved argument too.** Within a `guardrails.save` scope, the call's
+  `trustedScriptsAdded` (empty when absent) must equal the additions the store computes under its lock. If it does
+  not, the save is refused as `TrustedScriptsChangedMeanwhile`.
+- **C5 (L4, page): a stale page cannot add back what someone else removed.**
+  - The Guardrails page keeps the configuration it loaded. It computes its additions against that, not against the
+    store's current one: what the Admin added on this page.
+  - The store compares them with its own additions (A4). An entry another Admin removed meanwhile is then an addition
+    for the store only. The save is refused as `TrustedScriptsChangedMeanwhile`, and the page asks to reload.
+  - After a successful save, the page takes the stored configuration as its new starting point.
+- **C6 (L5): documentation.** The misplaced XML summary goes back to `RecordChange`.
+
+Tests for the amendment:
+- For an MCP key, these are findings or unanalysable:
+  - `-C/proc/1/root/…` and `--directory=/proc/self/root/…`;
+  - `/proc/1/task/1/root/…`;
+  - `cd /proc && … self/root/…`;
+  - `-C ~/scripts`;
+  - `cp /tmp/e x.s?`;
+  - `rename .new '' /usr/local/sbin/x.sh.new`.
+- A hard link, a file not owned by root, and a group- or world-writable file yield no hash. The real-shell test runs in
+  Linux CI.
+- An entry with a trailing line break is invalid.
+- An approved save whose argument differs from the store's additions writes nothing.
+- A page loaded before another Admin removed an entry cannot save it back.
+- On the page, a failed hash read adds no entry and shows the error.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.

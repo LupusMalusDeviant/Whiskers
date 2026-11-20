@@ -532,13 +532,12 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         Changed?.Invoke();
     }
 
-    /// <summary>The policy change as part of the gateway's event (R1-22): versioned, every changed rule named. The
-    /// version of an unreadable file is that of no policy.</summary>
     /// <summary>
     /// Contract 0017, amendment 1, under the store's lock before anything is written. A4: the additions this save makes
     /// to the configuration the store holds must be the ones the gateway decided on (<paramref name="expected"/>), and a
     /// save that adds entries while the held active policy requires a second approver must name them. A5: a change of
-    /// the list is audited (server, path and hash of each entry added or removed) or nothing is saved.
+    /// the list is audited (server, path and hash of each entry added or removed) or nothing is saved. Amendment 3
+    /// (C4): within a <c>guardrails.save</c> scope, the call's own <c>trustedScriptsAdded</c> must name them too.
     /// </summary>
     private async Task GuardTrustedScriptsAsync(GuardrailConfig next, AgentPrincipal editor, string? expected)
     {
@@ -547,6 +546,9 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         var added = TrustedScripts.Additions(held, next);
         var removed = TrustedScripts.Additions(next, held);
         if (expected is not null && !string.Equals(expected, added, StringComparison.Ordinal))
+            throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile));
+        if (Whiskers.Services.Mutations.MutationScope.Current is { CapabilityId: TrustedScripts.SaveCapability } save
+            && !string.Equals(DecidedAdditions(save), added, StringComparison.Ordinal))
             throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile));
         if (expected is null && added.Length > 0 && held.ActivePolicy().RequireSecondApprover)
             throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover));
@@ -584,6 +586,15 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         Whiskers.Services.Mutations.MutationScope.Current is { CapabilityId: TrustedScripts.SaveCapability } scope
         && scope.ApprovedRules.Contains(TrustedScriptApprovalRule.RuleId);
 
+    // The additions the gateway decided this save on (an approval binds to them); empty when the call named none.
+    private static string DecidedAdditions(Whiskers.Services.Mutations.MutationScope scope) =>
+        scope.Arguments?.TryGetValue(TrustedScripts.AdditionsArgument, out var value) == true
+        && value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString() ?? ""
+            : "";
+
+    /// <summary>The policy change as part of the gateway's event (R1-22): versioned, every changed rule named. The
+    /// version of an unreadable file is that of no policy.</summary>
     private static void RecordChange(State before, GuardrailConfig after) =>
         Whiskers.Services.Mutations.ConfigChange.Record("guardrails", before.LoadError is null ? before.Config : null, after);
 

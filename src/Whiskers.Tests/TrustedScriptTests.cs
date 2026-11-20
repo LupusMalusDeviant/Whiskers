@@ -342,6 +342,17 @@ public sealed class TrustedScriptTests
             File.CreateSymbolicLink(link, script);
             var linkedDir = Path.Combine(dir, "via");
             Directory.CreateSymbolicLink(linkedDir, dir);
+            // Amendment 3 (C2): owned by root, one link, no write bit for group or others.
+            var hard = Path.Combine(dir, "hard.sh");
+            var hardTarget = Path.Combine(dir, "hard-target.sh");
+            File.WriteAllText(hardTarget, "#!/bin/sh\necho ok\n");
+            var writable = Path.Combine(dir, "writable.sh");
+            File.WriteAllText(writable, "#!/bin/sh\necho ok\n");
+            var foreign = Path.Combine(dir, "foreign.sh");
+            File.WriteAllText(foreign, "#!/bin/sh\necho ok\n");
+            Skip.IfNot(AsRoot("chown", "0:0", script, hardTarget, writable) && AsRoot("chmod", "644", script, hardTarget)
+                       && AsRoot("chmod", "664", writable) && AsRoot("chown", "65534", foreign)
+                       && AsRoot("ln", hardTarget, hard), "needs root or sudo -n");
 
             Assert.NotNull(HashOnShell(script));
             Assert.Null(HashOnShell(plain));
@@ -349,8 +360,32 @@ public sealed class TrustedScriptTests
             Assert.Null(HashOnShell(link));
             Assert.Null(HashOnShell(Path.Combine(linkedDir, "ok.sh")));   // a symlink further up the path
             Assert.Null(HashOnShell(Path.Combine(dir, "missing.sh")));
+            Assert.Null(HashOnShell(hard));          // two links
+            Assert.Null(HashOnShell(hardTarget));
+            Assert.Null(HashOnShell(writable));      // group-writable
+            Assert.Null(HashOnShell(foreign));       // not owned by root
         }
-        finally { Directory.Delete(dir, true); }
+        finally { AsRoot("rm", "-rf", dir); if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    // Runs a command as root: directly when the tests run as root (a container), else through a password-less sudo.
+    private static bool AsRoot(params string[] command)
+    {
+        var asRoot = Environment.UserName == "root";
+        var psi = new System.Diagnostics.ProcessStartInfo(asRoot ? command[0] : "sudo") { RedirectStandardError = true };
+        if (!asRoot)
+        {
+            psi.ArgumentList.Add("-n");
+            psi.ArgumentList.Add(command[0]);
+        }
+        foreach (var arg in command.Skip(1)) psi.ArgumentList.Add(arg);
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            p.WaitForExit();
+            return p.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception) { return false; }
     }
 
     private static string? HashOnShell(string path)
@@ -475,7 +510,7 @@ public sealed class TrustedScriptTests
             Assert.Null(store.Current.TrustedScripts);
             Assert.DoesNotContain(audit.Entries, e => e.Action == GuardrailStore.TrustedScriptsAuditAction);
 
-            using (ApprovedSave())
+            using (ApprovedSave(approved))
                 await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
             Assert.NotNull(store.Current.TrustedScripts);
         }
@@ -483,10 +518,15 @@ public sealed class TrustedScriptTests
     }
 
     /// <summary>The scope the gateway opens for a <c>guardrails.save</c> that used a second Admin's approval.</summary>
-    private static MutationScope ApprovedSave(string capability = TrustedScripts.SaveCapability,
+    private static MutationScope ApprovedSave(string? added = null, string capability = TrustedScripts.SaveCapability,
         string rule = TrustedScriptApprovalRule.RuleId)
     {
-        var scope = MutationScope.Begin(capability, "op-" + Guid.NewGuid().ToString("N")[..8]);
+        // Amendment 3 (C4): the scope carries the call's arguments, the approved additions among them.
+        var args = new Dictionary<string, string> { ["section"] = "guardrails" };
+        if (added is not null) args[TrustedScripts.AdditionsArgument] = added;
+        var request = new MutationRequest(capability, ProtectionHarness.UiAdmin, MutationSurface.Ui,
+            new MutationTarget("config", "guardrails"), ProtectionHarness.Args(args));
+        var scope = MutationScope.Begin(capability, "op-" + Guid.NewGuid().ToString("N")[..8], request: request);
         scope.ApprovedRules = new HashSet<string>(StringComparer.Ordinal) { rule };
         return scope;
     }
@@ -593,16 +633,16 @@ public sealed class TrustedScriptTests
             var outside = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
                 store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
             GuardrailConfigException other, otherRule;
-            using (ApprovedSave(capability: "host.exec"))
+            using (ApprovedSave(approved, capability: "host.exec"))
                 other = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
-            using (ApprovedSave(rule: "protected-resource"))
+            using (ApprovedSave(approved, rule: "protected-resource"))
                 otherRule = await Assert.ThrowsAsync<GuardrailConfigException>(() => store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
 
             foreach (var refused in new[] { outside, other, otherRule })
                 Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover, refused.Problem.Kind);
             Assert.Null(store.Current.TrustedScripts);
 
-            using (ApprovedSave())
+            using (ApprovedSave(approved))
                 await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
             Assert.NotNull(store.Current.TrustedScripts);
         }
@@ -743,5 +783,88 @@ public sealed class TrustedScriptTests
             new MutationTarget("host", "local", ServerId: "local"), args);
 
         Assert.False(GuardrailMutationPolicy.WithResolvedTarget(request).ContainsKey(TrustedScripts.ResolvedKey));
+    }
+
+    // ---------------------------------------------------------------- amendment 3
+
+    [Theory]
+    [InlineData("tar -xf /tmp/p.tar -C/proc/1/root/usr/local/sbin")]
+    [InlineData("tar -xf /tmp/p.tar --directory=/proc/self/root/usr/local/sbin")]
+    [InlineData("tar -xf /tmp/p.tar -C /proc/1/task/1/root/usr/local/sbin")]
+    [InlineData("cd /proc && tar -xf /tmp/p.tar -C self/root/usr/local/sbin")]
+    [InlineData("cd proc && ls")]
+    [InlineData("pushd /proc/self")]
+    public void C1_proc_aliases_in_option_values_threads_and_cd_are_unanalysable(string command) =>
+        Assert.True(ProtectedResourceMatcher.AnalyseShell(command).Unanalyzable);
+
+    [Theory]
+    [InlineData("tar -xf /tmp/p.tar -C ~/scripts")]
+    [InlineData("rsync -a /tmp/tree/ ~root/scripts/")]
+    [InlineData("cp /tmp/e burgcloud-db-dump.s?")]
+    [InlineData("cp /tmp/e *.sh")]
+    [InlineData("rename .new '' /usr/local/sbin/burgcloud-db-dump.sh.new")]
+    [InlineData("perl-rename s/x// /tmp/a")]
+    public async Task C1_tilde_globs_on_the_file_name_and_renaming_tools_are_findings(string command)
+    {
+        var h = new ProtectionHarness(
+            p => p.TrustedScripts = [new TrustedScript { ServerId = "burgcloud", Path = Dump, Sha256 = Approved }],
+            host: new HashHost());
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, command)).Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Theory]
+    [InlineData("ls ~")]
+    [InlineData("cp /tmp/a /tmp/*.txt")]
+    public async Task C1_reading_home_and_unrelated_globs_stay_possible(string command)
+    {
+        var h = new ProtectionHarness(
+            p => p.TrustedScripts = [new TrustedScript { ServerId = "burgcloud", Path = Dump, Sha256 = Approved }],
+            host: new HashHost());
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, command)).Status);
+    }
+
+    [Fact]
+    public void C2_the_fixed_read_requires_one_link_owner_root_and_no_foreign_write_bit()
+    {
+        var read = TrustedScripts.HashCommand(Dump);
+        Assert.Contains("stat -c %h:%u", read, StringComparison.Ordinal);
+        Assert.Contains("& 022", read, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(Dump + "\n", Approved)]
+    [InlineData(Dump, Approved + "\n")]
+    public void C3_a_trailing_line_break_makes_an_entry_invalid(string path, string sha)
+    {
+        Assert.False(TrustedScripts.IsValid(new TrustedScript { ServerId = "local", Path = path, Sha256 = sha }));
+        Assert.Null(TrustedScripts.CallPath(Dump + "\n"));
+    }
+
+    [Fact]
+    public async Task C4_an_approved_save_writes_only_the_additions_its_call_named()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: true);
+        try
+        {
+            var approved = TrustedScripts.Additions(store.Config, Adding(store));
+            var otherAdded = TrustedScripts.Additions(store.Config, Adding(store, Other));
+            // The approval covered other additions than the store would write (the caller passed matching ones).
+            GuardrailConfigException named, missing;
+            using (ApprovedSave(approved))
+                named = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                    store.SaveConfigAsync(Adding(store, Other), StoreAdmin, otherAdded));
+            using (ApprovedSave())
+                missing = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                    store.SaveConfigAsync(Adding(store), StoreAdmin, approved));
+
+            Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile, named.Problem.Kind);
+            Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile, missing.Problem.Kind);
+            Assert.Null(store.Current.TrustedScripts);
+        }
+        finally { Directory.Delete(dir, true); }
     }
 }

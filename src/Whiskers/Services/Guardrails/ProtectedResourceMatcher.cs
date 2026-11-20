@@ -327,16 +327,19 @@ public static class ProtectedResourceMatcher
             if (!text.Contains('>') && shell.CommandWords.Count > 0
                 && shell.CommandWords.All(w => ReadOnlyCommands.Contains(LastSegment(w))))
                 continue;
+            // Amendment 3 (C1): a renaming tool takes its targets from an expression.
+            if (shell.CommandWords.FirstOrDefault(w => RenamingTools.Contains(LastSegment(w))) is { } renaming)
+                return new Hit(renaming, listed[0]) { Argument = key, InFreeText = true };
             foreach (var word in shell.TrustedCall ? shell.Words.Skip(1) : shell.Words)
-            {
-                // An option's value is read on its own as well: after '=' (--target-directory=/usr/local/sbin) and
-                // attached to a short option (-C/usr/local/sbin).
-                var candidates = new List<string> { word };
-                if (word.IndexOf('=') is var eq and > 0) candidates.Add(word[(eq + 1)..]);
-                if (word.Length > 2 && word[0] == '-' && word[1] != '-') candidates.Add(word[2..]);
-                foreach (var candidate in candidates)
+                foreach (var candidate in WithOptionValues(word))
                     if (ListedTarget(candidate, byName, directories) is { } path)
                         return new Hit(word, path) { Argument = key, InFreeText = true };
+            // Amendment 3 (C1): a glob whose last segment could expand to a listed script's file name.
+            foreach (var glob in shell.Globs)
+            {
+                var last = Regex.Replace(LastSegment(glob), @"\[[^\]]*\]", "?");
+                if (byName.FirstOrDefault(n => GuardrailRuleHelpers.GlobMatch(last, n.Key)) is { Key: not null } named)
+                    return new Hit(glob, named.Value) { Argument = key, InFreeText = true };
             }
         }
         return null;
@@ -346,7 +349,8 @@ public static class ProtectedResourceMatcher
     {
         if (word.Length == 0 || word.StartsWith('-')) return null;
         // The working directory is not known: '.' and '..' could be any directory above a listed script.
-        if (word is "." or "..") return directories.Values.First();
+        // Nor is a home directory (~, ~/scripts, ~root): amendment 3 (C1).
+        if (word is "." or ".." || word.StartsWith('~')) return directories.Values.First();
         var normal = NormalizePath(word);
         if (normal.Length > 0 && byName.TryGetValue(LastSegment(normal), out var named)) return named;
         if (word.StartsWith('/')) return directories.GetValueOrDefault(normal);
@@ -687,7 +691,10 @@ public static class ProtectedResourceMatcher
         try { decoded = ShellUnanalyzable.IsMatch(text); }
         catch (RegexMatchTimeoutException) { decoded = true; }
         // Contract 0017, amendment 2 (B1): /proc/<pid>/root, cwd and fd reach any file under another spelling.
-        var aliased = words.Any(w => ProcAlias.IsMatch(w));
+        // Amendment 3 (C1): in an option's value too, a thread's alias, and a cd or pushd into /proc.
+        var aliased = words.SelectMany(WithOptionValues).Any(ProcAlias.IsMatch)
+                      || commands.Any(i => LastSegment(words[i]) is "cd" or "pushd" && i + 1 < words.Count
+                                           && IntoProc(words[i + 1]));
         var result = unanalyzable || decoded || aliased;
         return new ShellText(words, globs, result)
         {
@@ -732,8 +739,30 @@ public static class ProtectedResourceMatcher
     private static readonly Regex InterpreterVersion = new(@"^(python|pypy)\d*(\.\d+)?$|^(perl|ruby|php|lua|node)\d+(\.\d+)?$",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
-    private static readonly Regex ProcAlias = new(@"^/+proc/+[^/]+/+(root|cwd|fd)(/|$)",
+    private static readonly Regex ProcAlias = new(@"^/+proc/+[^/]+/+(task/+[^/]+/+)?(root|cwd|fd)(/|$)",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    // A cd target in /proc or below it, also relative to an unknown start directory (proc, ../proc/self).
+    private static bool IntoProc(string word)
+    {
+        var path = NormalizePath(word).TrimStart('/');
+        return path == "proc" || path.StartsWith("proc/", StringComparison.Ordinal);
+    }
+
+    /// <summary>A word and the option values it carries: after <c>=</c> (<c>--directory=/srv</c>) and attached to a
+    /// short option (<c>-C/srv</c>), each read on its own.</summary>
+    private static IEnumerable<string> WithOptionValues(string word)
+    {
+        yield return word;
+        if (word.IndexOf('=') is var eq and > 0) yield return word[(eq + 1)..];
+        if (word.Length > 2 && word[0] == '-' && word[1] != '-') yield return word[2..];
+    }
+
+    // Commands that rename by an expression (rename .new '' x.new, perl-rename 's/…//' …): amendment 3 (C1).
+    private static readonly HashSet<string> RenamingTools = new(StringComparer.Ordinal)
+    {
+        "rename", "prename", "perl-rename", "file-rename", "rename.ul",
+    };
 
     private static readonly Regex ScriptFile = new(@"\.(sh|bash|zsh|ksh|py|pl|rb|js|mjs|cjs|ts|php|lua|ps1)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));

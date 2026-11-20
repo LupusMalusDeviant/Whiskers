@@ -45,6 +45,7 @@ public sealed class MutationScope : IDisposable
         Principal = principal;
         _parent = parent;
         PinnedPolicy = request?.PinnedPolicy ?? parent?.PinnedPolicy;
+        Arguments = request?.Arguments;
         TriggerId = request?.TriggerId ?? parent?.TriggerId;
         _serverId = request?.Target.ServerId;
         // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
@@ -353,6 +354,10 @@ public sealed class MutationScope : IDisposable
     /// <summary>Contract 0017, amendment 2 (B2): the rules of this operation's decision that a used approval covered,
     /// set by the gateway for this scope only; empty when it ran without one.</summary>
     public IReadOnlySet<string> ApprovedRules { get; internal set; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>Contract 0017, amendment 3 (C4): the arguments of the call this scope was decided for (what an approval
+    /// bound to); <c>null</c> for a scope opened without a request.</summary>
+    internal IReadOnlyDictionary<string, System.Text.Json.JsonElement>? Arguments { get; }
 
     /// <summary>
     /// Reports on the current scope that the mutation failed although the code returns normally — for tools that

@@ -281,6 +281,8 @@
 
     private bool _isAdmin;
     private GuardrailConfig _config = new();
+    // Contract 0017, amendment 3 (C5): the configuration this page started from; its additions are counted against it.
+    private GuardrailConfig _loaded = new();
     private int _editIndex;
     private GuardrailPreset? _edit;
     private List<IGrouping<string, ToolInfo>> _toolsByCategory = new();
@@ -301,7 +303,8 @@
         _servers = ServerConfig.GetServers();
         _newScriptServer = _servers.FirstOrDefault(s => s.IsDefault)?.Id ?? _servers.FirstOrDefault()?.Id ?? "";
 
-        _config = Clone(GuardrailStore.Config);
+        _loaded = Clone(GuardrailStore.Config);
+        _config = Clone(_loaded);
         if (_config.Presets.Count == 0)
             _config.Presets.Add(new GuardrailPreset { Name = "Standard", Policy = GuardrailPolicy.SafeDefault() });
 
@@ -438,11 +441,13 @@
             // Contract 0017 (D-1, A4): the trusted scripts this save adds (or re-hashes) are part of the call, so a second
             // Admin's approval binds to exactly them; the store compares them under its lock, writes the audit row (A5)
             // and saves nothing when they changed meanwhile.
-            var added = TrustedScripts.Additions(GuardrailStore.Config, _config);
+            // C5: what the Admin added on this page; an entry someone else removed meanwhile makes the store refuse.
+            var added = TrustedScripts.Additions(_loaded, _config);
             var arguments = new Dictionary<string, object> { ["section"] = "guardrails" };
             if (added.Length > 0) arguments[TrustedScripts.AdditionsArgument] = added;
             await Mutations.RunAsync("guardrails.save", arguments,
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal, added));
+            _loaded = Clone(GuardrailStore.Config);
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) when (ex.Status == MutationStatus.PendingApproval

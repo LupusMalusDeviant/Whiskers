@@ -191,6 +191,42 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Assert.Contains("GuardrailsView_TrustedScripts_None", cut.Find("#trusted-scripts").TextContent);
     }
 
+    [Fact]
+    public void A_script_whose_hash_cannot_be_read_is_not_added()
+    {
+        // A symlink, an ELF program, a file without #!, a hard link or a writable file: the fixed read prints nothing.
+        _host.Fails = true;
+        var cut = Render<GuardrailsView>();
+        cut.Find("#trusted-scripts input[placeholder='/usr/local/sbin/backup.sh']").Change(Script);
+        cut.FindAll("#trusted-scripts button").Single(b => b.TextContent.Contains("GuardrailsView_TrustedScripts_Add")).Click();
+
+        cut.WaitForAssertion(() => Assert.Single(_host.Commands));
+        Assert.Empty(cut.FindAll("#trusted-scripts table"));
+        Assert.Contains("GuardrailsView_TrustedScripts_None", cut.Find("#trusted-scripts").TextContent);
+        Save(cut);
+        cut.WaitForAssertion(() => Assert.Contains("complete:Executed", Events()));
+        Assert.Null(_store.Current.TrustedScripts);
+    }
+
+    [Fact]
+    public async Task A_page_loaded_before_an_entry_was_removed_cannot_save_it_back()
+    {
+        var admin = new Whiskers.Models.Agent.AgentPrincipal(Whiskers.Models.Agent.AgentPrincipalKind.WebUser,
+            "other@example.com", Whiskers.Models.McpPermissionLevels.Admin, null, UserEmail: "other@example.com");
+        var listed = _store.Config;
+        listed.Presets[0].Policy.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Script, Sha256 = ScriptHash }];
+        await _store.SaveConfigAsync(listed, admin, TrustedScripts.Additions(_store.Config, listed));
+        var cut = Render<GuardrailsView>();                      // loaded with the entry
+
+        var removed = _store.Config;                              // another Admin revokes it meanwhile
+        removed.Presets[0].Policy.TrustedScripts = null;
+        await _store.SaveConfigAsync(removed, admin, "");
+        Save(cut);                                                // the stale page saves
+
+        cut.WaitForAssertion(() => Assert.Contains(Events(), e => e.StartsWith("complete:", StringComparison.Ordinal)));
+        Assert.Null(_store.Current.TrustedScripts);
+    }
+
     private readonly HashHost _host = new();
     private readonly RecordingAudit _auditLog = new();
 
@@ -198,12 +234,15 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     private sealed class HashHost : Whiskers.Services.Server.IHostCommandExecutor
     {
         public List<string> Commands { get; } = [];
+        public bool Fails { get; set; }
 
         public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,
             TimeSpan? timeout = null, CancellationToken ct = default, int? maxOutputChars = null)
         {
             Commands.Add($"{serverId}: {command}");
-            return Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 0, Output = $"{ScriptHash}  {Script}\n" });
+            return Task.FromResult(Fails
+                ? new Whiskers.Services.Server.CommandResult { ExitCode = 1 }
+                : new Whiskers.Services.Server.CommandResult { ExitCode = 0, Output = $"{ScriptHash}  {Script}\n" });
         }
     }
 

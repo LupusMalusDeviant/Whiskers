@@ -18,13 +18,14 @@ public static class TrustedScripts
 
     // An absolute path of plain characters; literal arguments of plain characters, separated by blanks. No quotes,
     // no $, no backticks, no braces, no globs, no ; | & < > # ~ or line breaks.
-    private static readonly Regex Call = new(@"^[ \t]*(?<path>/[A-Za-z0-9._+/-]+)(?:[ \t]+[A-Za-z0-9._+/,:=@%-]+)*[ \t]*$",
+    private static readonly Regex Call = new(@"^[ \t]*(?<path>/[A-Za-z0-9._+/-]+)(?:[ \t]+[A-Za-z0-9._+/,:=@%-]+)*[ \t]*\z",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
-    private static readonly Regex PathShape = new(@"^/[A-Za-z0-9._+/-]+$", RegexOptions.CultureInvariant,
+    // Amendment 3 (C3): anchored at the true end (\z); '$' would also accept a final line break.
+    private static readonly Regex PathShape = new(@"^/[A-Za-z0-9._+/-]+\z", RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(200));
 
-    private static readonly Regex Hex64 = new(@"^[0-9a-f]{64}$", RegexOptions.CultureInvariant,
+    private static readonly Regex Hex64 = new(@"^[0-9a-f]{64}\z", RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(200));
 
     /// <summary>The path of a command that has the shape of a trusted call (point 3), else <c>null</c>.</summary>
@@ -62,12 +63,14 @@ public static class TrustedScripts
 
     /// <summary>Amendment 1 (A1): the fixed command that reads a script's hash, and prints it only for a real script — a
     /// regular file, no symlink anywhere in its path (its canonical path is the path itself), starting with <c>#!</c>
-    /// (so no ELF program). Anything else prints nothing and fails, which callers treat as no hash (fail closed). The
-    /// path holds no quote (<see cref="IsValidPath"/>).</summary>
+    /// (so no ELF program). Amendment 3 (C2): with one link (no hard link to it elsewhere), owned by root, and no write
+    /// bit for group or others. Anything else prints nothing and fails, which callers treat as no hash (fail closed).
+    /// The path holds no quote (<see cref="IsValidPath"/>).</summary>
     public static string HashCommand(string path)
     {
         if (!IsValidPath(path)) throw new ArgumentException("Not a path that can be trusted.", nameof(path));
         return $"p='{path}'; [ -f \"$p\" ] && [ ! -L \"$p\" ] && [ \"$(realpath -e -- \"$p\")\" = \"$p\" ] " +
+               "&& [ \"$(stat -c %h:%u -- \"$p\")\" = 1:0 ] && [ $(( 0$(stat -c %a -- \"$p\") & 022 )) -eq 0 ] " +
                "&& [ \"$(head -c 2 -- \"$p\")\" = '#!' ] && sha256sum -- \"$p\"";
     }
 
