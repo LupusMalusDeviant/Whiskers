@@ -22,9 +22,10 @@ event per attempt. From 1.0.0 on, every pull request runs the gate in Line mode.
 
 A full review of the withdrawn 1.0.0 reproduced 98 findings, most with a failing test. All of them are fixed in this
 release, most with a regression test (the security fixes by contract 0017, listed under Security and Fixed), except
-three documentation findings that were corrected on `main` after the tag. Two were settled by a decision instead of
-the reproduced behaviour: the owner of a deleted local account (contract 0020) and the cooperative deadline (INV-40).
-What stays for 1.1.0 are the known limits named in INV-51, INV-58 (exception RG-1) and INV-59.
+three documentation findings that were corrected on `main` after the tag. Two of the findings were settled by a
+decision instead of the reproduced behaviour: the owner of a deleted local account (contract 0020) and the cooperative
+deadline (INV-40). What stays for 1.1.0 are the known limits named in INV-51, INV-58 (exception RG-1) and INV-59, and
+the missing version check of the whitelist editor (`docs/operations/local-accounts.md`).
 
 ### Upgrading from 0.15.0
 
@@ -45,7 +46,8 @@ Check these before or right after the update. Details are in the entries below.
     `Oidc__TrustEmailVerified=true` is set.
   - Without that setting, the first federated sign-in of an account waits for confirmation. Confirm it under
     Settings → Sign-in identities, or on the host:
-    `docker compose exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email>`.
+    `docker exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email>` (installer; with the repository's
+    compose file `docker compose exec serverwatch …`).
   - Use the second way when the only Admin signs in through OIDC.
 - **Reverse proxy.** Forwarded headers are trusted from loopback only. Behind a proxy on another address, name it with
   `ForwardedHeaders__TrustedNetworks__0`.
