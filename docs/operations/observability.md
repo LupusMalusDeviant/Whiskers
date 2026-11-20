@@ -11,7 +11,7 @@ Whiskers writes its logs to the console (standard output) of its process and now
 | Installation | Read the log with |
 |---|---|
 | Docker Compose | `docker compose logs -f serverwatch` (the service keeps its pre-rebrand name), or `docker logs -f <container>` |
-| Helm / Kubernetes | `kubectl logs -f deploy/<release name of the chart>` |
+| Helm / Kubernetes | `kubectl logs -f deploy/<release>-whiskers -c whiskers` (just `deploy/<release>` when the release name contains `whiskers`; `nameOverride`/`fullnameOverride` change it) |
 | `dotnet Whiskers.dll` | the terminal or the service manager (`journalctl -u <unit>`) |
 
 Retention and rotation belong to the container runtime (the Docker `json-file` driver's `max-size`/`max-file`, or the

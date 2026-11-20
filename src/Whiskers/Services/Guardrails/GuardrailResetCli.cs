@@ -5,7 +5,8 @@ namespace Whiskers.Services.Guardrails;
 /// <summary>
 /// Contract 0010 D6: the host-level way out of "the guardrail policy is missing although one existed".
 /// <c>dotnet Whiskers.dll --reset-guardrails</c>, run on the host inside the container
-/// (<c>docker compose exec whiskers dotnet Whiskers.dll --reset-guardrails</c>), writes
+/// (<c>docker exec whiskers dotnet Whiskers.dll --reset-guardrails</c>; with the repository's compose file
+/// <c>docker compose exec serverwatch …</c>), writes
 /// <see cref="Whiskers.Configuration.GuardrailConfig.SafeDefault"/> with the kill switch <b>on</b> (Q2) and ensures the
 /// database's record (<c>reset-cli</c>). The operator then restarts Whiskers and an Admin switches the kill switch off on
 /// the Guardrails page (E1, audited).

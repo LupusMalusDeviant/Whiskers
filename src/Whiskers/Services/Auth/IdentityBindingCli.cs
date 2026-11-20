@@ -4,7 +4,8 @@ namespace Whiskers.Services.Auth;
 /// R1-27 (contract 0003): host-level confirmation of a pending Google/OIDC binding request, for an OIDC provider that is
 /// not trusted to verify addresses (the default) or a federated-only Admin after an upgrade.
 /// <c>dotnet Whiskers.dll --confirm-identity-binding &lt;email&gt; [--issuer &lt;issuer&gt;]</c>, run inside the running
-/// container (<c>docker compose exec whiskers dotnet Whiskers.dll --confirm-identity-binding admin@example.com</c>),
+/// container (<c>docker exec whiskers dotnet Whiskers.dll --confirm-identity-binding admin@example.com</c>; with the
+/// repository's compose file <c>docker compose exec serverwatch …</c>),
 /// binds the newest pending request of that configured address. Exit codes: <c>0</c> bound, <c>2</c> usage, <c>3</c> no
 /// pending request for that address, <c>4</c> ambiguous (several issuers wait: one line per request with issuer, time and
 /// fingerprint — no email, no subject), <c>1</c> nothing changed.

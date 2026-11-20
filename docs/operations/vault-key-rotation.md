@@ -39,7 +39,7 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
    - the Audit page verifies the trail (it is re-signed under the new key) and shows one `vault.key_rotated` row
      (`system:vault-rotation`, counts only);
    - the servers answer (mTLS hosts are green, an SSH host's terminal opens);
-   - the readiness check shows **"VAULT_KEY-Rotation abschließen"**: the next step is still open.
+   - the readiness check shows **"Finish the VAULT_KEY rotation"**: the next step is still open.
 5. Replace the content of the `VAULT_KEY_FILE` file with the new key (or point `VAULT_KEY_FILE` at the new file).
    Then remove `VAULT_KEY_NEW_FILE` and restart once more. The readiness line goes away.
 6. Restore the `post-rotation` self-backup once on a test instance. After that the old key may leave the password

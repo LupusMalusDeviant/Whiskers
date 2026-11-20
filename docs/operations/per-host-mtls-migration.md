@@ -49,16 +49,16 @@ the listen or target flags, or the socket proxy.
 
 1. **The host your MCP clients reach Whiskers through** (a gateway, if you run one) first.
 2. Then **the host that serves your public website**, if Whiskers manages it.
-3. Then the rest of the fleet, **one host at a time**. Wait for each host to show *Eigene Identität … der Host nimmt nur
-   sie an* before you start the next.
+3. Then the rest of the fleet, **one host at a time**. Wait for each host to show *Own identity … the host admits only
+   it* before you start the next.
 
 Do not run a migration on the host that runs Whiskers itself while you have no other way to reach it.
 
 ## Migrating one host
 
-On the server page, an Admin clicks the key icon (*Migrieren*) on the host's row. The same step is available over MCP
-as `migrate_mtls_client_credential`, Admin only. Both run under the protected control plane, so each call needs an
-approval.
+On the server page, an Admin clicks the key icon (*Migrate to its own client credential*) on the host's row. The
+same step is available over MCP as `migrate_mtls_client_credential`, Admin only. Both run under the protected
+control plane, so each call needs an approval.
 
 The migration runs five phases and reports each one:
 
@@ -170,12 +170,12 @@ shared key still opens it.
     reach it. Rotating again does not help, because a rotation needs a working connection.
   - **What readiness shows:** a restore brings back the whole `{MtlsDir}` (rollout journals included) together with the
     records, so the restored record and journal agree with each other. Only the live read tells the host apart: its
-    ghostunnel arguments cannot be read. The line *mTLS-Proxy (ghostunnel) läuft* names it with *(Argumente nicht
-    lesbar)*, and the host's own *mTLS-Client-Identität* line points to the break-glass re-onboarding, not to
-    „Migrieren“, which cannot reach it either.
+    ghostunnel arguments cannot be read. The line *mTLS proxy (ghostunnel) running* names it with *(arguments not
+    readable)*, and the host's own *mTLS client identity* line points to the break-glass re-onboarding, not to
+    *Migrate to its own client credential*, which cannot reach it either.
   - **The way back** is the break-glass re-onboarding over SSH:
     1. In the server dialog, set the connection back to SSH and give it a bootstrap key or root password.
-    2. Run *Speichern & Onboarden*. The run writes the proxy's compose file again with the client name Whiskers holds
+    2. Run *Save & Onboard*. The run writes the proxy's compose file again with the client name Whiskers holds
        for the host, and switches the record back to TCP+mTLS.
     3. Alternatively, on the host (provider console or SSH), put the restored record's name back into `--allow-cn` and
        recreate ghostunnel as under phase 4 above.
@@ -188,7 +188,7 @@ shared key still opens it.
 
 ## Verifying a host
 
-- **Readiness.** The host's line reads *Eigene Identität whiskers-client-…-g{n} … der Host nimmt nur sie an*, and the
+- **Readiness.** The host's line reads *Own identity whiskers-client-…-g{n} … the host admits only it*, and the
   `--allow-cn` line is green.
 - **On the host.** Run this; it must list only the host's own name:
 

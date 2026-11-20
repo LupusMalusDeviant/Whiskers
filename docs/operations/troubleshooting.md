@@ -57,7 +57,7 @@ Both are anonymous and answer only a status word.
 |---|---|---|
 | every SSH-connected server "Unreachable" at once | The SSH tunnels died (network change, Whiskers host suspended). The connection manager rebuilds dead tunnels. | Wait one check interval. If it stays, check the Whiskers host's network and the mesh (`tailscale status`). |
 | one SSH server fails with a host-key error | Its host key changed since Whiskers pinned it (ADR-0002). After an **intended** rebuild this is expected; otherwise it may be a man in the middle. | The server page shows the pinned and the offered fingerprint. Compare the offered one with the host's console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`). Only if they match after an intended rebuild: *Replace pin…* (Admin, needs an Admin approval, audited as `hostkey.replace`). Otherwise investigate first; do not edit `known_hosts` by hand. |
-| readiness: "mTLS-Proxy (ghostunnel) läuft" not OK for a host | ghostunnel is not running there, or its arguments cannot be read. The mTLS channel is the only management path. | Break-glass re-onboarding over SSH ([per-host-mtls-migration.md](per-host-mtls-migration.md)). |
+| readiness: "mTLS proxy (ghostunnel) running" not OK for a host | ghostunnel is not running there, or its arguments cannot be read. The mTLS channel is the only management path. | Break-glass re-onboarding over SSH ([per-host-mtls-migration.md](per-host-mtls-migration.md)). |
 | readiness: a host still admits the shared client identity | A stolen shared key would open it. | *Migrate* the host, or narrow `--allow-cn` by hand for hosts with your own certificates ([per-host-mtls-migration.md](per-host-mtls-migration.md)). |
 | *Whiskers itself* (`/self-status`): a loop stalled, a circuit open (`whiskers_self_circuit_open`) | The host failed repeatedly and Whiskers backs off, or the server's checks are paused. | Open *Whiskers itself*: a skipped server says why. A paused server resumes under *Servers* ([observability.md](observability.md#signals-to-alert-on)). |
 | Docker calls are slow everywhere (`whiskers_self_call_wait_seconds_max` rising) | Calls wait for a budget slot, usually behind one slow host. | Find the slow host on *Whiskers itself*; pause its checks while you fix it. |
@@ -76,9 +76,9 @@ Both are anonymous and answer only a status word.
   sign-in bindings blocked). The Guardrails page and *Settings > Production ready?* name the reason. The way back is on
   the host, not the recovery CLI: put a valid `guardrails.json` into the data directory (repair it, or restore it from a
   self-backup) and restart; or, with both files missing, run
-  `docker compose exec whiskers dotnet Whiskers.dll --reset-guardrails`, restart, and let an Admin switch the kill switch
-  off on the Guardrails page (the reset writes the safe default with the kill switch on). Deleting both files is no
-  reset: it stays fail-closed.
+  `docker exec whiskers dotnet Whiskers.dll --reset-guardrails` (installer; with the repository's compose file
+  `docker compose exec serverwatch …`), restart, and let an Admin switch the kill switch off on the Guardrails page
+  (the reset writes the safe default with the kill switch on). Deleting both files is no reset: it stays fail-closed.
 - **"protected" / needs an Admin approval:** the target is a protected resource or Whiskers' own control plane.
   An Admin decides it under *Approvals* (whether the requester may approve their own request follows the approval rules, PC-D4).
 - **An audit intent could not be written; operation refused:** the database cannot take the audit row. Check disk

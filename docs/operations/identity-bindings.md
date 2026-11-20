@@ -56,8 +56,11 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
 - **On the host** (e.g. a federated-only Admin locked out after an upgrade), inside the running container:
 
   ```bash
-  docker compose exec serverwatch dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]
+  docker exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]
   ```
+
+  That is the installer's container name; with the repository's compose file use
+  `docker compose exec serverwatch …`.
 
   It binds the newest pending request of that configured address. Exit codes: `0` bound, `2` usage, `3` no pending
   request for that address, `4` several issuers pending (lists issuer, time and fingerprint per line — no address, no

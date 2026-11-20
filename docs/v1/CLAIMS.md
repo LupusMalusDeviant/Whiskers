@@ -139,7 +139,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `SECURITY.md` | `5ab8016d2397` | policy | \| `< 1.0` (beta) \| ❌ \| |
 | `SECURITY.md` | `e1ade1a68e7d` | limit | - **The Docker-API and host-control plan |
 | `SECURITY.md` | `7bd63b63bc53` | limit | - **Not covered in 1.0, by design** (pro |
-| `SECURITY.md` | `a223f82ae23f` | advice | - **Local accounts have no MFA in 1.0.** |
+| `SECURITY.md` | `237edc7cb1d8` | advice | - **Local accounts have no MFA in 1.0.** |
 | `SECURITY.md` | `26ac10ed8324` | advice | - Keep the agent's guardrail presets res |
 | `docs/architecture/security-architecture.md` | `59e9b730c50e` | pointer | How Whiskers reaches managed hosts, what |
 | `docs/architecture/security-architecture.md` | `7daa853142a0` | pointer | None of them uses SSH in steady state, a |

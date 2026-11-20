@@ -199,7 +199,8 @@ are logged (lines that quote rows are left out). <!-- claim:SEC-12 -->
   there; keep local accounts as a break-glass fallback with long, unique passwords, and delete the ones nobody needs.
   A suspected password leak: reset the account under *Settings > Local accounts* (its sessions end at once); with no
   Admin left who can sign in, issue a one-time recovery code on the host with
-  `docker compose exec serverwatch dotnet Whiskers.dll --recover-local-account <email>`
+  `docker exec whiskers dotnet Whiskers.dll --recover-local-account <email>` (installer; with the repository's
+  compose file `docker compose exec serverwatch …`)
   ([docs/operations/local-accounts.md](docs/operations/local-accounts.md)). <!-- claim-free:advice -->
 - Complete the setup wizard right after installation. It requires the one-time token from
   `/app/data/setup-token.txt` (or `WHISKERS_SETUP_TOKEN`), so an exposed port alone is not enough to claim Admin. <!-- claim:SEC-14 -->
