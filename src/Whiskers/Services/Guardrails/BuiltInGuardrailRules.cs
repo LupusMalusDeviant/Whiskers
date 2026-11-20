@@ -168,7 +168,9 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         // the control plane's own check finds something in the same argument (not a server named whiskers-vps).
         // Free text that cannot be analysed could name such a resource, so it is refused too.
         // Looked for on its own, before any name: a protected word elsewhere in the text must not hide it.
-        if (change && policy.Count > 0 && ProtectedResourceMatcher.FirstUnanalyzable(request.Arguments) is { } dynamicText)
+        // Contract 0017: a call of a script an Admin vouched for, verified by the resolver (server and hash).
+        var trusted = TrustedScripts.TrustedCallOf(request.Arguments, request.Context.Policy);
+        if (change && policy.Count > 0 && ProtectedResourceMatcher.FirstUnanalyzable(request.Arguments, trusted) is { } dynamicText)
         {
             reason = Describe(dynamicText);
             return GuardrailVerdict.Deny;
@@ -177,12 +179,12 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         {
             // Every argument the pattern hits counts: one the control plane explains does not hide another.
             var remaining = request.Arguments;
-            while (ProtectedResourceMatcher.FirstHit(remaining, [pattern], [], analyseFreeText: change) is { } policyHit)
+            while (ProtectedResourceMatcher.FirstHit(remaining, [pattern], [], analyseFreeText: change, trustedCall: trusted) is { } policyHit)
             {
                 // Free text that cannot be analysed is no evidence of the control plane: refused.
                 if (change && policyHit.UnanalyzableArgument is null && IsControlPlanePattern(pattern)
                     && policyHit.Argument is { } explained && remaining.ContainsKey(explained)
-                    && ControlPlaneFindsIn(request.Arguments, explained))
+                    && ControlPlaneFindsIn(request.Arguments, explained, trusted))
                 {
                     remaining = remaining.Where(a => a.Key != explained).ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal);
                     continue;
@@ -191,10 +193,13 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                 return GuardrailVerdict.Deny;
             }
         }
-        var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change)
+        // Contract 0017 (point 5): a listed script is protected from changes on every server; only the command word of
+        // a trusted call is not a finding. Confirmable by an interactive Admin like the control plane.
+        if (change) paths = [.. paths, .. TrustedScripts.PathsOf(request.Context.Policy)];
+        var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change, trustedCall: trusted)
                   ?? (change
                       ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
-                          analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments))
+                          analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments), trusted)
                       : null);
         // A capability that changes the control plane by what it is, not by what it names (mTLS material, a restore
         // of Whiskers' own data).
@@ -224,11 +229,11 @@ public sealed class ProtectedResourceRule : IGuardrailRule
     // Whether the control plane's own check (its names only where a container, volume or network can be named, its
     // paths) finds something in this one argument.
     private static bool ControlPlaneFindsIn(IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments,
-        string? argument) =>
+        string? argument, string? trusted) =>
         argument is not null && arguments.TryGetValue(argument, out var value)
         && ProtectedResourceMatcher.FirstHit(new Dictionary<string, System.Text.Json.JsonElement> { [argument] = value },
             ControlPlaneResources.NamePatterns, ControlPlaneResources.PathPatterns, analyseFreeText: true,
-            ControlPlaneResources.NamesApplyTo(arguments)) is not null;
+            ControlPlaneResources.NamesApplyTo(arguments), trusted) is not null;
 
     private static string Describe(ProtectedResourceMatcher.Hit hit) =>
         hit.UnanalyzableArgument is { } argument

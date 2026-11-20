@@ -668,7 +668,9 @@ public sealed class MutationGateway : IMutationGateway
         // Contract 0012 (D9): the object is read again right before it is acted on — after the intent and the claim,
         // before the approval is used. Vanished or changed (or a read that fails): the intent ends as the refusal, the
         // claim is released, the approval stays usable, nothing runs — one event (INV-45).
-        if (prepared.Resolved is { } decidedObject && capability.Resolution == TargetResolutionKind.Object
+        // Contract 0017 (point 4): a trusted script's hash is read again here too, although host.exec resolves a server.
+        if (prepared.Resolved is { } decidedObject
+            && (capability.Resolution == TargetResolutionKind.Object || decidedObject.Record.TrustedScript is not null)
             && _targets is not null)
         {
             TargetResolution confirmation;

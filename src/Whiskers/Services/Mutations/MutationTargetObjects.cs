@@ -177,6 +177,45 @@ public sealed partial class MutationTargetResolver
         }
     }
 
+    // ---- Trusted scripts (contract 0017) ----
+
+    /// <summary>
+    /// <c>host.exec</c> whose command is a trusted call of a script the active policy lists for the resolved server: the
+    /// script's SHA-256 is read on that server with the fixed <see cref="Whiskers.Services.Guardrails.TrustedScripts.HashCommand"/>
+    /// and must equal the approved one, or the call is refused before policy. The hash is part of the fingerprint, so
+    /// the gateway's confirmation right before the run reads it again (a change in between: nothing runs). Any other
+    /// command resolves to its server as before.
+    /// </summary>
+    private async Task<TargetResolution> TrustedScriptAsync(MutationRequest request, TargetResolution resolution,
+        MutationTarget host, CancellationToken ct)
+    {
+        if (Whiskers.Services.Guardrails.TrustedScripts.CallPath(MutationTargets.String(request.Arguments, "command")) is not { } path)
+            return resolution;
+        if (_services.GetService<Whiskers.Services.Guardrails.IGuardrailStore>() is not { } guardrails
+            || Whiskers.Services.Guardrails.TrustedScripts.Find(guardrails.Current, host.ServerId, path) is not { } entry)
+            return resolution;
+        string? hash = null;
+        if (_services.GetService<Whiskers.Services.Server.IHostCommandExecutor>() is { } executor)
+        {
+            try
+            {
+                hash = Whiskers.Services.Guardrails.TrustedScripts.ParseHash(await executor.ExecuteAsync(host.ServerId!,
+                    Whiskers.Services.Guardrails.TrustedScripts.HashCommand(path), TimeSpan.FromSeconds(20), ct));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                hash = null;
+            }
+        }
+        if (hash is null || !string.Equals(hash, entry.Sha256, StringComparison.Ordinal))
+            return Refuse($"The trusted script '{path}' on '{host.ServerId}' changed since it was approved, or its hash " +
+                          "could not be read; nothing ran.");
+        var verified = entry.Clone();
+        var serverId = host.ServerId;
+        return Done(host with { TrustedScript = verified },
+            t => new ResolvedHostObject(Token, t, Hash(serverId, "trusted-script", path, hash), null));
+    }
+
     // ---- Volumes (D5) ----
 
     /// <summary>

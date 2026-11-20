@@ -12,6 +12,9 @@ public enum GuardrailConfigProblemKind
     InvalidPattern,
     /// <summary>Contract 0009: an id in KillSwitchBlockedExemptions that is not a blockable exemption.</summary>
     UnknownKillSwitchExemption,
+    /// <summary>Contract 0017: a trusted script entry that is incomplete, not a path that can be trusted, has no valid
+    /// SHA-256, or is listed twice for one server.</summary>
+    InvalidTrustedScript,
 }
 
 /// <summary>One reason a configuration is refused. <paramref name="Preset"/> names the preset it concerns,
@@ -29,6 +32,7 @@ public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, str
         GuardrailConfigProblemKind.ActivePresetMissing => $"The active preset '{Preset}' does not exist.",
         GuardrailConfigProblemKind.InvalidPattern => $"Preset '{Preset}': '{Value}' is not a valid regex.",
         GuardrailConfigProblemKind.UnknownKillSwitchExemption => $"Preset '{Preset}': '{Value}' is not a kill-switch exemption that can be blocked.",
+        GuardrailConfigProblemKind.InvalidTrustedScript => $"Preset '{Preset}': the trusted script '{Value}' is invalid or listed twice.",
         _ => Kind.ToString(),
     };
 }
@@ -111,6 +115,14 @@ public class GuardrailConfig
             {
                 if (exemption is null || !KillSwitchExemptions.Blockable.Contains(exemption, StringComparer.Ordinal))
                     return new(GuardrailConfigProblemKind.UnknownKillSwitchExemption, preset.Name, exemption ?? "(empty)");
+            }
+            // Contract 0017 (point 1): every entry complete and trustable, each server and path once.
+            var seen = new HashSet<(string, string)>();
+            foreach (var script in preset.Policy.TrustedScripts ?? [])
+            {
+                if (!Whiskers.Services.Guardrails.TrustedScripts.IsValid(script) || !seen.Add((script.ServerId, script.Path)))
+                    return new(GuardrailConfigProblemKind.InvalidTrustedScript, preset.Name,
+                        script is null ? "(empty)" : $"{script.ServerId}:{script.Path}");
             }
         }
         return null;

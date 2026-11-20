@@ -280,6 +280,7 @@ public class MutationGatewayCoverageTests
     [
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
+        ("Whiskers.Components.Pages.GuardrailsView", "AddTrustedScript", "sha256sum of a script an Admin adds to the trusted scripts, a fixed command (contract 0017); the list is saved through guardrails.save"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumeInfoAsync", "docker volume ls --format json: the inventory a volume target is resolved against (contract 0012)"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
@@ -302,6 +303,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposeRunner", "PinAsync", "docker image inspect of the pins (contract 0013, D11); the pin file is written through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
+        ("Whiskers.Services.Mutations.MutationTargetResolver", "TrustedScriptAsync", "sha256sum of a trusted script before the decision and right before the run, a fixed command (contract 0017)"),
         ("Whiskers.Services.Mutations.VerifierSupport", "HostReadAsync", "the verifiers' read-back (R1-37)"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "ls -1Aq of the DB backup directory, inside db.backup_delete (INV-19 review); the rm of the chosen dumps runs on the primitive"),
         ("Whiskers.Services.Server.FirewallService", "GetStatusAsync", "ufw status"),

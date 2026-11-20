@@ -116,6 +116,11 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// approval binding, and checked again by the onboarding under the host lock: an approval given for one host is
     /// never used on another after the record was edited. Null for every other capability.</summary>
     public string? Connection { get; init; }
+
+    /// <summary>Contract 0017: for <c>host.exec</c>, the trusted script the command calls, as the resolver verified it on
+    /// the resolved server (its hash read there equals the approved one). The policy adapter hands it to the rules
+    /// (<see cref="Whiskers.Services.Guardrails.TrustedScripts.ResolvedKey"/>). Null for every other call.</summary>
+    public Whiskers.Configuration.TrustedScript? TrustedScript { get; init; }
 }
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>

@@ -64,8 +64,11 @@ internal sealed class ProtectionHarness
         Approvals = new ApprovalStore(policy: store);
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Audit, [],
             NullLogger<MutationGateway>.Instance,
+            // Contract 0017: the resolver reads the trusted scripts from the store and their hash through the host.
             targets: new MutationTargetResolver(planner is null
-                ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), Backups)
+                ? host is null
+                    ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), Backups, store)
+                    : new TestServices(Docker, new FakeServerConfig(Server(serverName)), Backups, store, host)
                 : host is null
                     ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), Backups)
                     : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), host, Backups)),

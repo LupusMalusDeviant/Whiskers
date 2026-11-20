@@ -304,6 +304,9 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         // Contract 0012 (D11): an nginx site, a systemd unit or a firewall rule on the server, against the host's listing.
         if (resolution.Target is { } onServer && CapabilityCatalog.HostObjects.Contains(capability.Id))
             return await HostObjectAsync(request, capability, onServer);
+        // Contract 0017 (point 4): a call of a script the policy trusts on this server, pinned to the hash read there.
+        if (resolution.Target is { } execHost && capability.Id == "host.exec")
+            return await TrustedScriptAsync(request, resolution, execHost, ct);
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
             return await WithStoppedContainersAsync(pruned,
                 MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);

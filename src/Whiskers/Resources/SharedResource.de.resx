@@ -6032,6 +6032,48 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
   </data>
+  <data name="GuardrailsView_Problem_InvalidTrustedScript" xml:space="preserve">
+    <value>Preset „{0}“: Das freigegebene Skript „{1}“ ist ungültig oder doppelt eingetragen. Nichts wurde gespeichert.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Title" xml:space="preserve">
+    <value>Freigegebene Skripte</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Intro" xml:space="preserve">
+    <value>Ein Skript, das über seinen Pfad aufgerufen wird, lässt sich nicht auf geschützte Ressourcen prüfen. Solange etwas geschützt ist, wird es deshalb abgelehnt. Ein hier eingetragenes Skript läuft auf seinem Server, wenn es genau über seinen Pfad mit einfachen Argumenten aufgerufen wird und sein Inhalt noch die SHA-256-Prüfsumme vom Eintragen hat. Eingetragene Skripte sind vor Änderungen geschützt. Nach einem Update den Eintrag entfernen und neu hinzufügen.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Path" xml:space="preserve">
+    <value>Skriptpfad</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_PathHelper" xml:space="preserve">
+    <value>Absoluter Pfad; keine Shell, kein Interpreter, keine Container-Runtime.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_None" xml:space="preserve">
+    <value>Keine freigegebenen Skripte.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Add" xml:space="preserve">
+    <value>Prüfsumme lesen und eintragen</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Invalid" xml:space="preserve">
+    <value>Bitte einen Server und einen absoluten Skriptpfad wählen, der freigegeben werden kann (keine Shell, kein Interpreter, keine Container-Runtime).</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Duplicate" xml:space="preserve">
+    <value>Dieses Skript ist für diesen Server schon eingetragen.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_HashFailed" xml:space="preserve">
+    <value>Die Prüfsumme von „{0}“ ließ sich auf „{1}“ nicht lesen.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_Added" xml:space="preserve">
+    <value>„{0}“ eingetragen (SHA-256 {1}). Zum Übernehmen speichern.</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_AuditFailed" xml:space="preserve">
+    <value>Gespeichert, aber die Änderung der freigegebenen Skripte ließ sich nicht ins Audit-Log schreiben.</value>
+  </data>
   <data name="GuardrailsView_Exemptions_Title" xml:space="preserve">
     <value>Bei eingeschaltetem Kill-Switch weiter erlaubt</value>
   </data>

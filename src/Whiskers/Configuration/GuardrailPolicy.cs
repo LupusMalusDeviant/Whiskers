@@ -23,6 +23,16 @@ public static class KillSwitchExemptions
     public const string RuleId = "read-only-mode";
 }
 
+/// <summary>Contract 0017: one script an Admin vouched for on one server, pinned to the SHA-256 of its content.</summary>
+public sealed class TrustedScript
+{
+    public string ServerId { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Sha256 { get; set; } = "";
+
+    public TrustedScript Clone() => new() { ServerId = ServerId, Path = Path, Sha256 = Sha256 };
+}
+
 /// <summary>The configurable but code-enforced security policy of the agent. Persisted in its
 /// own guardrails.json (admin-only). Defaults are deliberately restrictive:
 /// read-only autonomous, writes need confirmation, Whiskers itself is protected.</summary>
@@ -76,6 +86,20 @@ public class GuardrailPolicy
     {
         get => _killSwitchBlockedExemptions is { Count: > 0 } ? _killSwitchBlockedExemptions : null;
         set => _killSwitchBlockedExemptions = value;
+    }
+
+    private List<TrustedScript>? _trustedScripts;
+
+    /// <summary>Contract 0017: scripts an Admin vouched for, per server, pinned to their content's SHA-256. A command
+    /// that is exactly such a script with literal arguments is analysable; the listed paths are protected from
+    /// changes. Optional in <c>guardrails.json</c>, and left out of the stored and hashed policy while empty (an empty
+    /// list reads as <c>null</c>), so existing policies keep their version. An invalid entry makes the configuration
+    /// invalid (the store fails closed, INV-25).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<TrustedScript>? TrustedScripts
+    {
+        get => _trustedScripts is { Count: > 0 } ? _trustedScripts : null;
+        set => _trustedScripts = value;
     }
 
     /// <summary>Contract 0009: whether the kill switch is on and <paramref name="exemption"/> is blocked under it.</summary>
@@ -133,6 +157,7 @@ public class GuardrailPolicy
         ExposureLabelPrefixes = ExposureLabelPrefixes is null ? null : [.. ExposureLabelPrefixes],
         ExposureConfirmClasses = ExposureConfirmClasses is null ? null : [.. ExposureConfirmClasses],
         KillSwitchBlockedExemptions = KillSwitchBlockedExemptions is null ? null : [.. KillSwitchBlockedExemptions],
+        TrustedScripts = TrustedScripts?.Select(s => s?.Clone()!).ToList(),
     };
 
     /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),

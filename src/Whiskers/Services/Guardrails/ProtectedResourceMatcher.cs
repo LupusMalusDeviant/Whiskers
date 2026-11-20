@@ -63,8 +63,12 @@ public static class ProtectedResourceMatcher
     /// matched against names, <paramref name="pathPatterns"/> against path-like words.</summary>
     /// <param name="nameKeys">The arguments <paramref name="patterns"/> apply to; all when <c>null</c>. Paths and
     /// unanalysable free text are checked in every argument.</param>
+    /// <param name="trustedCall">Contract 0017: the path of a trusted call the rule verified (<see cref="TrustedScripts.TrustedCallOf"/>).
+    /// The <c>command</c> argument's command word is then spared the hidden-code verdict and not matched itself;
+    /// every other word is checked as before.</param>
     public static Hit? FirstHit(IReadOnlyDictionary<string, JsonElement> arguments, IReadOnlyList<string> patterns,
-        IReadOnlyList<string> pathPatterns, bool analyseFreeText, Func<string, bool>? nameKeys = null)
+        IReadOnlyList<string> pathPatterns, bool analyseFreeText, Func<string, bool>? nameKeys = null,
+        string? trustedCall = null)
     {
         if (patterns.Count == 0 && pathPatterns.Count == 0) return null;
         foreach (var (key, element) in arguments)
@@ -72,6 +76,8 @@ public static class ProtectedResourceMatcher
             var value = element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : element.GetRawText();
             // The resolved target's kind (container, whiskers, host …) is a category, not a name.
             if (key == ResolvedKindKey) continue;
+            // Contract 0017: the path the resolver verified is no resource named by the call.
+            if (key == TrustedScripts.ResolvedKey) continue;
             // Contract 0006: exposures are no resources; the resolved target carries them for ExposureChangeRule.
             if (IsExposureArgument(key)) continue;
             var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
@@ -101,8 +107,10 @@ public static class ProtectedResourceMatcher
             }
             if (freeText && ShellArguments.Contains(key))
             {
-                var shell = AnalyseShell(value);
-                foreach (var word in shell.Words.SelectMany(Words))
+                var shell = AnalyseShell(value, key == "command" ? trustedCall : null);
+                // Contract 0017: a trusted call's command word is the script the Admin vouched for, not a resource.
+                IReadOnlyList<string> checkedWords = shell.TrustedCall ? shell.Words.Skip(1).ToList() : shell.Words;
+                foreach (var word in checkedWords.SelectMany(Words))
                     if (WordHit(word, keyPatterns, pathPatterns, names: true) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
                 foreach (var glob in shell.Globs)
@@ -110,8 +118,8 @@ public static class ProtectedResourceMatcher
                         return hit with { Argument = key, InFreeText = true };
                 // A command that removes, moves or changes permissions of a directory above a protected path
                 // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
-                if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
-                    foreach (var word in shell.Words.Where(w => !w.StartsWith('-')))
+                if (checkedWords.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
+                    foreach (var word in checkedWords.Where(w => !w.StartsWith('-')))
                     {
                         if (word.StartsWith('/') && AncestorHit(word, pathPatterns) is { } above)
                             return above with { Argument = key, InFreeText = true };
@@ -283,8 +291,23 @@ public static class ProtectedResourceMatcher
 
     /// <summary>The first free-text argument that cannot be analysed (a command or SQL completed at run time, a
     /// compose file that is no YAML), found whatever else the arguments name; <c>null</c> when there is none.</summary>
-    public static Hit? FirstUnanalyzable(IReadOnlyDictionary<string, JsonElement> arguments) =>
-        FirstHit(arguments, [NoName], [], analyseFreeText: true) is { UnanalyzableArgument: not null } hit ? hit : null;
+    public static Hit? FirstUnanalyzable(IReadOnlyDictionary<string, JsonElement> arguments, string? trustedCall = null) =>
+        FirstHit(arguments, [NoName], [], analyseFreeText: true, trustedCall: trustedCall)
+            is { UnanalyzableArgument: not null } hit ? hit : null;
+
+    /// <summary>Contract 0017: a command name that can never be trusted — a shell, an interpreter, a container runtime,
+    /// a build or scheduling tool, a command prefix or one that builds its arguments from data.</summary>
+    public static bool IsUntrustableCommandName(string name) =>
+        Shells.Contains(name) || name is "su" or "." || IsInterpreter(name) || BuildTools.Contains(name)
+        || ShellRunTime.Contains(name) || CommandPrefixes.Contains(name) || IsRuntimeWord(name)
+        || name is "docker-compose" or "podman-compose" or "kubectl" or "ssh" or "find";
+
+    /// <summary>Contract 0017: whether a path is, or lies below or above, a path of the control plane.</summary>
+    public static bool IsControlPlanePath(string path) =>
+        Match(NormalizePath(path), ControlPlaneResources.PathPatterns) is not null
+        || AncestorHit(path, ControlPlaneResources.PathPatterns) is not null
+        || ControlPlaneResources.PathPatterns.Any(p => !p.StartsWith('*')
+            && NormalizePath(path).StartsWith(p.TrimEnd('*').TrimEnd('/') + "/", StringComparison.Ordinal));
 
     // A pattern no word matches: FirstHit then finds only what cannot be analysed.
     private const string NoName = "\u0000";
@@ -505,6 +528,10 @@ public static class ProtectedResourceMatcher
     public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable)
     {
         public bool RunsHiddenCode { get; init; }
+
+        /// <summary>Contract 0017: the text is exactly a call of the trusted script it was analysed with; its command
+        /// word (<c>Words[0]</c>) was spared the hidden-code verdict.</summary>
+        public bool TrustedCall { get; init; }
     }
 
     private const int MaxShellDepth = 4;
@@ -516,17 +543,25 @@ public static class ProtectedResourceMatcher
     /// interpreter, a script or program run by a relative path or a script by its path, a build tool, <c>.</c> and
     /// the commands that build their arguments from data (<c>xargs</c>, <c>eval</c>, <c>parallel</c>, …) are not.
     /// </summary>
-    public static ShellText AnalyseShell(string text)
+    /// <param name="trustedPath">Contract 0017: a script path the caller verified as trusted. When the text is exactly
+    /// a call of it (one command, that path as its first word, literal arguments), that command word alone is not
+    /// judged as hidden code.</param>
+    public static ShellText AnalyseShell(string text, string? trustedPath = null)
     {
         var words = new List<string>();
         var globs = new List<string>();
         var commands = new List<int>();
         var unanalyzable = Tokenize(text, words, globs, commands, 0);
+        var trusted = trustedPath is not null && !unanalyzable && globs.Count == 0
+                      && commands.Count == 1 && commands[0] == 0 && words.Count > 0
+                      && string.Equals(words[0], trustedPath, StringComparison.Ordinal)
+                      && string.Equals(TrustedScripts.CallPath(text), trustedPath, StringComparison.Ordinal);
         // Set below wherever a literal command runs code the text does not show (not built at run time).
         var hidden = false;
         foreach (var i in commands)
         {
             if (unanalyzable) break;
+            if (trusted && i == 0) continue;
             var word = words[i];
             var name = Path.GetFileName(word);
             var next = i + 1 < words.Count ? words[i + 1] : null;
@@ -566,7 +601,13 @@ public static class ProtectedResourceMatcher
         bool decoded;
         try { decoded = ShellUnanalyzable.IsMatch(text); }
         catch (RegexMatchTimeoutException) { decoded = true; }
-        return new ShellText(words, globs, unanalyzable || decoded) { RunsHiddenCode = hidden && !decoded };
+        var result = unanalyzable || decoded;
+        return new ShellText(words, globs, result)
+        {
+            RunsHiddenCode = hidden && !decoded,
+            // Only a call that stayed analysable counts as trusted (nothing else in it was a finding).
+            TrustedCall = trusted && !result,
+        };
     }
 
     /// <summary>A compose or stack command that changes containers (<c>docker compose down</c>, <c>docker-compose up</c>,

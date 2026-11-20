@@ -39,6 +39,10 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IGuardrailStore>(_store);
         Services.AddSingleton<IAgentToolRegistry>(new NoTools());
         Services.AddSingleton<ICurrentUserService>(_user);
+        // Contract 0017: the trusted-script editor lists servers, reads a hash and audits a change of the list.
+        Services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(ProtectionHarness.Local));
+        Services.AddSingleton<Whiskers.Services.Server.IHostCommandExecutor>(_host);
+        Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService>(_auditLog);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), _audit, [],
             NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), _store));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
@@ -149,6 +153,82 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
 
         cut.WaitForAssertion(() => Assert.Equal([KillSwitchExemptions.RecoveryCode], _store.Current.KillSwitchBlockedExemptions));
         Assert.Contains("begin:guardrails.save:", Events());
+    }
+
+    // ---- Contract 0017: trusted scripts ----
+
+    private const string Script = "/usr/local/sbin/burgcloud-db-dump.sh";
+    private const string ScriptHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    [Fact]
+    public void A_trusted_script_is_added_with_the_hash_read_on_the_server_and_its_save_is_audited()
+    {
+        var cut = Render<GuardrailsView>();
+        cut.Find("#trusted-scripts input[placeholder='/usr/local/sbin/backup.sh']").Change(Script);
+        cut.FindAll("#trusted-scripts button").Single(b => b.TextContent.Contains("GuardrailsView_TrustedScripts_Add")).Click();
+
+        cut.WaitForAssertion(() => Assert.Contains(ScriptHash[..12], cut.Find("#trusted-scripts").TextContent));
+        Assert.Null(_store.Current.TrustedScripts);                       // the edit buffer only
+        Assert.Equal([$"local: sha256sum -- '{Script}'"], _host.Commands);
+        Save(cut);
+
+        cut.WaitForAssertion(() => Assert.NotNull(_store.Current.TrustedScripts));
+        var entry = Assert.Single(_store.Current.TrustedScripts!);
+        Assert.Equal(("local", Script, ScriptHash), (entry.ServerId, entry.Path, entry.Sha256));
+        cut.WaitForAssertion(() => Assert.Contains(_auditLog.Entries, e => e.Action == "guardrails.trusted_scripts"
+            && e.Details!.Contains($"added Standard | local | {Script} | {ScriptHash}", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void An_interpreter_cannot_be_added_and_nothing_is_read()
+    {
+        var cut = Render<GuardrailsView>();
+        cut.Find("#trusted-scripts input[placeholder='/usr/local/sbin/backup.sh']").Change("/usr/bin/python3");
+        cut.FindAll("#trusted-scripts button").Single(b => b.TextContent.Contains("GuardrailsView_TrustedScripts_Add")).Click();
+
+        Assert.Empty(_host.Commands);
+        Assert.Empty(cut.FindAll("#trusted-scripts table"));   // nothing listed
+        Assert.Contains("GuardrailsView_TrustedScripts_None", cut.Find("#trusted-scripts").TextContent);
+    }
+
+    private readonly HashHost _host = new();
+    private readonly RecordingAudit _auditLog = new();
+
+    /// <summary>Answers the fixed hash command for <see cref="Script"/>.</summary>
+    private sealed class HashHost : Whiskers.Services.Server.IHostCommandExecutor
+    {
+        public List<string> Commands { get; } = [];
+
+        public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,
+            TimeSpan? timeout = null, CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Commands.Add($"{serverId}: {command}");
+            return Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 0, Output = $"{ScriptHash}  {Script}\n" });
+        }
+    }
+
+    private sealed class RecordingAudit : Whiskers.Services.AuditLog.IAuditLogService
+    {
+        public List<(string Action, string? Details)> Entries { get; } = [];
+
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            lock (Entries) Entries.Add((action, details));
+            return Task.CompletedTask;
+        }
+
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType,
+            string targetId, string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
+        public Task<List<Whiskers.Models.AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
+            string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(new List<Whiskers.Models.AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
     }
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }

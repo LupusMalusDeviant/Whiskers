@@ -548,6 +548,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     [
         nameof(GuardrailPolicy.RequireSecondApprover), nameof(GuardrailPolicy.ExposureLabelPrefixes),
         nameof(GuardrailPolicy.ExposureConfirmClasses), nameof(GuardrailPolicy.KillSwitchBlockedExemptions),
+        nameof(GuardrailPolicy.TrustedScripts),
     ];
 
     private static JsonNode? Field(JsonObject obj, string name, out bool present)

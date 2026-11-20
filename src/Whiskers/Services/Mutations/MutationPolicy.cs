@@ -137,6 +137,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         // INV-59 (#187): a re-onboarding replaces the host's mTLS state.
         if (t.HasControlPlaneState)
             args[ControlPlaneResources.ResolvedStateKey] = JsonSerializer.SerializeToElement(true);
+        // Contract 0017: the trusted script the resolver verified (server, path and hash).
+        if (t.TrustedScript is { } script)
+            args[TrustedScripts.ResolvedKey] = JsonSerializer.SerializeToElement(TrustedScripts.Encode(script));
         // Contract 0006: the exposures of the resolved target, for ExposureChangeRule only (the other rules skip them); a
         // withheld one under a prefix of its own.
         // Review m1: an entry whose value only is withheld under a prefix of its own, so the reason can name its key.

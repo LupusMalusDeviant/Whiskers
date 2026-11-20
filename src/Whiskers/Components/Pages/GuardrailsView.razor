@@ -11,6 +11,9 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
+@inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfig
+@inject Whiskers.Services.Server.IHostCommandExecutor Executor
+@inject Whiskers.Services.AuditLog.IAuditLogService AuditLog
 
 <PageTitle>Guardrails</PageTitle>
 
@@ -171,6 +174,63 @@
             </MudItem>
         </MudGrid>
 
+        @* Trusted scripts (contract 0017) *@
+        <MudPaper Class="pa-4 mt-4" id="trusted-scripts">
+            <div style="display:flex; align-items:center; gap:8px;" class="mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Primary" Size="Size.Small" />
+                <MudText Typo="Typo.subtitle1">@L["GuardrailsView_TrustedScripts_Title"]</MudText>
+            </div>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3 d-block">@L["GuardrailsView_TrustedScripts_Intro"]</MudText>
+            @if (_edit.Policy.TrustedScripts is { Count: > 0 } scripts)
+            {
+                <MudSimpleTable Dense="true" Class="mb-3">
+                    <thead>
+                        <tr>
+                            <th>@L["GuardrailsView_TrustedScripts_Server"]</th>
+                            <th>@L["GuardrailsView_TrustedScripts_Path"]</th>
+                            <th>SHA-256</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var script in scripts.ToList())
+                        {
+                            <tr>
+                                <td>@script.ServerId</td>
+                                <td style="font-family:monospace;">@script.Path</td>
+                                <td style="font-family:monospace;" title="@script.Sha256">@ShortHash(script.Sha256)</td>
+                                <td>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   title="@L["GuardrailsView_TrustedScripts_Remove"]"
+                                                   OnClick="@(() => RemoveTrustedScript(script))" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">@L["GuardrailsView_TrustedScripts_None"]</MudText>
+            }
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+                <MudSelect T="string" @bind-Value="_newScriptServer" Label="@L["GuardrailsView_TrustedScripts_Server"]"
+                           Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:200px;">
+                    @foreach (var server in _servers)
+                    {
+                        <MudSelectItem Value="@server.Id">@server.Name (@server.Id)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField T="string" @bind-Value="_newScriptPath" Label="@L["GuardrailsView_TrustedScripts_Path"]"
+                              Placeholder="/usr/local/sbin/backup.sh" Margin="Margin.Dense" Variant="Variant.Outlined"
+                              Style="min-width:320px;" HelperText="@L["GuardrailsView_TrustedScripts_PathHelper"]" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="AddTrustedScript" Disabled="_hashing"
+                           StartIcon="@Icons.Material.Filled.Fingerprint" Class="mt-1">
+                    @L["GuardrailsView_TrustedScripts_Add"]
+                </MudButton>
+            </div>
+        </MudPaper>
+
         @* Tool grid *@
         <MudPaper Class="pa-4 mt-4">
             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-2">
@@ -226,6 +286,12 @@
     private GuardrailPreset? _edit;
     private List<IGrouping<string, ToolInfo>> _toolsByCategory = new();
 
+    // Contract 0017: the trusted-script editor.
+    private List<Whiskers.Models.ServerConfig> _servers = new();
+    private string _newScriptServer = "";
+    private string _newScriptPath = "";
+    private bool _hashing;
+
     private string CsvProtected => string.Join(", ", _edit?.Policy.ProtectedResources ?? new());
     private string CsvForbidden => string.Join(", ", _edit?.Policy.ForbiddenArgPatterns ?? new());
 
@@ -233,6 +299,8 @@
     {
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
         if (!_isAdmin) return;
+        _servers = ServerConfig.GetServers();
+        _newScriptServer = _servers.FirstOrDefault(s => s.IsDefault)?.Id ?? _servers.FirstOrDefault()?.Id ?? "";
 
         _config = Clone(GuardrailStore.Config);
         if (_config.Presets.Count == 0)
@@ -368,9 +436,11 @@
         try
         {
             var principal = await BuildPrincipalAsync();
+            var trustedBefore = TrustedEntries(GuardrailStore.Config);
             await Mutations.RunAsync("guardrails.save", new { section = "guardrails" },
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal));
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
+            await AuditTrustedScriptsAsync(trustedBefore, TrustedEntries(GuardrailStore.Config));
         }
         catch (MutationRefusedException ex)
         {
@@ -443,7 +513,84 @@
         ExposureLabelPrefixes = s.ExposureLabelPrefixes is null ? null : new(s.ExposureLabelPrefixes),
         ExposureConfirmClasses = s.ExposureConfirmClasses is null ? null : new(s.ExposureConfirmClasses),
         KillSwitchBlockedExemptions = s.KillSwitchBlockedExemptions is null ? null : new(s.KillSwitchBlockedExemptions),
+        // Contract 0017: edited on this page; a copy never shares entries with the stored policy.
+        TrustedScripts = s.TrustedScripts?.Select(t => t.Clone()).ToList(),
     };
+
+    // ---- Trusted scripts (contract 0017) ----
+
+    private static string ShortHash(string sha) => sha.Length > 12 ? sha[..12] + "…" : sha;
+
+    /// <summary>Adds an entry to the edit buffer with the hash read on the server itself — an Admin never types one. It
+    /// takes effect with the next save (<c>guardrails.save</c>).</summary>
+    private async Task AddTrustedScript()
+    {
+        if (_edit is null) return;
+        var path = (_newScriptPath ?? "").Trim();
+        var server = _newScriptServer;
+        if (string.IsNullOrEmpty(server) || !TrustedScripts.IsValidPath(path))
+        {
+            Snackbar.Add(L["GuardrailsView_TrustedScripts_Invalid"].Value, Severity.Warning);
+            return;
+        }
+        if (TrustedScripts.Find(_edit.Policy, server, path) is not null)
+        {
+            Snackbar.Add(L["GuardrailsView_TrustedScripts_Duplicate"].Value, Severity.Warning);
+            return;
+        }
+        _hashing = true;
+        try
+        {
+            var hash = TrustedScripts.ParseHash(
+                await Executor.ExecuteAsync(server, TrustedScripts.HashCommand(path), TimeSpan.FromSeconds(20)));
+            if (hash is null)
+            {
+                Snackbar.Add(L["GuardrailsView_TrustedScripts_HashFailed", path, server].Value, Severity.Error);
+                return;
+            }
+            var list = _edit.Policy.TrustedScripts ?? new();
+            list.Add(new TrustedScript { ServerId = server, Path = path, Sha256 = hash });
+            _edit.Policy.TrustedScripts = list;
+            _newScriptPath = "";
+            Snackbar.Add(L["GuardrailsView_TrustedScripts_Added", path, ShortHash(hash)].Value, Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _hashing = false;
+        }
+    }
+
+    private void RemoveTrustedScript(TrustedScript script)
+    {
+        if (_edit?.Policy.TrustedScripts is not { } list) return;
+        list.Remove(script);
+        _edit.Policy.TrustedScripts = list.Count == 0 ? null : list;
+    }
+
+    /// <summary>Every trusted script of every preset, as "preset | server | path | sha256".</summary>
+    private static HashSet<string> TrustedEntries(GuardrailConfig config) =>
+        config.Presets.Where(p => p?.Policy is not null)
+            .SelectMany(p => (p.Policy.TrustedScripts ?? []).Where(s => s is not null)
+                .Select(s => $"{p.Name} | {s.ServerId} | {s.Path} | {s.Sha256}"))
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Contract 0017 (point 2): a save that changed the list is on record with every entry added or removed
+    /// (server, path and hash — never the script's content).</summary>
+    private async Task AuditTrustedScriptsAsync(HashSet<string> before, HashSet<string> after)
+    {
+        var added = after.Except(before).OrderBy(e => e, StringComparer.Ordinal).ToList();
+        var removed = before.Except(after).OrderBy(e => e, StringComparer.Ordinal).ToList();
+        if (added.Count == 0 && removed.Count == 0) return;
+        var details = string.Join("; ", added.Select(e => "added " + e).Concat(removed.Select(e => "removed " + e)));
+        var email = await CurrentUser.GetEmailAsync();
+        if (!await AuditLog.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.Person(email),
+                "guardrails.trusted_scripts", "guardrails", "trusted-scripts", "trusted scripts", details))
+            Snackbar.Add(L["GuardrailsView_TrustedScripts_AuditFailed"].Value, Severity.Error);
+    }
 
     /// <summary>Contract 0009 (D6): whether the edited preset blocks <paramref name="exemption"/> under the kill switch.</summary>
     private bool IsBlocked(string exemption) =>
