@@ -82,7 +82,12 @@ public static class ProtectedResourceMatcher
             if (IsExposureArgument(key)) continue;
             var keyPatterns = nameKeys is null || nameKeys(key) ? patterns : [];
             // A whole payload (SQL, a command) that matches is never quoted either: it can carry a credential.
-            if (Match(value, keyPatterns) is { } whole)
+            // Contract 0017: a trusted call is matched without its command word, the script the resolver verified.
+            var payload = key == "command" && trustedCall is not null
+                          && string.Equals(TrustedScripts.CallPath(value), trustedCall, StringComparison.Ordinal)
+                ? value.TrimStart()[trustedCall.Length..].Trim()
+                : value;
+            if (Match(payload, keyPatterns) is { } whole)
                 return new Hit(value, whole)
                 {
                     Argument = key,
@@ -316,13 +321,19 @@ public static class ProtectedResourceMatcher
         foreach (var (key, element) in arguments)
         {
             if (!ShellArguments.Contains(key) || element.ValueKind != JsonValueKind.String) continue;
-            var shell = AnalyseShell(element.GetString() ?? "", key == "command" ? trustedCall : null);
-            if (shell.CommandWords.Count > 0 && shell.CommandWords.All(w => ReadOnlyCommands.Contains(LastSegment(w))))
+            var text = element.GetString() ?? "";
+            var shell = AnalyseShell(text, key == "command" ? trustedCall : null);
+            // A redirection writes whatever its command is: such a line is never read-only (third review).
+            if (!text.Contains('>') && shell.CommandWords.Count > 0
+                && shell.CommandWords.All(w => ReadOnlyCommands.Contains(LastSegment(w))))
                 continue;
             foreach (var word in shell.TrustedCall ? shell.Words.Skip(1) : shell.Words)
             {
-                // An option's value (--target-directory=/usr/local/sbin) is read on its own as well.
-                var candidates = word.IndexOf('=') is var eq and > 0 ? new[] { word, word[(eq + 1)..] } : [word];
+                // An option's value is read on its own as well: after '=' (--target-directory=/usr/local/sbin) and
+                // attached to a short option (-C/usr/local/sbin).
+                var candidates = new List<string> { word };
+                if (word.IndexOf('=') is var eq and > 0) candidates.Add(word[(eq + 1)..]);
+                if (word.Length > 2 && word[0] == '-' && word[1] != '-') candidates.Add(word[2..]);
                 foreach (var candidate in candidates)
                     if (ListedTarget(candidate, byName, directories) is { } path)
                         return new Hit(word, path) { Argument = key, InFreeText = true };

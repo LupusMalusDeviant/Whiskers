@@ -183,6 +183,15 @@ stricter. None of them widens what can run.
   - Known limit: a command that picks its target names itself without naming them is not caught. An example is
     `tar -xf a.tar` with no `-C` while the start directory happens to be `/`. The hash pin catches such a change before
     the next run, and closing the window entirely is the separate topic of the private copy.
+  - Clarification after the third review (20 November 2026; the maintainer asked for all three fixes):
+    - A line with an output redirection (`>`, `>>`, `>|`, `&>`) is never read-only, whatever its commands are. So
+      `cat /tmp/x > ../usr/local/sbin/x.sh` is a finding.
+    - An option value is read on its own in both forms: after `=` (`--target-directory=/usr/local/sbin`) and attached
+      to a short option (`-C/usr/local/sbin`, `-d/usr/local/sbin`, which means the word without its first two
+      characters).
+    - A trusted call is not a finding of a policy pattern merely because the script's own path matches it (for
+      example `*backup*` for `/opt/backup.sh`). The whole command is matched without its command word. Every argument
+      word is still matched as before.
 - **B2 (L1, D-1 point 4): the store checks that the second Admin really decided.**
   - The gateway decides with the setting *Require a second approver* as it is at decision time. Someone can switch
     the setting on between the decision and the store's write. A save decided without approval would then still go

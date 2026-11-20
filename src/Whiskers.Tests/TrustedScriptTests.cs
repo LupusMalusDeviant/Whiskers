@@ -508,6 +508,13 @@ public sealed class TrustedScriptTests
     [InlineData("tar -xf /tmp/a.tar -C .")]
     [InlineData("cp -r /tmp/tree/ /")]
     [InlineData("install --target-directory=/usr/local/sbin /tmp/e")]
+    // Third review: a redirection writes whatever the command is, and an attached option value names a target.
+    [InlineData("cat /tmp/payload > ../usr/local/sbin/burgcloud-db-dump.sh")]
+    [InlineData("cat /tmp/payload >> sbin/burgcloud-db-dump.sh")]
+    [InlineData("grep x /tmp/a > burgcloud-db-dump.sh")]
+    [InlineData("tar -xf /tmp/payload.tar -C/usr/local/sbin")]
+    [InlineData("unzip -o /tmp/a.zip -d/usr/local/sbin")]
+    [InlineData("tar -xf /tmp/payload.tar -C../usr/local/sbin")]
     public async Task B1_every_spelling_of_a_listed_script_or_its_directory_is_a_finding(string command)
     {
         var h = new ProtectionHarness(
@@ -534,6 +541,20 @@ public sealed class TrustedScriptTests
             host: new HashHost());
 
         Assert.Equal(MutationStatus.Executed, (await AsKey(h, command)).Status);
+    }
+
+    [Fact]
+    public async Task A_trusted_call_is_no_finding_because_its_own_path_matches_a_policy_pattern()
+    {
+        var host = new HashHost();
+        var h = Trusting(host, protectedResources: "*burgcloud-db*");
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, Dump)).Status);
+        // An argument word that matches stays a finding.
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, Dump + " burgcloud-db-main")).Status);
+        // Without the entry, the whole command is matched as before.
+        var plain = new ProtectionHarness(p => p.ProtectedResources = ["*burgcloud-db*"], host: new HashHost());
+        Assert.Equal(MutationStatus.Denied, (await AsKey(plain, Dump)).Status);
     }
 
     [Fact]
