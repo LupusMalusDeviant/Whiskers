@@ -20,8 +20,11 @@ whether from the UI, MCP, the agent, a webhook or a scheduled task, runs through
 resolves the target, decides on a structured principal, asks for approval where the policy says so, and writes one audit
 event per attempt. From 1.0.0 on, every pull request runs the gate in Line mode.
 
-A full review of the withdrawn 1.0.0 reproduced 98 findings, most with a failing test. The security fixes and the
-crash fixes are part of this release (contract 0017, listed under Security and Fixed); the rest is planned for 1.1.0.
+A full review of the withdrawn 1.0.0 reproduced 98 findings, most with a failing test. All of them are fixed in this
+release, most with a regression test (the security fixes by contract 0017, listed under Security and Fixed), except
+three documentation findings that were corrected on `main` after the tag. Two were settled by a decision instead of
+the reproduced behaviour: the owner of a deleted local account (contract 0020) and the cooperative deadline (INV-40).
+What stays for 1.1.0 are the known limits named in INV-51, INV-58 (exception RG-1) and INV-59.
 
 ### Upgrading from 0.15.0
 

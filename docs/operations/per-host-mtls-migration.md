@@ -56,7 +56,7 @@ Do not run a migration on the host that runs Whiskers itself while you have no o
 
 ## Migrating one host
 
-On the server page, an Admin clicks the key icon (*Migrieren*) on the host's row. The same step is available over MCP
+On the server page, an Admin clicks the key icon (*Migrate to its own client credential*) on the host's row. The same step is available over MCP
 as `migrate_mtls_client_credential`, Admin only. Both run under the protected control plane, so each call needs an
 approval.
 
@@ -170,12 +170,12 @@ shared key still opens it.
     reach it. Rotating again does not help, because a rotation needs a working connection.
   - **What readiness shows:** a restore brings back the whole `{MtlsDir}` (rollout journals included) together with the
     records, so the restored record and journal agree with each other. Only the live read tells the host apart: its
-    ghostunnel arguments cannot be read. The line *mTLS-Proxy (ghostunnel) läuft* names it with *(Argumente nicht
-    lesbar)*, and the host's own *mTLS-Client-Identität* line points to the break-glass re-onboarding, not to
-    „Migrieren“, which cannot reach it either.
+    ghostunnel arguments cannot be read. The line *mTLS proxy (ghostunnel) running* names it with *(arguments not
+    readable)*, and the host's own *mTLS client identity* line points to the break-glass re-onboarding, not to
+    *Migrate to its own client credential*, which cannot reach it either.
   - **The way back** is the break-glass re-onboarding over SSH:
     1. In the server dialog, set the connection back to SSH and give it a bootstrap key or root password.
-    2. Run *Speichern & Onboarden*. The run writes the proxy's compose file again with the client name Whiskers holds
+    2. Run *Save & Onboard*. The run writes the proxy's compose file again with the client name Whiskers holds
        for the host, and switches the record back to TCP+mTLS.
     3. Alternatively, on the host (provider console or SSH), put the restored record's name back into `--allow-cn` and
        recreate ghostunnel as under phase 4 above.

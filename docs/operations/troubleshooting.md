@@ -76,7 +76,8 @@ Both are anonymous and answer only a status word.
   sign-in bindings blocked). The Guardrails page and *Settings > Production ready?* name the reason. The way back is on
   the host, not the recovery CLI: put a valid `guardrails.json` into the data directory (repair it, or restore it from a
   self-backup) and restart; or, with both files missing, run
-  `docker compose exec whiskers dotnet Whiskers.dll --reset-guardrails`, restart, and let an Admin switch the kill switch
+  `docker exec whiskers dotnet Whiskers.dll --reset-guardrails` (installer; with the repository's compose file
+  `docker compose exec serverwatch …`), restart, and let an Admin switch the kill switch
   off on the Guardrails page (the reset writes the safe default with the kill switch on). Deleting both files is no
   reset: it stays fail-closed.
 - **"protected" / needs an Admin approval:** the target is a protected resource or Whiskers' own control plane.
