@@ -6,8 +6,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with the next
-1.0.0. This entry is that release. Anyone who installed the withdrawn v1.0.0 or v1.0.1 updates to the new 1.0.0:
+## [1.0.0] — 2026-11-20
+
+v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with this
+release. Anyone who installed the withdrawn v1.0.0 or v1.0.1 updates to this 1.0.0:
 from v1.0.0, the last seven items of "Upgrading from 0.15.0" apply (OAuth whitelist to Metric retention); from
 v1.0.1, the last one (Metric retention).
 
