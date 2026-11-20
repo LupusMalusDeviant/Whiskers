@@ -48,7 +48,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | RM-22 | `README.md` | `d304424dbc9d` | `PATH_BASE` \| `PathBase` | artifact | `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-12 | `README.md` | `2807a5ff5649` | loopback only by default. | default | `ForwardedHeadersConfigTests.Without_configuration_only_loopback_is_trusted`, `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-23 | `README.md` | `fcbeb0625505` | Apache License 2.0 | artifact | `SelfReportClaimTests.The_stack_is_dotnet_10_under_the_apache_license_2` |
-| SEC-01 | `SECURITY.md` | `30036fb4eb56` | This source tree is the **stable** (`1.0.x`) line. | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
+| SEC-01 | `SECURITY.md` | `01cc5c2892bd` | This source tree is the **stable** (`1.0.x`) line. | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
 | SEC-02 | `SECURITY.md` | `2c3376c66abd` | Helm chart pins `replicas: 1` with a `Recreate` strategy | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
 | SEC-15 | `SECURITY.md` | `be2a1ac9b3fe` | roll out the mTLS certificates, the Docker proxy and telemetry | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
 | SEC-16 | `SECURITY.md` | `6f24cdfbc22b` | the Docker API (Docker Engine API over mutual TLS, client CN pinned, behind a verb-whitelisting socket proxy) | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
@@ -115,7 +115,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 
 | File | Block | Reason | Starts with |
 | --- | --- | --- | --- |
-| `README.md` | `edf4bc7be19b` | policy | **Status: 1.0.0 in preparation.** No 1.0 |
+| `README.md` | `c13702a701d0` | policy | **Status: stable (1.0).** Run it on a tr |
 | `README.md` | `941b3da88f96` | history | **Scope of this README:** `main`, i.e. t |
 | `README.md` | `323ff41f5965` | advice | ```bash VER=X.Y.Z # a release from https |
 | `README.md` | `2bf9fe4cfb10` | pointer | `docker run`, Compose, Helm, a reverse p |
@@ -135,7 +135,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `SECURITY.md` | `e24b21437c3c` | policy | \| Fix released for **critical / high** \| |
 | `SECURITY.md` | `586ef6d8f8ba` | policy | \| Fix released for **medium / low** \| wi |
 | `SECURITY.md` | `abca188454fb` | policy | If a target slips, you will hear so — wi |
-| `SECURITY.md` | `0cd2fc532ae9` | policy | \| `main` / `1.0.x` (once released) \| ✅ l |
+| `SECURITY.md` | `9bf87d10b106` | policy | \| `1.0.x` (stable) \| ✅ latest only \| |
 | `SECURITY.md` | `5ab8016d2397` | policy | \| `< 1.0` (beta) \| ❌ \| |
 | `SECURITY.md` | `e1ade1a68e7d` | limit | - **The Docker-API and host-control plan |
 | `SECURITY.md` | `7bd63b63bc53` | limit | - **Not covered in 1.0, by design** (pro |
