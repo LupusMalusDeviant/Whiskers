@@ -300,7 +300,11 @@ public static class ProtectedResourceMatcher
     public static bool IsUntrustableCommandName(string name) =>
         Shells.Contains(name) || name is "su" or "." || IsInterpreter(name) || BuildTools.Contains(name)
         || ShellRunTime.Contains(name) || CommandPrefixes.Contains(name) || IsRuntimeWord(name)
-        || name is "docker-compose" or "podman-compose" or "kubectl" or "ssh" or "find";
+        || name is "docker-compose" or "podman-compose" or "kubectl" or "ssh" or "find"
+        // Amendment 1 (A1): programs that run code named in their arguments; defence in depth behind the host-side
+        // check that only a real script (#!, no symlink) can be trusted.
+        || name is "awk" or "csh" or "tcsh" or "rbash" or "nsenter" or "unshare" or "runuser" or "setpriv" or "java"
+            or "dotnet" or "tar" or "rsync" or "sed" or "strace" or "gdb";
 
     /// <summary>Contract 0017: whether a path is, or lies below or above, a path of the control plane.</summary>
     public static bool IsControlPlanePath(string path) =>

@@ -49,13 +49,21 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     public event Action? Changed;
 
     public GuardrailStore(ILogger<GuardrailStore>? logger = null, string? filePath = null, DataPathOptions? dataPaths = null,
-        IGuardrailPolicyMarker? marker = null)
+        IGuardrailPolicyMarker? marker = null, IServiceProvider? services = null)
     {
         _logger = logger;
         _filePath = filePath ?? (dataPaths ?? DataPathOptions.Default).GuardrailsJson;
         _store = new JsonFileStore<GuardrailConfig>(_filePath);
         _marker = marker;
+        _services = services;
     }
+
+    // Contract 0017 (A5): the audit log is resolved when a save changes the trusted scripts, not at construction (the
+    // store is built before the database).
+    private readonly IServiceProvider? _services;
+
+    /// <summary>The action of the audit row a change of the trusted scripts writes (contract 0017, point 2).</summary>
+    public const string TrustedScriptsAuditAction = "guardrails.trusted_scripts";
 
     /// <summary>Contract 0010: true once the database confirmed the record that a guardrail policy has existed.</summary>
     public bool MarkerRecorded => _markerRecorded;
@@ -401,7 +409,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
     }
 
-    public async Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default)
+    public Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default) =>
+        SaveConfigAsync(config, editor, null, ct);
+
+    public async Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, string? expectedTrustedAdditions,
+        CancellationToken ct = default)
     {
         RequireAdmin(editor);
         ArgumentNullException.ThrowIfNull(config);
@@ -416,6 +428,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         try
         {
             var before = _state;
+            await GuardTrustedScriptsAsync(next, editor, expectedTrustedAdditions);
             await _store.SaveAsync(next);   // throws → the previous policy stays live
             _state = new State(next, null);
             await AfterSavedAsync();
@@ -450,6 +463,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             active.Policy = policy.Clone();
             if (next.Problem() is { } problem)
                 throw new GuardrailConfigException(problem);
+            await GuardTrustedScriptsAsync(next, editor, null);
             await _store.SaveAsync(next);
             _state = new State(next, null);
             await AfterSavedAsync();
@@ -520,6 +534,47 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
     /// <summary>The policy change as part of the gateway's event (R1-22): versioned, every changed rule named. The
     /// version of an unreadable file is that of no policy.</summary>
+    /// <summary>
+    /// Contract 0017, amendment 1, under the store's lock before anything is written. A4: the additions this save makes
+    /// to the configuration the store holds must be the ones the gateway decided on (<paramref name="expected"/>), and a
+    /// save that adds entries while the held active policy requires a second approver must name them. A5: a change of
+    /// the list is audited (server, path and hash of each entry added or removed) or nothing is saved.
+    /// </summary>
+    private async Task GuardTrustedScriptsAsync(GuardrailConfig next, AgentPrincipal editor, string? expected)
+    {
+        // What the gateway and the page compared with: the configuration the store shows (Config).
+        var held = Config;
+        var added = TrustedScripts.Additions(held, next);
+        var removed = TrustedScripts.Additions(next, held);
+        if (expected is not null && !string.Equals(expected, added, StringComparison.Ordinal))
+            throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile));
+        if (expected is null && added.Length > 0 && held.ActivePolicy().RequireSecondApprover)
+            throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover));
+        if (added.Length == 0 && removed.Length == 0) return;
+
+        var details = string.Join("; ",
+            added.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => "added " + l)
+                .Concat(removed.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => "removed " + l)));
+        var audit = _services?.GetService(typeof(Whiskers.Services.AuditLog.IAuditLogService))
+            as Whiskers.Services.AuditLog.IAuditLogService;
+        var written = false;
+        if (audit is not null)
+        {
+            try
+            {
+                written = await audit.TryLogAsync(
+                    Whiskers.Services.AuditLog.AuditPrincipals.Person(editor.UserEmail, editor.DisplayName),
+                    TrustedScriptsAuditAction, "guardrails", "trusted-scripts", "trusted scripts", details);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "The audit row of a trusted-script change could not be written.");
+            }
+        }
+        if (!written)
+            throw new GuardrailConfigException(new GuardrailConfigProblem(GuardrailConfigProblemKind.TrustedScriptsAuditFailed));
+    }
+
     private static void RecordChange(State before, GuardrailConfig after) =>
         Whiskers.Services.Mutations.ConfigChange.Record("guardrails", before.LoadError is null ? before.Config : null, after);
 

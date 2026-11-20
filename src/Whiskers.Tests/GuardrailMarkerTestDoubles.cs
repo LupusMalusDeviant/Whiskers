@@ -51,5 +51,6 @@ public static class GuardrailStoreTestExtensions
     }
 
     /// <summary>A store over <paramref name="path"/> with an empty in-memory record: a missing file is a first start.</summary>
-    public static GuardrailStore FirstStartStore(string path) => new(filePath: path, marker: new InMemoryGuardrailPolicyMarker());
+    public static GuardrailStore FirstStartStore(string path, IServiceProvider? services = null) =>
+        new(filePath: path, marker: new InMemoryGuardrailPolicyMarker(), services: services);
 }

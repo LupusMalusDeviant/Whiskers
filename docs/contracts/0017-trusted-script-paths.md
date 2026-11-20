@@ -105,6 +105,55 @@ Tests (once approved):
 - With the setting off, saving works as before.
 - Other additions than the approved ones raise a new request.
 
+## Amendment 1 — review findings (approved 20 November 2026)
+
+From the review of 20 November 2026 (findings M1, M2, L1, L2, L4). All changes make the contract stricter or make it
+hold as written. None of them widens what can run.
+
+- **A1 (M1, point 1 and point 4): only a real script can be trusted.**
+  - A name denylist does not pin the code a general-purpose program runs from its arguments (`awk -f`, `tar
+    --checkpoint-action=exec`, `rsync -e`, `java -jar`, `sed -f`, `nsenter`), nor does it stop a symlink with a
+    harmless name.
+  - The fixed read of point 4 therefore checks what the file is in the same call as the hash:
+    `p='<path>'; [ -f "$p" ] && [ ! -L "$p" ] && [ "$(realpath -e -- "$p")" = "$p" ] && [ "$(head -c 2 -- "$p")" = '#!' ] && sha256sum -- "$p"`.
+    That means a regular file, no symlink anywhere in its path, and starting with `#!`, so not an ELF program. If any
+    part fails, there is no hash: the page cannot add the entry, and the gateway refuses the call (fail closed).
+  - The same read is used when the page adds an entry, at the decision, and right before the run.
+  - The name denylist stays as defence in depth and grows by `awk`, `csh`, `tcsh`, `rbash`, `nsenter`, `unshare`,
+    `runuser`, `setpriv`, `java`, `dotnet`, `tar`, `rsync`, `sed`, `strace` and `gdb`.
+- **A2 (M2, point 4): the resolver uses the deciding policy.** The resolver reads the list from
+  `EffectivePolicy.Of(request.PinnedPolicy, store)`, the same policy the rules decide with (INV-23), never
+  `IGuardrailStore.Current`. A trusted call under an AI trigger's pinned preset then works, and its write protection
+  follows that preset's list.
+- **A3 (L4, interfaces): the verified server must match.** `TrustedCallOf` honours the resolved key only when its
+  server equals the request's resolved server (`__resolvedTargetId`); otherwise there is no trusted call.
+- **A4 (L1, D-1 point 4): binding under the store's lock.**
+  - `IGuardrailStore.SaveConfigAsync` takes the expected additions (`string? expectedTrustedAdditions`).
+  - Under its lock, the store recomputes the additions against the configuration it holds. It refuses the save when
+    they differ from the expected ones (when given).
+  - It also refuses any save with additions while the held active policy requires a second approver and the
+    additions were not passed in. So a save path that skips the gateway argument (e.g. preset activation) cannot add
+    entries.
+  - The page's own check before the save goes away.
+- **A5 (L2, point 2): the audit row is written by the store.**
+  - Under its lock, before it writes the file, the store writes the `guardrails.trusted_scripts` row with every entry
+    added or removed (preset, server, path, hash) and the editor.
+  - If the row cannot be written, the save is refused and nothing changes (fail closed).
+  - This covers every save path, preset activation included. The page no longer writes the row.
+- **Correction (point 3, interfaces).** The text said a trusted call is judged "with its argument words read as a
+  command of their own". The build does it more strictly: the whole command is analysed as usual, and only the hidden-
+  code verdict on its command word (and that word's own matching) is left out. Points 3 and the
+  `ProtectedResourceRule` line mean that.
+
+Tests for the amendment:
+- A symlink, an ELF program, a file without `#!` and an unreadable file yield no hash, both on the page and at the
+  gateway.
+- A trusted call under a pinned preset that lists the entry runs. Under one that does not list it, the call is refused.
+- A resolved key for another server is ignored.
+- A save whose additions changed under the lock writes nothing. A save with additions and no expected additions,
+  while the second approver is required, writes nothing.
+- An audit row that cannot be written refuses the save. Preset activation that drops entries writes the row.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.

@@ -60,11 +60,15 @@ public static class TrustedScripts
         catch (RegexMatchTimeoutException) { return false; }
     }
 
-    /// <summary>The fixed command that reads a script's hash (the path holds no quote, see <see cref="IsValidPath"/>).</summary>
+    /// <summary>Amendment 1 (A1): the fixed command that reads a script's hash, and prints it only for a real script — a
+    /// regular file, no symlink anywhere in its path (its canonical path is the path itself), starting with <c>#!</c>
+    /// (so no ELF program). Anything else prints nothing and fails, which callers treat as no hash (fail closed). The
+    /// path holds no quote (<see cref="IsValidPath"/>).</summary>
     public static string HashCommand(string path)
     {
         if (!IsValidPath(path)) throw new ArgumentException("Not a path that can be trusted.", nameof(path));
-        return $"sha256sum -- '{path}'";
+        return $"p='{path}'; [ -f \"$p\" ] && [ ! -L \"$p\" ] && [ \"$(realpath -e -- \"$p\")\" = \"$p\" ] " +
+               "&& [ \"$(head -c 2 -- \"$p\")\" = '#!' ] && sha256sum -- \"$p\"";
     }
 
     /// <summary>The hash a successful <see cref="HashCommand"/> printed, lowercase; <c>null</c> for anything else.</summary>
@@ -97,6 +101,10 @@ public static class TrustedScripts
         if (!arguments.TryGetValue(ResolvedKey, out var verified) || verified.ValueKind != JsonValueKind.String) return null;
         var parts = (verified.GetString() ?? "").Split('\u001f');
         if (parts.Length != 3) return null;
+        // Amendment 1 (A3): the verified server must be the server this request resolved to.
+        if (!arguments.TryGetValue("__resolvedTargetId", out var server) || server.ValueKind != JsonValueKind.String
+            || !string.Equals(server.GetString(), parts[0], StringComparison.Ordinal))
+            return null;
         if (Find(policy, parts[0], parts[1]) is not { } listed
             || !string.Equals(listed.Sha256, parts[2], StringComparison.Ordinal))
             return null;

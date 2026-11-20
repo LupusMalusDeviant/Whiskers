@@ -15,6 +15,14 @@ public enum GuardrailConfigProblemKind
     /// <summary>Contract 0017: a trusted script entry that is incomplete, not a path that can be trusted, has no valid
     /// SHA-256, or is listed twice for one server.</summary>
     InvalidTrustedScript,
+    /// <summary>Contract 0017, amendment 1 (A4): the trusted scripts a save adds differ from the ones it was approved
+    /// for (another save came in between).</summary>
+    TrustedScriptsChangedMeanwhile,
+    /// <summary>A4: a save adds trusted scripts while the policy requires a second approver, without the approved
+    /// additions.</summary>
+    TrustedScriptsNeedSecondApprover,
+    /// <summary>A5: the audit row of a change of the trusted scripts could not be written.</summary>
+    TrustedScriptsAuditFailed,
 }
 
 /// <summary>One reason a configuration is refused. <paramref name="Preset"/> names the preset it concerns,
@@ -33,6 +41,9 @@ public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, str
         GuardrailConfigProblemKind.InvalidPattern => $"Preset '{Preset}': '{Value}' is not a valid regex.",
         GuardrailConfigProblemKind.UnknownKillSwitchExemption => $"Preset '{Preset}': '{Value}' is not a kill-switch exemption that can be blocked.",
         GuardrailConfigProblemKind.InvalidTrustedScript => $"Preset '{Preset}': the trusted script '{Value}' is invalid or listed twice.",
+        GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile => "The trusted scripts changed since this save was approved; nothing was saved.",
+        GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover => "Adding a trusted script needs a second Admin's approval; nothing was saved.",
+        GuardrailConfigProblemKind.TrustedScriptsAuditFailed => "The change of the trusted scripts could not be audited; nothing was saved.",
         _ => Kind.ToString(),
     };
 }

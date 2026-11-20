@@ -140,7 +140,7 @@ public sealed class TrustedScriptTests
         Assert.Equal(2, h.Runs);
         // Read at the decision and again right before each run.
         Assert.Equal(4, host.Commands.Count);
-        Assert.All(host.Commands, c => Assert.Equal($"local: sha256sum -- '{Dump}'", c));
+        Assert.All(host.Commands, c => Assert.Equal($"local: {TrustedScripts.HashCommand(Dump)}", c));
     }
 
     [Fact]
@@ -256,15 +256,229 @@ public sealed class TrustedScriptTests
     {
         var policy = GuardrailPolicy.SafeDefault();
         policy.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved }];
-        Dictionary<string, JsonElement> Args(string verified) => ProtectionHarness.Args(new Dictionary<string, string>
-        {
-            ["command"] = Dump, [TrustedScripts.ResolvedKey] = verified,
-        });
+        Dictionary<string, JsonElement> Args(string verified, string resolvedServer = "local") =>
+            ProtectionHarness.Args(new Dictionary<string, string>
+            {
+                ["command"] = Dump, [TrustedScripts.ResolvedKey] = verified, ["__resolvedTargetId"] = resolvedServer,
+            });
 
         Assert.Equal(Dump, TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Approved}"), policy));
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Other}"), policy));      // other hash
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"web\u001f{Dump}\u001f{Approved}"), policy));      // other server
         Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f/opt/x.sh\u001f{Approved}"), policy)); // not listed
+        // A3: verified for one server, but the request resolved to another (or to none).
+        Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Approved}", resolvedServer: "web"), policy));
+        Assert.Null(TrustedScripts.TrustedCallOf(ProtectionHarness.Args(new Dictionary<string, string>
+        {
+            ["command"] = Dump, [TrustedScripts.ResolvedKey] = $"local\u001f{Dump}\u001f{Approved}",
+        }), policy));
+    }
+
+    // ---------------------------------------------------------------- amendment 1
+
+    [Theory]
+    [InlineData("/usr/bin/awk")]
+    [InlineData("/bin/tar")]
+    [InlineData("/usr/bin/rsync")]
+    [InlineData("/usr/bin/java")]
+    [InlineData("/usr/bin/dotnet")]
+    [InlineData("/bin/sed")]
+    [InlineData("/usr/bin/nsenter")]
+    [InlineData("/bin/tcsh")]
+    public void A_program_that_runs_code_from_its_arguments_cannot_be_listed(string path) =>
+        Assert.False(TrustedScripts.IsValid(new TrustedScript { ServerId = "local", Path = path, Sha256 = Approved }));
+
+    [Fact]
+    public async Task A_trusted_call_under_a_pinned_preset_is_verified_against_that_preset()
+    {
+        var host = new HashHost();
+        // The active preset lists nothing; the pinned one lists the script.
+        var h = new ProtectionHarness(p => p.ProtectedResources = ["whiskers-db"], host: host);
+        var pinned = GuardrailPolicy.SafeDefault();
+        pinned.ProtectedResources = ["whiskers-db"];
+        pinned.ForbiddenArgPatterns = [];
+        pinned.MaxAutonomousLevel = Whiskers.Models.McpPermissionLevels.Admin;
+        pinned.RequireConfirmationForWrites = false;
+        pinned.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved }];
+
+        var listed = await RunPinnedAsync(h, pinned, Dump);
+        pinned.TrustedScripts = null;
+        var unlisted = await RunPinnedAsync(h, pinned, Dump);
+
+        Assert.Equal(MutationStatus.Executed, listed.Status);
+        Assert.Equal(MutationStatus.Denied, unlisted.Status);
+        Assert.Equal(2, host.Commands.Count);   // read at the decision and before the run, for the listed one only
+    }
+
+    private static Task<MutationOutcome<int>> RunPinnedAsync(ProtectionHarness h, GuardrailPolicy pinned, string command)
+    {
+        var capability = new CapabilityCatalog().Find("host.exec")!;
+        var args = ProtectionHarness.Args(new { serverId = "local", command });
+        var request = new MutationRequest("host.exec", ProtectionHarness.AdminsTask(), MutationSurface.Automation,
+            MutationTargets.FromArguments(capability, args), args)
+        {
+            PinnedPolicy = new Whiskers.Models.Agent.PinnedPolicy("Pinned", pinned.Clone()),
+        };
+        return h.Gateway.ExecuteAsync(request, (_, _) => Task.FromResult(1));
+    }
+
+    /// <summary>A1: the fixed read on a real shell prints a hash only for a regular script file that starts with
+    /// <c>#!</c> and is not reached through a symlink.</summary>
+    [SkippableFact]
+    public void On_a_real_shell_only_a_real_script_yields_a_hash()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "needs a POSIX shell");
+        var dir = Path.Combine("/tmp", "ts-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var script = Path.Combine(dir, "ok.sh");
+            File.WriteAllText(script, "#!/bin/sh\necho ok\n");
+            var plain = Path.Combine(dir, "plain.sh");
+            File.WriteAllText(plain, "echo no shebang\n");
+            var elf = Path.Combine(dir, "prog");
+            File.WriteAllBytes(elf, [0x7f, (byte)'E', (byte)'L', (byte)'F', 2, 1, 1, 0]);
+            var link = Path.Combine(dir, "link.sh");
+            File.CreateSymbolicLink(link, script);
+            var linkedDir = Path.Combine(dir, "via");
+            Directory.CreateSymbolicLink(linkedDir, dir);
+
+            Assert.NotNull(HashOnShell(script));
+            Assert.Null(HashOnShell(plain));
+            Assert.Null(HashOnShell(elf));
+            Assert.Null(HashOnShell(link));
+            Assert.Null(HashOnShell(Path.Combine(linkedDir, "ok.sh")));   // a symlink further up the path
+            Assert.Null(HashOnShell(Path.Combine(dir, "missing.sh")));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    private static string? HashOnShell(string path)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("sh") { RedirectStandardOutput = true, RedirectStandardError = true };
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(TrustedScripts.HashCommand(path));
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        return TrustedScripts.ParseHash(new CommandResult { ExitCode = p.ExitCode, Output = output });
+    }
+
+    // A4/A5 on the real store.
+
+    private sealed class RecordingAudit(bool works = true) : Whiskers.Services.AuditLog.IAuditLogService
+    {
+        public List<(string Action, string? Details)> Entries { get; } = [];
+
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            Entries.Add((action, details));
+            return Task.CompletedTask;
+        }
+
+        public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType,
+            string targetId, string targetName, string? details = null, string? serverId = null, bool success = true)
+        {
+            if (!works) return false;
+            await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
+            return true;
+        }
+
+        public Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0, string? actionFilter = null,
+            string? targetTypeFilter = null) => Task.FromResult(new List<AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
+    }
+
+    private static readonly Whiskers.Models.Agent.AgentPrincipal StoreAdmin = new(
+        Whiskers.Models.Agent.AgentPrincipalKind.WebUser, "admin@x", Whiskers.Models.McpPermissionLevels.Admin, null,
+        UserEmail: "admin@x");
+
+    private static async Task<(GuardrailStore Store, string Dir)> StoreAsync(RecordingAudit? audit, bool secondApprover)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ts-store-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        var store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(dir, "guardrails.json"),
+            audit is null ? null : new TestServices(audit));
+        await store.StartAsync();
+        var config = store.Config;
+        config.Presets[0].Policy.RequireSecondApprover = secondApprover;
+        await store.SaveConfigAsync(config, StoreAdmin, expectedTrustedAdditions: "");
+        return (store, dir);
+    }
+
+    private static GuardrailConfig Adding(GuardrailStore store, string sha = Approved)
+    {
+        var config = store.Config;
+        config.Presets[0].Policy.TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Sha256 = sha }];
+        return config;
+    }
+
+    [Fact]
+    public async Task The_store_writes_the_audit_row_before_it_saves_a_change_of_the_list()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: false);
+        try
+        {
+            var next = Adding(store);
+            await store.SaveConfigAsync(next, StoreAdmin, TrustedScripts.Additions(store.Config, next));
+            Assert.NotNull(store.Current.TrustedScripts);
+
+            // A save that drops the entry without naming additions (as the preset activation does) is audited too.
+            var dropped = store.Config;
+            dropped.Presets[0].Policy.TrustedScripts = null;
+            await store.SaveConfigAsync(dropped, StoreAdmin);
+
+            Assert.Null(store.Current.TrustedScripts);
+            Assert.Equal(2, audit.Entries.Count(e => e.Action == GuardrailStore.TrustedScriptsAuditAction));
+            Assert.Contains(audit.Entries, e => e.Details == $"added Standard | local | {Dump} | {Approved}");
+            Assert.Contains(audit.Entries, e => e.Details == $"removed Standard | local | {Dump} | {Approved}");
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task Without_an_audit_row_the_list_is_not_changed()
+    {
+        foreach (var audit in new[] { null, new RecordingAudit(works: false) })
+        {
+            var (store, dir) = await StoreAsync(audit, secondApprover: false);
+            try
+            {
+                var next = Adding(store);
+                var ex = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                    store.SaveConfigAsync(next, StoreAdmin, TrustedScripts.Additions(store.Config, next)));
+                Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsAuditFailed, ex.Problem.Kind);
+                Assert.Null(store.Current.TrustedScripts);
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+    }
+
+    [Fact]
+    public async Task The_store_refuses_additions_other_than_the_approved_ones_or_none_named_under_a_second_approver()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: true);
+        try
+        {
+            var approved = TrustedScripts.Additions(store.Config, Adding(store));
+            var changed = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                store.SaveConfigAsync(Adding(store, Other), StoreAdmin, approved));
+            var unnamed = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                store.SaveConfigAsync(Adding(store), StoreAdmin));
+
+            Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsChangedMeanwhile, changed.Problem.Kind);
+            Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover, unnamed.Problem.Kind);
+            Assert.Null(store.Current.TrustedScripts);
+            Assert.DoesNotContain(audit.Entries, e => e.Action == GuardrailStore.TrustedScriptsAuditAction);
+
+            await store.SaveConfigAsync(Adding(store), StoreAdmin, approved);
+            Assert.NotNull(store.Current.TrustedScripts);
+        }
+        finally { Directory.Delete(dir, true); }
     }
 
     // ---------------------------------------------------------------- D-1: a second Admin for additions

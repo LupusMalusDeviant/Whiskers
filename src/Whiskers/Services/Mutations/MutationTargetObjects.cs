@@ -192,7 +192,9 @@ public sealed partial class MutationTargetResolver
         if (Whiskers.Services.Guardrails.TrustedScripts.CallPath(MutationTargets.String(request.Arguments, "command")) is not { } path)
             return resolution;
         if (_services.GetService<Whiskers.Services.Guardrails.IGuardrailStore>() is not { } guardrails
-            || Whiskers.Services.Guardrails.TrustedScripts.Find(guardrails.Current, host.ServerId, path) is not { } entry)
+            // Amendment 1 (A2): the policy the rules decide with — a pinned run's own preset (INV-23).
+            || Whiskers.Services.Guardrails.TrustedScripts.Find(EffectivePolicy.Of(request.PinnedPolicy, guardrails).Policy,
+                host.ServerId, path) is not { } entry)
             return resolution;
         string? hash = null;
         if (_services.GetService<Whiskers.Services.Server.IHostCommandExecutor>() is { } executor)

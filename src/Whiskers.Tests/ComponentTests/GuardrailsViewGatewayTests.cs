@@ -29,7 +29,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     public GuardrailsViewGatewayTests()
     {
         Directory.CreateDirectory(_dir);
-        _store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(_dir, "guardrails.json"));
+        _store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(_dir, "guardrails.json"), new TestServices(_auditLog));
         _store.StartAsync().GetAwaiter().GetResult();
 
         Services.AddLogging();
@@ -169,7 +169,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
 
         cut.WaitForAssertion(() => Assert.Contains(ScriptHash[..12], cut.Find("#trusted-scripts").TextContent));
         Assert.Null(_store.Current.TrustedScripts);                       // the edit buffer only
-        Assert.Equal([$"local: sha256sum -- '{Script}'"], _host.Commands);
+        Assert.Equal([$"local: {TrustedScripts.HashCommand(Script)}"], _host.Commands);
         Save(cut);
 
         cut.WaitForAssertion(() => Assert.NotNull(_store.Current.TrustedScripts));
