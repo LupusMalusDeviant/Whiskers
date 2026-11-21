@@ -340,6 +340,13 @@ public static class ProtectedResourceMatcher
                 var last = Regex.Replace(LastSegment(glob), @"\[[^\]]*\]", "?");
                 if (byName.FirstOrDefault(n => GuardrailRuleHelpers.GlobMatch(last, n.Key)) is { Key: not null } named)
                     return new Hit(glob, named.Value) { Argument = key, InFreeText = true };
+                // Sixth review: a glob that could expand to a listed script's directory or one above it (-C /srv/jo?s).
+                foreach (var candidate in WithOptionValues(glob).Where(c => c.StartsWith('/')))
+                {
+                    var pattern = Regex.Replace(NormalizePath(candidate), @"\[[^\]]*\]", "?");
+                    if (directories.FirstOrDefault(d => GuardrailRuleHelpers.GlobMatch(pattern, d.Key)) is { Key: not null } dir)
+                        return new Hit(glob, dir.Value) { Argument = key, InFreeText = true };
+                }
             }
         }
         return null;
@@ -676,6 +683,10 @@ public static class ProtectedResourceMatcher
                     || Match(NormalizePath(r), ControlPlaneResources.PathPatterns) is not null);
             }
         }
+        // Contract 0017 (point 3, sixth review): a trusted call's arguments go to a script that may run them, so any
+        // argument that names a code runner (python3 payload, make -f x.mk, sudo id) is hidden code, whatever follows.
+        if (trusted && !unanalyzable && words.Skip(1).Any(w => IsUntrustableCommandName(LastSegment(w))))
+            unanalyzable = hidden = true;
         // A shell or an interpreter as an argument (docker exec -i db sh, ssh host python3 x.py) runs what it is fed.
         for (var w = 0; w < words.Count && !unanalyzable; w++)
         {

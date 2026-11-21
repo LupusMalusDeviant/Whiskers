@@ -284,7 +284,7 @@ public sealed class TrustedScriptApprovalRule : IGuardrailRule
         {
             // The approval card must show every line; additions it would cut off are refused (fifth review).
             if (added.ValueKind != System.Text.Json.JsonValueKind.String
-                || added.GetString()!.Length > TrustedScripts.MaxAdditionsChars)
+                || TrustedScripts.CardLength(added.GetString()!) > TrustedScripts.MaxAdditionsChars)
             {
                 reason = $"Too many trusted scripts in one save (at most {TrustedScripts.MaxAdditionsChars} characters); add fewer at once.";
                 return GuardrailVerdict.Deny;

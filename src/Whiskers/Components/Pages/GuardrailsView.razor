@@ -443,7 +443,7 @@
             // and saves nothing when they changed meanwhile.
             // C5: what the Admin added on this page; an entry someone else removed meanwhile makes the store refuse.
             var added = TrustedScripts.Additions(_loaded, _config);
-            if (added.Length > TrustedScripts.MaxAdditionsChars)
+            if (TrustedScripts.CardLength(added) > TrustedScripts.MaxAdditionsChars)
             {
                 Snackbar.Add(L["GuardrailsView_TrustedScripts_TooMany"].Value, Severity.Warning);
                 return;

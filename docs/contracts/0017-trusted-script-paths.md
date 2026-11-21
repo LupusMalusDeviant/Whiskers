@@ -285,6 +285,18 @@ build hold what point 3, D-1 point 3 and C1 already say:
 Tests: an unquoted `sh -c` script as command word and as argument of a trusted call; the approval card of an addition
 lists server, path and hash; a too-long argument is refused; `/./proc/self/root/…` is unanalysable.
 
+Clarification after the sixth review (21 November 2026; the maintainer asked for all three fixes and agreed that a
+review of only the fix commit decides the deploy):
+- **No code runner among a trusted call's arguments.** Point 3 says a shell or an interpreter among the arguments
+  stays a finding. In the build, the general check flagged an interpreter only when the next word looked like a file
+  or an option. For a trusted call, every argument whose name can never be trusted (`IsUntrustableCommandName`: shells,
+  interpreters, build tools, command prefixes, runtimes …) makes the call unanalysable as hidden code, whatever
+  follows. `/opt/runner.sh python3 payload` and `/opt/runner.sh make -f /tmp/x.mk` are refused.
+- **A directory glob is compared with the listed directories.** A glob that could expand to a listed script's
+  directory or one above it (`/srv/jo?s`, `-C/usr/local/sb*`) is a finding while the line is not read-only.
+- **The limit counts what the card stores.** The 3000 characters are measured on the additions as JSON-escaped
+  text, which is what the approval card holds. A preset name full of quotes cannot push lines off the card.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.

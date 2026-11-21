@@ -935,4 +935,58 @@ public sealed class TrustedScriptTests
         Assert.Empty(h.Approvals.GetPending());
         Assert.Equal(0, h.Runs);
     }
+
+    // ---------------------------------------------------------------- sixth review
+
+    [Theory]
+    [InlineData(" python3 payload")]
+    [InlineData(" make -f /tmp/evil.mk")]
+    [InlineData(" perl x")]
+    [InlineData(" sudo id")]
+    [InlineData(" docker ps")]
+    public async Task No_code_runner_among_a_trusted_calls_arguments(string arguments)
+    {
+        var host = new HashHost();
+        var h = Trusting(host);
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, Dump + arguments)).Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Fact]
+    public async Task Plain_arguments_of_a_trusted_call_still_run()
+    {
+        var host = new HashHost();
+        var h = Trusting(host);
+
+        Assert.Equal(MutationStatus.Executed, (await AsKey(h, Dump + " burgcloud --keep=7")).Status);
+    }
+
+    [Theory]
+    [InlineData("tar -xf /tmp/p.tar -C /usr/local/sb?n")]
+    [InlineData("tar -xf /tmp/p.tar -C/usr/lo*/sbin")]
+    [InlineData("cp -r /tmp/tree /usr/*")]
+    public async Task A_directory_glob_that_could_reach_a_listed_script_is_a_finding(string command)
+    {
+        var h = new ProtectionHarness(
+            p => p.TrustedScripts = [new TrustedScript { ServerId = "burgcloud", Path = Dump, Sha256 = Approved }],
+            host: new HashHost());
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, command)).Status);
+    }
+
+    [Fact]
+    public async Task The_limit_counts_the_escaped_text_the_card_stores()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        // Short as raw text, but every quote doubles in the stored JSON.
+        var quotes = new string('"', 1300);
+        var added = $"{quotes} | local | /opt/jobs/a.sh | {Approved}\n{quotes} | local | /opt/jobs/b.sh | {Approved}";
+        Assert.True(added.Length <= TrustedScripts.MaxAdditionsChars);
+
+        var outcome = await SaveAsync(h, added);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+    }
 }

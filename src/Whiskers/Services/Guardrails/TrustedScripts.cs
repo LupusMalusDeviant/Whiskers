@@ -20,6 +20,11 @@ public static class TrustedScripts
     /// 4000 characters for all arguments) shows every line (contract 0017, fifth review).</summary>
     public const int MaxAdditionsChars = 3000;
 
+    /// <summary>The length of <paramref name="additions"/> as the approval card stores it: JSON-escaped (sixth review).
+    /// That length, not the raw one, is held to <see cref="MaxAdditionsChars"/>.</summary>
+    public static int CardLength(string additions) =>
+        System.Text.Json.JsonSerializer.Serialize(additions, Whiskers.Utils.SinkRedaction.JsonOptions).Length;
+
     // An absolute path of plain characters; literal arguments of plain characters, separated by blanks. No quotes,
     // no $, no backticks, no braces, no globs, no ; | & < > # ~ or line breaks.
     private static readonly Regex Call = new(@"^[ \t]*(?<path>/[A-Za-z0-9._+/-]+)(?:[ \t]+[A-Za-z0-9._+/,:=@%-]+)*[ \t]*\z",
