@@ -297,6 +297,51 @@ review of only the fix commit decides the deploy):
 - **The limit counts what the card stores.** The 3000 characters are measured on the additions as JSON-escaped
   text, which is what the approval card holds. A preset name full of quotes cannot push lines off the card.
 
+## Amendment 4 — the whole call is pinned (approved 21 November 2026)
+
+From the review of 21 November 2026 on `f526d962`. Four review rounds found new ways to run unapproved code through a
+trusted call's **arguments**: a shell after `-c`, an interpreter, a build tool, and now a runner name in an option
+value (`/opt/runner.sh --runner=python3 payload`). A script can read its arguments any way it likes (`eval "$1"`), so
+no list of forbidden words makes the arguments safe. Amendment 4 therefore trusts the **exact call**, not the script
+with any arguments.
+
+- **D1 — an entry pins its arguments.** `TrustedScript` gains `Arguments` (string, optional): the literal arguments
+  of the one call the Admin approves, for example `burgcloud`.
+  - The arguments are made only of the characters of point 3, words separated by single blanks, with no leading or
+    trailing blank. Empty or missing means the script is called without arguments.
+  - No argument word, and no option value in it (after `=`, or after the first two characters of a short option), is
+    a name that can never be trusted (`IsUntrustableCommandName`). An entry that breaks this is invalid (point 1).
+  - Within a policy, `(serverId, path, arguments)` is unique. The same script may be listed with different argument
+    sets, each approved on its own.
+- **D2 — a trusted call is exactly a listed call.** A command is a trusted call only when it is, after trimming and
+  collapsing blanks, `path` or `path arguments` of an entry for the resolved server. Any other argument list is no
+  trusted call and stays unanalysable as before (INV-24).
+  - The hash pin (point 4), the server match (A3) and the re-read before the run are unchanged.
+  - The argument checks of point 3 and of the fifth and sixth reviews stay as defence in depth.
+- **D3 — approvals, audit and the page show the arguments.** An addition line becomes
+  `preset | server | path | arguments | sha256` (the arguments field empty when there are none). The approval card,
+  the audit row `guardrails.trusted_scripts` and the page's table show it. The page gets an arguments field next to
+  the path. Changing an entry's arguments counts as an addition (D-1), like changing its hash.
+- **D4 (medium): the card limit is measured on what the card stores after redaction.** The approval gate redacts the
+  arguments (`SinkRedaction`) before it caps the card at 4000 characters. Redaction can lengthen text (`-px` becomes
+  `-p***`). The 3000-character limit is therefore measured on the additions after the same redaction and JSON
+  escaping. A save over the limit is refused, so no line is cut off the card.
+- **D5 (low): relative directory globs.** A relative glob is read against each listed directory, like a relative
+  literal operand (B1 point 2). `-C usr/lo*/sbin` is a finding while the line is not read-only.
+
+Migration: no entry is stored yet; the feature is not deployed. An entry without `Arguments` is a call without
+arguments, so a stored policy keeps its version.
+
+Tests for the amendment:
+- An entry with arguments `burgcloud` trusts `<path> burgcloud` only. It does not trust `<path>`,
+  `<path> burgcloud x` or `<path> other`.
+- An entry without arguments trusts only `<path>`.
+- `--runner=python3` and `-Rpython3` in an entry's arguments make it invalid.
+- The approval card and the audit row name the arguments.
+- Additions that redaction would push over the limit are refused. The pending card for a passing save holds every
+  line in full.
+- `tar -C usr/lo*/sbin` and `tar -Cusr/lo*/sbin` are findings with a listed script.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.
