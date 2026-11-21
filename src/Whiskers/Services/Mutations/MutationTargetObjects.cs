@@ -189,12 +189,15 @@ public sealed partial class MutationTargetResolver
     private async Task<TargetResolution> TrustedScriptAsync(MutationRequest request, TargetResolution resolution,
         MutationTarget host, CancellationToken ct)
     {
-        if (Whiskers.Services.Guardrails.TrustedScripts.CallPath(MutationTargets.String(request.Arguments, "command")) is not { } path)
+        var command = MutationTargets.String(request.Arguments, "command");
+        if (Whiskers.Services.Guardrails.TrustedScripts.CallPath(command) is not { } path
+            || Whiskers.Services.Guardrails.TrustedScripts.CallArguments(command) is not { } arguments)
             return resolution;
         if (_services.GetService<Whiskers.Services.Guardrails.IGuardrailStore>() is not { } guardrails
             // Amendment 1 (A2): the policy the rules decide with — a pinned run's own preset (INV-23).
+            // Amendment 4 (D2): only an entry for exactly this argument list.
             || Whiskers.Services.Guardrails.TrustedScripts.Find(EffectivePolicy.Of(request.PinnedPolicy, guardrails).Policy,
-                host.ServerId, path) is not { } entry)
+                host.ServerId, path, arguments) is not { } entry)
             return resolution;
         string? hash = null;
         if (_services.GetService<Whiskers.Services.Server.IHostCommandExecutor>() is { } executor)

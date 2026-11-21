@@ -176,7 +176,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         var entry = Assert.Single(_store.Current.TrustedScripts!);
         Assert.Equal(("local", Script, ScriptHash), (entry.ServerId, entry.Path, entry.Sha256));
         cut.WaitForAssertion(() => Assert.Contains(_auditLog.Entries, e => e.Action == "guardrails.trusted_scripts"
-            && e.Details!.Contains($"added Standard | local | {Script} | {ScriptHash}", StringComparison.Ordinal)));
+            && e.Details!.Contains($"added Standard | local | {Script} |  | {ScriptHash}", StringComparison.Ordinal)));
     }
 
     [Fact]

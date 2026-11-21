@@ -354,11 +354,18 @@ public static class ProtectedResourceMatcher
                 if (byName.FirstOrDefault(n => GuardrailRuleHelpers.GlobMatch(last, n.Key)) is { Key: not null } named)
                     return new Hit(glob, named.Value) { Argument = key, InFreeText = true };
                 // Sixth review: a glob that could expand to a listed script's directory or one above it (-C /srv/jo?s).
-                foreach (var candidate in WithOptionValues(glob).Where(c => c.StartsWith('/')))
+                // Amendment 4 (D5): a relative glob is read against each listed directory, like a relative literal.
+                foreach (var candidate in WithOptionValues(glob).Where(c => c.Length > 0 && !c.StartsWith('-')))
                 {
-                    var pattern = Regex.Replace(NormalizePath(candidate), @"\[[^\]]*\]", "?");
-                    if (directories.FirstOrDefault(d => GuardrailRuleHelpers.GlobMatch(pattern, d.Key)) is { Key: not null } dir)
-                        return new Hit(glob, dir.Value) { Argument = key, InFreeText = true };
+                    var spellings = candidate.StartsWith('/')
+                        ? [candidate]
+                        : directories.Keys.Select(d => d.TrimEnd('/') + "/" + candidate).ToList();
+                    foreach (var spelling in spellings)
+                    {
+                        var pattern = Regex.Replace(NormalizePath(spelling), @"\[[^\]]*\]", "?");
+                        if (directories.FirstOrDefault(d => GuardrailRuleHelpers.GlobMatch(pattern, d.Key)) is { Key: not null } dir)
+                            return new Hit(glob, dir.Value) { Argument = key, InFreeText = true };
+                    }
                 }
             }
         }

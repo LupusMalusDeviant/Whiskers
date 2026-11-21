@@ -40,12 +40,16 @@ public sealed class TrustedScriptTests
     }
 
     private static ProtectionHarness Trusting(HashHost host, string serverId = "local", string sha = Approved,
-        params string[] protectedResources) =>
+        string? arguments = null, params string[] protectedResources) =>
         new(p =>
         {
             p.ProtectedResources = protectedResources.Length == 0 ? ["whiskers-db"] : [.. protectedResources];
-            p.TrustedScripts = [new TrustedScript { ServerId = serverId, Path = Dump, Sha256 = sha }];
+            p.TrustedScripts = [new TrustedScript { ServerId = serverId, Path = Dump, Arguments = arguments, Sha256 = sha }];
         }, host: host);
+
+    /// <summary>The resolved key for <see cref="Dump"/>: server, path, arguments and hash (amendment 4).</summary>
+    private static string Verified(string server = "local", string path = Dump, string sha = Approved, string arguments = "") =>
+        string.Join('\u001f', server, path, arguments, sha);
 
     private static Task<MutationOutcome<int>> AsKey(ProtectionHarness h, string command) =>
         h.RunAsync("host.exec", new { serverId = "local", command }, ProtectionHarness.AdminKey, MutationSurface.Mcp);
@@ -128,12 +132,12 @@ public sealed class TrustedScriptTests
     // ---------------------------------------------------------------- running it
 
     [Theory]
-    [InlineData(Dump)]
-    [InlineData(Dump + " 80")]
-    public async Task A_trusted_call_with_the_approved_hash_runs_for_a_key_and_a_scheduled_task(string command)
+    [InlineData(Dump, null)]
+    [InlineData(Dump + " 80", "80")]
+    public async Task A_trusted_call_with_the_approved_hash_runs_for_a_key_and_a_scheduled_task(string command, string? arguments)
     {
         var host = new HashHost();
-        var h = Trusting(host);
+        var h = Trusting(host, arguments: arguments);
 
         Assert.Equal(MutationStatus.Executed, (await AsKey(h, command)).Status);
         Assert.Equal(MutationStatus.Executed, (await AsTask(h, command)).Status);
@@ -262,15 +266,17 @@ public sealed class TrustedScriptTests
                 ["command"] = Dump, [TrustedScripts.ResolvedKey] = verified, ["__resolvedTargetId"] = resolvedServer,
             });
 
-        Assert.Equal(Dump, TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Approved}"), policy));
-        Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Other}"), policy));      // other hash
-        Assert.Null(TrustedScripts.TrustedCallOf(Args($"web\u001f{Dump}\u001f{Approved}"), policy));      // other server
-        Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f/opt/x.sh\u001f{Approved}"), policy)); // not listed
+        Assert.Equal(Dump, TrustedScripts.TrustedCallOf(Args(Verified()), policy));
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Verified(sha: Other)), policy));             // other hash
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Verified(server: "web")), policy));          // other server
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Verified(path: "/opt/x.sh")), policy));      // not listed
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Verified(arguments: "x")), policy));         // other arguments
+        Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Approved}"), policy)); // old shape
         // A3: verified for one server, but the request resolved to another (or to none).
-        Assert.Null(TrustedScripts.TrustedCallOf(Args($"local\u001f{Dump}\u001f{Approved}", resolvedServer: "web"), policy));
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Verified(), resolvedServer: "web"), policy));
         Assert.Null(TrustedScripts.TrustedCallOf(ProtectionHarness.Args(new Dictionary<string, string>
         {
-            ["command"] = Dump, [TrustedScripts.ResolvedKey] = $"local\u001f{Dump}\u001f{Approved}",
+            ["command"] = Dump, [TrustedScripts.ResolvedKey] = Verified(),
         }), policy));
     }
 
@@ -468,8 +474,8 @@ public sealed class TrustedScriptTests
 
             Assert.Null(store.Current.TrustedScripts);
             Assert.Equal(2, audit.Entries.Count(e => e.Action == GuardrailStore.TrustedScriptsAuditAction));
-            Assert.Contains(audit.Entries, e => e.Details == $"added Standard | local | {Dump} | {Approved}");
-            Assert.Contains(audit.Entries, e => e.Details == $"removed Standard | local | {Dump} | {Approved}");
+            Assert.Contains(audit.Entries, e => e.Details == $"added Standard | local | {Dump} |  | {Approved}");
+            Assert.Contains(audit.Entries, e => e.Details == $"removed Standard | local | {Dump} |  | {Approved}");
         }
         finally { Directory.Delete(dir, true); }
     }
@@ -601,7 +607,7 @@ public sealed class TrustedScriptTests
     public async Task B1_a_trusted_call_still_runs_next_to_the_wider_protection()
     {
         var host = new HashHost();
-        var h = Trusting(host);
+        var h = Trusting(host, arguments: "--keep 7");
 
         Assert.Equal(MutationStatus.Executed, (await AsKey(h, Dump + " --keep 7")).Status);
     }
@@ -695,7 +701,8 @@ public sealed class TrustedScriptTests
 
     // ---------------------------------------------------------------- D-1: a second Admin for additions
 
-    private static string Line(string sha, string server = "local") => $"Standard | {server} | {Dump} | {sha}";
+    private static string Line(string sha, string server = "local", string arguments = "") =>
+        $"Standard | {server} | {Dump} | {arguments} | {sha}";
 
     private static Task<MutationOutcome<int>> SaveAsync(ProtectionHarness h, string? added) =>
         h.RunAsync("guardrails.save", added is null
@@ -777,7 +784,7 @@ public sealed class TrustedScriptTests
     {
         var args = ProtectionHarness.Args(new Dictionary<string, string>
         {
-            ["serverId"] = "local", ["command"] = Dump, [TrustedScripts.ResolvedKey] = $"local\u001f{Dump}\u001f{Approved}",
+            ["serverId"] = "local", ["command"] = Dump, [TrustedScripts.ResolvedKey] = Verified(),
         });
         var request = new MutationRequest("host.exec", ProtectionHarness.AdminKey, MutationSurface.Mcp,
             new MutationTarget("host", "local", ServerId: "local"), args);
@@ -957,7 +964,7 @@ public sealed class TrustedScriptTests
     public async Task Plain_arguments_of_a_trusted_call_still_run()
     {
         var host = new HashHost();
-        var h = Trusting(host);
+        var h = Trusting(host, arguments: "burgcloud --keep=7");
 
         Assert.Equal(MutationStatus.Executed, (await AsKey(h, Dump + " burgcloud --keep=7")).Status);
     }
@@ -966,6 +973,9 @@ public sealed class TrustedScriptTests
     [InlineData("tar -xf /tmp/p.tar -C /usr/local/sb?n")]
     [InlineData("tar -xf /tmp/p.tar -C/usr/lo*/sbin")]
     [InlineData("cp -r /tmp/tree /usr/*")]
+    // Amendment 4 (D5): a relative glob is read against the listed directories too.
+    [InlineData("tar -xf /tmp/p.tar -C usr/lo*/sbin")]
+    [InlineData("tar -xf /tmp/p.tar -Cusr/lo*/sbin")]
     public async Task A_directory_glob_that_could_reach_a_listed_script_is_a_finding(string command)
     {
         var h = new ProtectionHarness(
@@ -988,5 +998,158 @@ public sealed class TrustedScriptTests
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
+    }
+
+    // ---------------------------------------------------------------- amendment 4: the whole call is pinned
+
+    [Theory]
+    [InlineData(Dump + " burgcloud", MutationStatus.Executed)]
+    [InlineData("  " + Dump + "   burgcloud  ", MutationStatus.Executed)]   // trimmed, blanks collapsed
+    [InlineData(Dump, MutationStatus.Denied)]
+    [InlineData(Dump + " burgcloud x", MutationStatus.Denied)]
+    [InlineData(Dump + " other", MutationStatus.Denied)]
+    public async Task D2_an_entry_with_arguments_trusts_exactly_that_call(string command, MutationStatus expected)
+    {
+        var host = new HashHost();
+        var h = Trusting(host, arguments: "burgcloud");
+
+        Assert.Equal(expected, (await AsKey(h, command)).Status);
+        Assert.Equal(expected, (await AsTask(h, command)).Status);
+    }
+
+    [Theory]
+    [InlineData(Dump, MutationStatus.Executed)]
+    [InlineData(Dump + " 80", MutationStatus.Denied)]
+    [InlineData(Dump + " --runner=python3 payload", MutationStatus.Denied)]
+    public async Task D2_an_entry_without_arguments_trusts_only_the_bare_path(string command, MutationStatus expected)
+    {
+        var h = Trusting(new HashHost());
+
+        Assert.Equal(expected, (await AsKey(h, command)).Status);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("burgcloud", true)]
+    [InlineData("burgcloud --keep=7 -k3", true)]
+    [InlineData("--runner=python3", false)]   // an option value that runs code
+    [InlineData("-Rpython3", false)]          // the value of a short option
+    [InlineData("python3", false)]
+    [InlineData("sh -c id", false)]
+    [InlineData(" burgcloud", false)]         // a leading blank
+    [InlineData("burgcloud ", false)]         // a trailing blank
+    [InlineData("a  b", false)]               // not single blanks
+    [InlineData("a\tb", false)]
+    [InlineData("$(id)", false)]
+    [InlineData("'x'", false)]
+    [InlineData("x;id", false)]
+    public void D1_arguments_are_plain_words_that_name_no_code_runner(string? arguments, bool valid) =>
+        Assert.Equal(valid, TrustedScripts.IsValid(new TrustedScript
+            { ServerId = "local", Path = Dump, Arguments = arguments, Sha256 = Approved }));
+
+    [Fact]
+    public void D1_the_same_script_may_be_listed_with_different_arguments_but_each_call_once()
+    {
+        var config = GuardrailConfig.SafeDefault();
+        var a = new TrustedScript { ServerId = "local", Path = Dump, Arguments = "burgcloud", Sha256 = Approved };
+        var b = new TrustedScript { ServerId = "local", Path = Dump, Arguments = "other", Sha256 = Approved };
+        config.Presets[0].Policy.TrustedScripts = [a, b];
+        Assert.Null(config.Problem());
+
+        config.Presets[0].Policy.TrustedScripts = [a, a.Clone()];
+        Assert.Equal(GuardrailConfigProblemKind.InvalidTrustedScript, config.Problem()?.Kind);
+
+        // No arguments and empty arguments are the same call.
+        config.Presets[0].Policy.TrustedScripts =
+        [
+            new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved },
+            new TrustedScript { ServerId = "local", Path = Dump, Arguments = "", Sha256 = Approved },
+        ];
+        Assert.Equal(GuardrailConfigProblemKind.InvalidTrustedScript, config.Problem()?.Kind);
+    }
+
+    [Fact]
+    public void D1_arguments_are_cloned_and_a_missing_value_is_not_stored()
+    {
+        var entry = new TrustedScript { ServerId = "local", Path = Dump, Arguments = "burgcloud", Sha256 = Approved };
+        Assert.Equal("burgcloud", entry.Clone().Arguments);
+        Assert.DoesNotContain("Arguments",
+            JsonSerializer.Serialize(new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved }));
+    }
+
+    [Fact]
+    public void D3_the_additions_name_the_arguments_and_a_changed_argument_list_is_an_addition()
+    {
+        GuardrailConfig With(params TrustedScript[] scripts)
+        {
+            var config = GuardrailConfig.SafeDefault();
+            config.Presets[0].Policy.TrustedScripts = [.. scripts];
+            return config;
+        }
+        var plain = new TrustedScript { ServerId = "local", Path = Dump, Sha256 = Approved };
+        var withArgs = new TrustedScript { ServerId = "local", Path = Dump, Arguments = "burgcloud", Sha256 = Approved };
+
+        Assert.Equal(Line(Approved, arguments: "burgcloud"), TrustedScripts.Additions(With(), With(withArgs)));
+        Assert.Equal(Line(Approved, arguments: "burgcloud"), TrustedScripts.Additions(With(plain), With(withArgs)));
+        Assert.Equal(Line(Approved), TrustedScripts.Additions(With(), With(plain)));
+    }
+
+    [Fact]
+    public async Task D3_the_approval_card_names_the_arguments()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+
+        await SaveAsync(h, Line(Approved, arguments: "burgcloud"));
+
+        var card = Assert.Single(h.Approvals.GetPending()).ParamsJson;
+        Assert.Contains($"{Dump} | burgcloud | {Approved}", card, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task D4_additions_that_redaction_lengthens_over_the_limit_are_refused()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        // 2799 characters as raw and as escaped text, but every "-px" becomes "-p***" on the card.
+        var added = string.Join(" ", Enumerable.Repeat("-px", 700));
+        Assert.True(TrustedScripts.CardLength(added) > TrustedScripts.MaxAdditionsChars);
+        Assert.True(JsonSerializer.Serialize(added).Length <= TrustedScripts.MaxAdditionsChars);
+
+        var outcome = await SaveAsync(h, added);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Fact]
+    public async Task D4_the_card_of_a_save_under_the_limit_holds_every_line_in_full()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        var lines = Enumerable.Range(0, 40).Select(i => Line(Approved, server: $"s{i:00}")).ToList();
+        while (TrustedScripts.CardLength(string.Join("\n", lines)) > TrustedScripts.MaxAdditionsChars) lines.RemoveAt(0);
+        Assert.True(lines.Count > 10);
+
+        await SaveAsync(h, string.Join("\n", lines));
+
+        var card = Assert.Single(h.Approvals.GetPending()).ParamsJson;
+        Assert.All(lines, line => Assert.Contains(line, card, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void D2_the_resolved_key_carries_the_arguments_and_must_match_the_command()
+    {
+        var policy = new GuardrailPolicy
+        {
+            TrustedScripts = [new TrustedScript { ServerId = "local", Path = Dump, Arguments = "burgcloud", Sha256 = Approved }],
+        };
+        IReadOnlyDictionary<string, JsonElement> Args(string command, string verified) =>
+            ProtectionHarness.Args(new Dictionary<string, string>
+            {
+                ["command"] = command, ["__resolvedTargetId"] = "local", [TrustedScripts.ResolvedKey] = verified,
+            });
+
+        Assert.Equal(Dump, TrustedScripts.TrustedCallOf(Args(Dump + " burgcloud", Verified(arguments: "burgcloud")), policy));
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Dump + " other", Verified(arguments: "burgcloud")), policy));
+        Assert.Null(TrustedScripts.TrustedCallOf(Args(Dump, Verified()), policy));
     }
 }

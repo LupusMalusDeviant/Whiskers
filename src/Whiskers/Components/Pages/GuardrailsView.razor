@@ -187,6 +187,7 @@
                         <tr>
                             <th>@L["GuardrailsView_TrustedScripts_Server"]</th>
                             <th>@L["GuardrailsView_TrustedScripts_Path"]</th>
+                            <th>@L["GuardrailsView_TrustedScripts_Arguments"]</th>
                             <th>SHA-256</th>
                             <th></th>
                         </tr>
@@ -197,6 +198,7 @@
                             <tr>
                                 <td>@script.ServerId</td>
                                 <td style="font-family:monospace;">@script.Path</td>
+                                <td style="font-family:monospace;">@script.Arguments</td>
                                 <td style="font-family:monospace;" title="@script.Sha256">@ShortHash(script.Sha256)</td>
                                 <td>
                                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
@@ -223,6 +225,9 @@
                 <MudTextField T="string" @bind-Value="_newScriptPath" Label="@L["GuardrailsView_TrustedScripts_Path"]"
                               Placeholder="/usr/local/sbin/backup.sh" Margin="Margin.Dense" Variant="Variant.Outlined"
                               Style="min-width:320px;" HelperText="@L["GuardrailsView_TrustedScripts_PathHelper"]" />
+                <MudTextField T="string" @bind-Value="_newScriptArguments" Label="@L["GuardrailsView_TrustedScripts_Arguments"]"
+                              Placeholder="burgcloud" Margin="Margin.Dense" Variant="Variant.Outlined"
+                              Style="min-width:200px;" HelperText="@L["GuardrailsView_TrustedScripts_ArgumentsHelper"]" />
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="AddTrustedScript" Disabled="_hashing"
                            StartIcon="@Icons.Material.Filled.Fingerprint" Class="mt-1">
                     @L["GuardrailsView_TrustedScripts_Add"]
@@ -291,6 +296,7 @@
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _newScriptServer = "";
     private string _newScriptPath = "";
+    private string _newScriptArguments = "";
     private bool _hashing;
 
     private string CsvProtected => string.Join(", ", _edit?.Policy.ProtectedResources ?? new());
@@ -546,12 +552,14 @@
         if (_edit is null) return;
         var path = (_newScriptPath ?? "").Trim();
         var server = _newScriptServer;
-        if (string.IsNullOrEmpty(server) || !TrustedScripts.IsValidPath(path))
+        // Amendment 4 (D1): the literal arguments of the one call approved, blanks collapsed.
+        var arguments = string.Join(' ', (_newScriptArguments ?? "").Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrEmpty(server) || !TrustedScripts.IsValidPath(path) || !TrustedScripts.IsValidArguments(arguments))
         {
             Snackbar.Add(L["GuardrailsView_TrustedScripts_Invalid"].Value, Severity.Warning);
             return;
         }
-        if (TrustedScripts.Find(_edit.Policy, server, path) is not null)
+        if (TrustedScripts.Find(_edit.Policy, server, path, arguments) is not null)
         {
             Snackbar.Add(L["GuardrailsView_TrustedScripts_Duplicate"].Value, Severity.Warning);
             return;
@@ -567,9 +575,13 @@
                 return;
             }
             var list = _edit.Policy.TrustedScripts ?? new();
-            list.Add(new TrustedScript { ServerId = server, Path = path, Sha256 = hash });
+            list.Add(new TrustedScript
+            {
+                ServerId = server, Path = path, Arguments = arguments.Length == 0 ? null : arguments, Sha256 = hash,
+            });
             _edit.Policy.TrustedScripts = list;
             _newScriptPath = "";
+            _newScriptArguments = "";
             Snackbar.Add(L["GuardrailsView_TrustedScripts_Added", path, ShortHash(hash)].Value, Severity.Info);
         }
         catch (Exception ex)

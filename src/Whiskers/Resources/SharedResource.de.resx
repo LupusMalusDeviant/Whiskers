@@ -6086,6 +6086,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_TrustedScripts_PathHelper" xml:space="preserve">
     <value>Absoluter Pfad; keine Shell, kein Interpreter, keine Container-Runtime.</value>
   </data>
+  <data name="GuardrailsView_TrustedScripts_Arguments" xml:space="preserve">
+    <value>Argumente</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_ArgumentsHelper" xml:space="preserve">
+    <value>Genau diese Argumente; nur dieser Aufruf gilt als vertrauenswürdig. Leer: ohne Argumente.</value>
+  </data>
   <data name="GuardrailsView_TrustedScripts_Remove" xml:space="preserve">
     <value>Entfernen</value>
   </data>

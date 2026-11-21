@@ -6086,6 +6086,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_TrustedScripts_PathHelper" xml:space="preserve">
     <value>Absolute path; no shell, interpreter or container runtime.</value>
   </data>
+  <data name="GuardrailsView_TrustedScripts_Arguments" xml:space="preserve">
+    <value>Arguments</value>
+  </data>
+  <data name="GuardrailsView_TrustedScripts_ArgumentsHelper" xml:space="preserve">
+    <value>Exactly these arguments; only this call is trusted. Empty: no arguments.</value>
+  </data>
   <data name="GuardrailsView_TrustedScripts_Remove" xml:space="preserve">
     <value>Remove</value>
   </data>

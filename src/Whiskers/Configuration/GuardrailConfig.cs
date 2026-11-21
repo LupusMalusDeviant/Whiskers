@@ -133,11 +133,13 @@ public class GuardrailConfig
                 if (exemption is null || !KillSwitchExemptions.Blockable.Contains(exemption, StringComparer.Ordinal))
                     return new(GuardrailConfigProblemKind.UnknownKillSwitchExemption, preset.Name, exemption ?? "(empty)");
             }
-            // Contract 0022 (point 1): every entry complete and trustable, each server and path once.
-            var seen = new HashSet<(string, string)>();
+            // Contract 0022 (point 1, amendment 4 D1): every entry complete and trustable, each server, path and
+            // argument list once.
+            var seen = new HashSet<(string, string, string)>();
             foreach (var script in preset.Policy.TrustedScripts ?? [])
             {
-                if (!Whiskers.Services.Guardrails.TrustedScripts.IsValid(script) || !seen.Add((script.ServerId, script.Path)))
+                if (!Whiskers.Services.Guardrails.TrustedScripts.IsValid(script)
+                    || !seen.Add((script.ServerId, script.Path, script.Arguments ?? "")))
                     return new(GuardrailConfigProblemKind.InvalidTrustedScript, preset.Name,
                         script is null ? "(empty)" : $"{script.ServerId}:{script.Path}");
             }

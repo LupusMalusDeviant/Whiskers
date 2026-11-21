@@ -28,9 +28,15 @@ public sealed class TrustedScript
 {
     public string ServerId { get; set; } = "";
     public string Path { get; set; } = "";
+
+    /// <summary>Amendment 4 (D1): the literal arguments of the one call an Admin approved; missing or empty is a call
+    /// without arguments.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Arguments { get; set; }
+
     public string Sha256 { get; set; } = "";
 
-    public TrustedScript Clone() => new() { ServerId = ServerId, Path = Path, Sha256 = Sha256 };
+    public TrustedScript Clone() => new() { ServerId = ServerId, Path = Path, Arguments = Arguments, Sha256 = Sha256 };
 }
 
 /// <summary>The configurable but code-enforced security policy of the agent. Persisted in its
