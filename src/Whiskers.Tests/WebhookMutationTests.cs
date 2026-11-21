@@ -130,7 +130,8 @@ public sealed partial class WebhookMutationTests : IDisposable
         Assert.StartsWith("Suspended", output);
         Assert.False(Ran(action));
         Assert.False(Stored(webhook.WebhookId).Enabled);
-        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended");
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_suspended"
+                                             && e.ThrottleSubject == NotificationThrottleSubjects.Webhook(webhook.Id));   // contract 0017, G2
         // The switch-off is a configuration change of its own: one row, written after the run's event (R1-22).
         var row = Assert.Single(_rows.Entries, r => r.Action == WebhookService.SuspendAction);
         Assert.Matches(@"^operation=[^;]+; config\.version ([0-9a-f]{12}) → (?!\1)[0-9a-f]{12}; Enabled: true → false$", row.Details);
@@ -163,7 +164,8 @@ public sealed partial class WebhookMutationTests : IDisposable
         Assert.StartsWith("Refused", output);
         Assert.False(Ran(action));
         Assert.True(Stored(webhook.WebhookId).Enabled);
-        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused");
+        Assert.Contains(_notify.Events, e => e.EventType == "automation_refused"
+                                             && e.ThrottleSubject == NotificationThrottleSubjects.Webhook(webhook.Id));   // contract 0017, G2
     }
 
     [Theory]
@@ -519,11 +521,11 @@ public sealed partial class WebhookMutationTests : IDisposable
     [Fact]
     public void Every_alias_of_a_server_is_one_lock()
     {
-        var locks = new ResourceLocks(new FakeServerConfig(new ServerConfig { Id = "rabenhof", Name = "Rabenhof (Hetzner)" }));
+        var locks = new ResourceLocks(new FakeServerConfig(new ServerConfig { Id = "host-d", Name = "Host-D (Hetzner)" }));
 
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof"));
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("RABENHOF"));
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof (hetzner)"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("host-d"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("HOST-D"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("host-d (hetzner)"));
         Assert.Equal(ResourceLocks.Server("gone"), locks.ServerKey("gone"));
     }
 

@@ -166,7 +166,7 @@ public class DockerClientConnectionBindingTests
         var waiting = docker.GetClientAsync("neuhof");    // resolved "neuhof", waits for the lock
 
         await inner.RemoveServerAsync("neuhof");
-        var other = Tcp("zirkus", "10.0.0.99");
+        var other = Tcp("host-e", "10.0.0.99");
         other.Name = "neuhof";
         await inner.AddServerAsync(other);
         builds.SshTunnel.SetResult();

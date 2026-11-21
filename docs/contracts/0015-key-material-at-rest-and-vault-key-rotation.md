@@ -343,7 +343,7 @@ Part A — keys at rest
 4. [Claude-prüfbar, **mTLS layer** for the client keys] `KeyMaterialMigration` at start; `KeyMaterialMigrationTests`,
    `KeyMaterialAtRestTests`; readiness lines.
 5. [Claude-prüfbar] `SshKeyLeaseImageTests` in the image runtime suite (runs in CI on amd64 and arm64).
-6. [braucht Nutzer] Deploy Part A: check in the start log that every key of Badwolf's data directory was sealed, that all
+6. [braucht Nutzer] Deploy Part A: check in the start log that every key of the production instance's data directory was sealed, that all
    mTLS hosts still answer (server pages green, readiness "mTLS-Proxy läuft") and that an SSH host's terminal opens.
 
 Part B — rotation
@@ -353,9 +353,9 @@ Part B — rotation
    switch; `VaultKeyRotationTests`, `PostgresVaultRotationTests`.
 9. [Claude-prüfbar] Readiness, backup list marks (D9), documentation, gate records, required-test manifests; full test
    run with the lock.
-10. [braucht Nutzer] A real rotation on a test instance (not Badwolf first): new key file, restart, check the audit trail
+10. [braucht Nutzer] A real rotation on a test instance (not the production instance first): new key file, restart, check the audit trail
     verifies, the hosts answer, a new self-backup restores; then replace the key file and restart once more. Only then on
-    Badwolf, with the old key kept in the password manager until a self-backup under the new key has been restored once.
+    the production instance, with the old key kept in the password manager until a self-backup under the new key has been restored once.
 
 ## Decisions of the maintainer (10 November 2026)
 
@@ -402,7 +402,7 @@ Deviations found while implementing; none weakens a decision.
   `ISshKeyLeases.AcquireAsync` are listed as write-named but not gated (`MutationGatewayCoverageTests`): the first is a
   storage step inside its caller's decision or the start-up migration, the second a short-lived copy with no state.
 
-## Amendment 2 (merge of main, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 2 (merge of main, 10 November 2026) — accepted by the maintainer on 18 November 2026
 
 - **A7 — Principal of the rotation row (contract 0014).** Since INV-01 every audit row carries a structured principal
   from a closed list. The row `vault.key_rotated` is written as the system component `system:vault-rotation` (actor
@@ -414,5 +414,5 @@ Deviations found while implementing; none weakens a decision.
 - **A9 — Readiness lines (contract 0011).** The two lines of this contract have the ids `keys-sealed` and
   `vault-rotation`; their texts are `Readiness_keysSealed_*` / `Readiness_vaultRotation_*` (and
   `Readiness_vault_WrongAfterRotation`) in `SharedResource.resx` / `.de.resx`. The vault line now says the keys are
-  sealed; README, SECURITY.md, `docs/security-architecture.md` and the production checklist say the same, and
+  sealed; README, SECURITY.md, `docs/architecture/security-architecture.md` and the production checklist say the same, and
   `CLAIMS.md` registers it (RM-07, SA-10, PC-13 changed; SEC-29 to SEC-32 new).

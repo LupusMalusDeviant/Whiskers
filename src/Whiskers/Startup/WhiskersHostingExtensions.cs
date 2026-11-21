@@ -206,6 +206,12 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService<Whiskers.Services.Certificates.CertificateMonitor>();
         // R1-57 (contract 0004): endpoint checks run on the managed host, through the gateway as the check's owner.
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckStore, Whiskers.Services.EndpointChecks.EndpointCheckStore>();
+        // Contract 0020 (INV-66): the handover of an unusable owner's automation, the account.create hold, the first-run
+        // ledger and the new owner's personal notices. Interface-first; the scope guard wraps the marked ones.
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IHandoverLedger, Whiskers.Services.Mutations.HandoverLedger>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IHandoverNotices, Whiskers.Services.Mutations.HandoverNotices>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IAutomationHandover, Whiskers.Services.Mutations.AutomationHandover>();
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IAutomationHold, Whiskers.Services.Mutations.AutomationHold>();
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckSlots, Whiskers.Services.EndpointChecks.EndpointCheckSlots>();
         builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckRunner, Whiskers.Services.EndpointChecks.EndpointCheckRunner>();
         builder.Services.AddHostedService<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>();
@@ -324,6 +330,22 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientCredentialStore, Whiskers.Services.Certificates.MtlsClientCredentialStore>();
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
+        // Contract 0018: registration from name + IP (B), SSH host-key pins (C), the Hetzner rescue bootstrap and the
+        // bootstrap-line clean-up (D). The provider clients are resolved per call (the cloud module may be off).
+        builder.Services.Configure<Whiskers.Configuration.OnboardingSettings>(
+            builder.Configuration.GetSection(Whiskers.Configuration.OnboardingSettings.SectionName));
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshProcessRunner, Whiskers.Services.Server.SshProcessRunner>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshToolchain, Whiskers.Services.Server.SshToolchain>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshHostKeyPins, Whiskers.Services.Server.SshHostKeyPins>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ICloudBootstrap, Whiskers.Services.Onboarding.HetznerRescueBootstrap>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IBootstrapCleanup, Whiskers.Services.Onboarding.BootstrapCleanup>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ServerRegistration>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IServerRegistration>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ICloudVmReader>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
+        // Contract 0018 part E: the latest run per server in memory, for get_onboarding_status (Admin only).
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.OnboardingRuns>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingRuns>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.OnboardingRuns>());
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingRunRecorder>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.OnboardingRuns>());
 
         // Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider
         // (WHISKERS_DB_PROVIDER / _CONNECTION[_FILE]). SQLite default is byte-identical to before. (stableDB.md)
@@ -470,6 +492,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
 
         builder.Services.AddMudServices();
+        // Contract 0019 (INV-65): the dialog that shows an INV-59 approval raised by a UI call.
+        builder.Services.AddInlineApprovalPrompt();
 
         // Blazor + SignalR
         builder.Services.AddRazorComponents()

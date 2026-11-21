@@ -360,7 +360,7 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// call was in flight: an <see cref="ObjectDisposedException"/> in the chain, and <paramref name="used"/> is no
     /// longer the cached client for <paramref name="serverId"/>. That says nothing about the host. Counting it let one
     /// <see cref="InvalidateClient"/> (the mTLS switch check rebuilds the connection on purpose) fail every open call
-    /// at once, open the circuit and refuse the very check that caused it (2026-11-10, Infomaniak). A disposed client
+    /// at once, open the circuit and refuse the very check that caused it (2026-11-10, web-02). A disposed client
     /// that is still the cached one is not covered: nothing replaced it, so the failure counts as before.</summary>
     internal bool IsSupersededClientFailure(string serverId, DockerClient used, Exception ex) =>
         IsSupersededClientFailure(ex, used, _clients.TryGetValue(serverId, out var current) ? current.Client : null);

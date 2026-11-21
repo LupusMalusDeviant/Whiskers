@@ -17,4 +17,10 @@ public interface IOnboardingService
     Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, string? decidedConnection,
         IProgress<string> progress,
         CancellationToken ct = default);
+
+    /// <summary>Contract 0018: the run with its options (bootstrap method, confirmed VM name, abandon) and per-step
+    /// progress. The overload above runs it with <see cref="BootstrapMethod.None"/>.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("server.onboard")]
+    Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, string? decidedConnection,
+        OnboardingOptions options, IProgress<OnboardingProgress> progress, CancellationToken ct = default);
 }

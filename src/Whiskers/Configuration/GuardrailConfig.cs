@@ -12,10 +12,10 @@ public enum GuardrailConfigProblemKind
     InvalidPattern,
     /// <summary>Contract 0009: an id in KillSwitchBlockedExemptions that is not a blockable exemption.</summary>
     UnknownKillSwitchExemption,
-    /// <summary>Contract 0017: a trusted script entry that is incomplete, not a path that can be trusted, has no valid
+    /// <summary>Contract 0022: a trusted script entry that is incomplete, not a path that can be trusted, has no valid
     /// SHA-256, or is listed twice for one server.</summary>
     InvalidTrustedScript,
-    /// <summary>Contract 0017, amendment 1 (A4): the trusted scripts a save adds differ from the ones it was approved
+    /// <summary>Contract 0022, amendment 1 (A4): the trusted scripts a save adds differ from the ones it was approved
     /// for (another save came in between).</summary>
     TrustedScriptsChangedMeanwhile,
     /// <summary>A4: a save adds trusted scripts while the policy requires a second approver, without the approved
@@ -31,7 +31,7 @@ public enum GuardrailConfigProblemKind
 public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, string? Preset = null, string? Value = null)
 {
     /// <summary>The <see cref="Value"/> of a <see cref="GuardrailConfigProblemKind.TrustedScriptsNeedSecondApprover"/>
-    /// refusal because the setting was switched on while the save waited (contract 0017, amendment 2, B2).</summary>
+    /// refusal because the setting was switched on while the save waited (contract 0022, amendment 2, B2).</summary>
     public const string SettingChangedMeanwhile = "setting-changed";
 
     public override string ToString() => Kind switch
@@ -133,7 +133,7 @@ public class GuardrailConfig
                 if (exemption is null || !KillSwitchExemptions.Blockable.Contains(exemption, StringComparer.Ordinal))
                     return new(GuardrailConfigProblemKind.UnknownKillSwitchExemption, preset.Name, exemption ?? "(empty)");
             }
-            // Contract 0017 (point 1): every entry complete and trustable, each server and path once.
+            // Contract 0022 (point 1): every entry complete and trustable, each server and path once.
             var seen = new HashSet<(string, string)>();
             foreach (var script in preset.Policy.TrustedScripts ?? [])
             {

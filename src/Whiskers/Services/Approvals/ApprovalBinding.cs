@@ -51,6 +51,9 @@ public static class ApprovalBinding
             // INV-59 (#187): an onboarding approval is bound to the host the record reached when it was given.
             if (target.Connection is { } connection)
                 w.WriteString("targetConnection", connection);
+            // Contract 0018 (INV-30): a cloud-bootstrap approval is bound to the VM's id, name and public IP.
+            if (target.CloudVm is { } cloudVm)
+                w.WriteString("targetCloudVm", cloudVm);
             w.WriteString("policy", policyVersion);
         });
     }

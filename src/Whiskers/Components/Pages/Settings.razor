@@ -33,6 +33,7 @@
 @inject Whiskers.Services.Persistence.IAppSettingsStore AppSettings
 @inject IUiMutationRunner Mutations
 @inject IConfiguration Configuration
+@inject ILogger<Settings> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["Settings_PageTitle"]</PageTitle>
@@ -191,6 +192,11 @@ else
     @* R1-58: optional disk-health readings (SMART, RAID, ZFS) from the hosts' metrics endpoints. *@
     <MudExpansionPanel Text="@L["DiskHealth_Panel"]" Icon="@Icons.Material.Filled.Storage">
         <DiskHealthPanel />
+    </MudExpansionPanel>
+
+    @* Contract 0018 D9: the optional Tailscale auth key for onboarding new hosts (vault only). *@
+    <MudExpansionPanel Text="@L["Onboarding_AuthKey_Panel"]" Icon="@Icons.Material.Filled.VpnKey">
+        <OnboardingAuthKeyPanel />
     </MudExpansionPanel>
 
     @* Metric alerts *@
@@ -352,7 +358,7 @@ else
             </MudItem>
             <MudItem xs="12">
                 <MudTextField @bind-Value="_dnsAllowedZones" Label="@L["Settings_Dns_AllowedZones"]" Variant="Variant.Outlined" Margin="Margin.Dense"
-                              Placeholder="lupusmalus.dev, example.org" HelperText="@L["Settings_Dns_AllowedZonesHelper"]" />
+                              Placeholder="example.com, example.org" HelperText="@L["Settings_Dns_AllowedZonesHelper"]" />
             </MudItem>
         </MudGrid>
         <MudStack Row="true" Class="mt-3" Spacing="2">
@@ -518,7 +524,7 @@ else
 
     @* Local accounts (R1-49) *@
     <MudExpansionPanel Text="@L["LocalAccounts_Panel"]" Icon="@Icons.Material.Filled.People">
-        <LocalAccountsPanel />
+        <LocalAccountsPanel AccountsChanged="ReloadWhitelist" />
     </MudExpansionPanel>
 
     @* Google/OIDC sign-in identities (R1-27) *@
@@ -893,6 +899,7 @@ else
         {
             Snackbar.Add(ex.Message, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save " + scope, ex); }
         return false;
     }
 
@@ -904,10 +911,15 @@ else
     {
         try
         {
+            // The section is written whole: the values this panel does not show (the unreachable-cycle counts) travel
+            // along as they are, or every save reset them to their defaults (review 1.0.0, T3).
+            var current = HealthOptions.CurrentValue;
             var health = new HealthMonitorSettings
             {
                 CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
                 RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
+                ServerUnreachableCycles = current.ServerUnreachableCycles,
+                ServerUnreachableColdStartCycles = current.ServerUnreachableColdStartCycles,
             };
             // Follow-up (2026-11-03, review R1-41 round 7 NIT 5): an interval out of range is refused before the gateway
             // runs — not recorded as a failed config.save (the store refuses it again on its own).
@@ -924,6 +936,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save health monitoring", ex); }
     }
 
     private async Task SaveMetricAlert()
@@ -942,6 +955,7 @@ else
             Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("save metric alerts", ex); }
     }
 
     private async Task SaveCve()
@@ -969,6 +983,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save CVE monitor", ex); }
     }
 
     private async Task SaveImageUpdate()
@@ -992,6 +1007,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save image updates", ex); }
     }
 
     private async Task SaveTerminal()
@@ -1011,6 +1027,7 @@ else
             Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("save terminal", ex); }
     }
 
     private void LoadDns()
@@ -1092,6 +1109,7 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        catch (Exception ex) { ShowFailure("save DNS", ex); return; }
         // The settings name the new token now; the one they named before is unused.
         var previousRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous);
         if (newRef is not null && previousRef is not null && previousRef != newRef) await RemoveUnusedDnsTokenAsync(previousRef);
@@ -1127,6 +1145,7 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        catch (Exception ex) { ShowFailure("clear DNS token", ex, isSave: false); return; }
         if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef)
         {
             // Without a usable vault the entry cannot be removed: it stays encrypted and unused — say so.
@@ -1244,6 +1263,13 @@ else
         return false;
     }
 
+    // Review 1.0.0 (U1): a failure other than a refusal (a store that cannot write, the gateway's deadline) is shown
+    // and logged without secrets instead of leaving the handler and ending the circuit.
+    // A save says "Error while saving"; a delete or clear says only that the action failed.
+    private void ShowFailure(string action, Exception ex, bool isSave = true) =>
+        Snackbar.Add(L[isSave ? "Settings_Snackbar_SaveError" : "Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value,
+            Severity.Error);
+
     private async Task CopyKey(string value)
     {
         // Copy to the clipboard via JS — never echo the key value in a toast. Report success only when the
@@ -1310,6 +1336,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(rt.RecordId));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex) { ShowFailure("delete MCP API key", ex, isSave: false); return; }
         ReloadApiKeysKeepingPendingToggles();
         if (_freshKey?.Id == id) _freshKey = null;
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
@@ -1344,7 +1371,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_SaveError", ex.Message].Value, Severity.Error);
+            ShowFailure("save MCP permissions", ex);
         }
         finally
         {
@@ -1367,6 +1394,18 @@ else
     private void RemoveEmail(string email)
     {
         _whitelistEmails.Remove(email);
+    }
+
+    /// <summary>Contract 0017 H2/H3: adding or deleting a local account may change the whitelist in the service. The
+    /// editor reloads it, so saving a stale buffer can neither drop a new account's entry nor list a deleted account's
+    /// address again (as a manual entry that would admit a federated identity).</summary>
+    private void ReloadWhitelist()
+    {
+        // Reads only: refreshes the list after a local account changed. Same role as the whitelist itself.
+        if (_role < CapabilityCatalog.RoleOf("config.whitelist")) return;
+        var data = WhitelistService.GetWhitelist();
+        _whitelistEnabled = data.Enabled;
+        _whitelistEmails = data.Emails;
     }
 
     private async Task SaveWhitelist()
@@ -1399,7 +1438,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add(L["Settings_Snackbar_SaveError", ex.Message].Value, Severity.Error);
+            ShowFailure("save whitelist", ex);
         }
         finally
         {
@@ -1410,9 +1449,17 @@ else
     private async Task TestMattermost()
     {
         if (!await CanSendTestNotificationsAsync()) return;
+        // The Mattermost channel alone, resolved like Matrix below: the composite NotificationService tested every
+        // configured channel from this button (review 1.0.0, T3).
+        var mattermost = ServiceProvider.GetService<Whiskers.Services.Notifications.IMattermostNotificationService>();
+        if (mattermost is null)
+        {
+            Snackbar.Add(L["Settings_Snackbar_NotificationsModuleDisabled"].Value, Severity.Warning);
+            return;
+        }
         try
         {
-            await NotificationService.SendTestAsync();
+            await mattermost.SendTestAsync();
             Snackbar.Add(L["Settings_Snackbar_MattermostTestSent"].Value, Severity.Success);
         }
         catch (Exception ex)
@@ -1448,7 +1495,15 @@ else
     private async Task AddRole()
     {
         if (string.IsNullOrWhiteSpace(_newRoleEmail)) return;
-        _roleEntries.Add(new Whiskers.Models.UserRoleEntry { Email = _newRoleEmail.Trim(), Role = _newRoleRole });
+        var email = _newRoleEmail.Trim();
+        // One entry per address: a second one was saved but never took effect (the first match wins). Its role is
+        // changed in the list instead (review 1.0.0, T3).
+        if (_roleEntries.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+        {
+            Snackbar.Add(L["Settings_Snackbar_RoleExists", email].Value, Severity.Warning);
+            return;
+        }
+        _roleEntries.Add(new Whiskers.Models.UserRoleEntry { Email = email, Role = _newRoleRole });
         _newRoleEmail = "";
         await SaveRoles();
     }
@@ -1475,10 +1530,19 @@ else
             _defaultRole = stored.DefaultRole;
             return;
         }
-        catch (InvalidOperationException)
+        catch (Whiskers.Services.Auth.LastAdminException)
         {
-            // The service refuses to drop the last Admin; put the stored roles back on screen.
+            // The service refuses to drop the last Admin; put the stored roles back on screen. Any other failure is
+            // reported as what it is (below), not as this refusal.
             Snackbar.Add(L["Settings_Snackbar_LastAdmin"].Value, Severity.Error);
+            var stored = RoleService.GetRoleData();
+            _roleEntries = stored.Roles;
+            _defaultRole = stored.DefaultRole;
+            return;
+        }
+        catch (Exception ex)
+        {
+            ShowFailure("save roles", ex);
             var stored = RoleService.GetRoleData();
             _roleEntries = stored.Roles;
             _defaultRole = stored.DefaultRole;
@@ -1503,6 +1567,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(key));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex) { ShowFailure("delete vault secret", ex, isSave: false); return; }
         LoadVault();
     }
 
@@ -1555,11 +1620,8 @@ else
                     started: () => _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info))));
             }
             catch (MutationRefusedException ex) { refused = ex.Message; }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                Console.Error.WriteLine($"Manual CVE scan failed: {Whiskers.Utils.SinkRedaction.Text(ex.Message)}");
-            }
+            // Logged and shown only redacted (UiFailure), as every other failure on this page.
+            catch (Exception ex) { error = UiFailure.Report(Logger, "manual CVE scan", ex); }
 
             // Report completion and refresh the "last scan" line / button state.
             try

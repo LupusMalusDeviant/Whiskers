@@ -1,3 +1,5 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit area A: Authentication, Authorization, HTTP/SignalR surface, Sessions
 
 Repo: repository @ `498e70d` (read-only audit). Paths below are relative to `src/Whiskers/` unless noted.
@@ -172,7 +174,7 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 
 ### A-13 Missing security headers (frame-ancestors/X-Frame-Options, CSP, nosniff, Referrer-Policy) and no HSTS
 
-_R1-50: frame-ancestors, X-Frame-Options, nosniff and Referrer-Policy on every answer (`HttpSecurityTests`). A full CSP and HSTS are deliberately not set (see WORK_PACKAGES R1-50)._
+_R1-50: frame-ancestors, X-Frame-Options, nosniff and Referrer-Policy on every answer (`HttpSecurityTests`). A full CSP and HSTS are deliberately not set (see WORK_PACKAGES R1-50). Since 1.0.0 (contract 0017 F2): the CSP is `frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'`; the app shell carries no inline script (`HttpSecurityTests`, `ContentSecurityPolicySourceTests`). HSTS is still not set._
 
 - **Severity:** Low · **Category:** Security · **v1-blocker:** no
 - **Evidence:** A grep for `X-Frame-Options`, `Content-Security-Policy`, `frame-ancestors` and `X-Content-Type-Options` finds nothing. Neither `UseHsts` nor `UseHttpsRedirection` is called.

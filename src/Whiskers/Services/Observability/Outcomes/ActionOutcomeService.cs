@@ -31,13 +31,18 @@ public sealed class ActionOutcomeService : IActionOutcomeService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly SelfMetrics.ISelfMetrics _selfMetrics;
     private readonly ILogger<ActionOutcomeService> _logger;
+    private readonly Whiskers.Configuration.EffectiveInterval<Whiskers.Configuration.MetricsSettings>? _collection;
 
+    /// <param name="collection">The metric collection interval (<c>Metrics:CollectionIntervalSeconds</c>), which sets how
+    /// far before the window's end a stored reading may lie; without it the tolerance is <see cref="MinimumWindowEndTolerance"/>.</param>
     public ActionOutcomeService(
-        IServiceScopeFactory scopeFactory, SelfMetrics.ISelfMetrics selfMetrics, ILogger<ActionOutcomeService> logger)
+        IServiceScopeFactory scopeFactory, SelfMetrics.ISelfMetrics selfMetrics, ILogger<ActionOutcomeService> logger,
+        Whiskers.Configuration.EffectiveInterval<Whiskers.Configuration.MetricsSettings>? collection = null)
     {
         _scopeFactory = scopeFactory;
         _selfMetrics = selfMetrics;
         _logger = logger;
+        _collection = collection;
     }
 
     public async Task<string> RecordAsync(
@@ -150,9 +155,13 @@ public sealed class ActionOutcomeService : IActionOutcomeService
         {
             case ActionCriteria.Metrics.ApiLatencyMs:
             {
-                if (!_selfMetrics.ApiLatencies().TryGetValue(outcome.ServerId, out var samples) || samples.Count == 0)
+                if (!_selfMetrics.ApiLatencies().TryGetValue(outcome.ServerId, out var window) || window.Samples.Count == 0)
                     return null;
-                return samples[^1].TotalMilliseconds;
+                // Review 1.0.0: the newest call must have been measured after the action and at the end of its window.
+                // A reading from before describes the state the action was meant to change; judging on it inflated the
+                // success rate of every throttle and lockout whose server was not called again afterwards.
+                if (!DescribesWindowEnd(window.LastAtUtc, outcome)) return null;
+                return window.Samples[^1].TotalMilliseconds;
             }
 
             case ActionCriteria.Metrics.LoopSuccessAgeSeconds:
@@ -170,26 +179,44 @@ public sealed class ActionOutcomeService : IActionOutcomeService
                     .Where(m => m.ServerId == outcome.ServerId && m.Timestamp >= outcome.ExecutedAtUtc)
                     .OrderByDescending(m => m.Timestamp)
                     .FirstOrDefault();
-                return sample?.CpuPercent;
+                return sample is not null && DescribesWindowEnd(sample.Timestamp, outcome) ? sample.CpuPercent : null;
             }
 
             case ActionCriteria.Metrics.ContainerUp:
             {
+                // Scoped to the server too: container ids are unique per host only.
                 var sample = db.ContainerMetrics
-                    .Where(m => m.ContainerId == outcome.TargetId && m.Timestamp >= outcome.ExecutedAtUtc)
+                    .Where(m => m.ServerId == outcome.ServerId && m.ContainerId == outcome.TargetId
+                                && m.Timestamp >= outcome.ExecutedAtUtc)
                     .OrderByDescending(m => m.Timestamp)
                     .FirstOrDefault();
 
                 // A metric row exists only while the container is running and answering, so its presence is
                 // the liveness signal. Its absence is genuinely ambiguous — stopped, or simply not collected
-                // yet — and ambiguity is what NotMeasurable is for.
-                return sample is null ? null : 1;
+                // yet — and ambiguity is what NotMeasurable is for. Review 1.0.0: the row has to come from the end of
+                // the window — "running five minutes later" — not from seconds after the action: a container that
+                // died right after its restart left one such row and was counted as a restart that worked.
+                return sample is not null && DescribesWindowEnd(sample.Timestamp, outcome) ? 1 : null;
             }
 
             default:
                 return null;
         }
     }
+
+    /// <summary>The least distance before the end of the check window a reading may lie and still describe it.</summary>
+    internal static readonly TimeSpan MinimumWindowEndTolerance = TimeSpan.FromMinutes(2);
+
+    /// <summary>How far before the end of the check window a reading may lie and still describe it: two collection
+    /// intervals, at least <see cref="MinimumWindowEndTolerance"/> — with a long interval no stored reading could lie
+    /// closer to the end. An older reading says nothing about the end of the window.</summary>
+    internal TimeSpan WindowEndTolerance =>
+        _collection?.Interval * 2 is { } twice && twice > MinimumWindowEndTolerance ? twice : MinimumWindowEndTolerance;
+
+    /// <summary>Review 1.0.0: whether a reading taken at <paramref name="at"/> describes the end of the action's window —
+    /// taken after the action, and no earlier than <see cref="WindowEndTolerance"/> before the window closed.</summary>
+    private bool DescribesWindowEnd(DateTime at, ActionOutcomeEntity outcome) =>
+        at >= outcome.ExecutedAtUtc && at >= outcome.DueAtUtc - WindowEndTolerance;
 
     public async Task<IReadOnlyList<OutcomeTally>> TalliesAsync(DateTime sinceUtc, CancellationToken ct = default)
     {

@@ -16,7 +16,7 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
-/// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): the request correlation id (R1-53, decides
+/// ORDER is security-critical (protected layer, docs/architecture/ARCHITECTURE.md): the request correlation id (R1-53, decides
 /// nothing) ahead of everything, then (R1-50, approved 2026-11-05) the untrusted-forwarded-headers marker (it must see
 /// the original peer), the forwarded headers, the response-header registration (before anything can write), then the fixed
 /// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. Apart from the R1-50 steps every
@@ -82,7 +82,7 @@ public static class WhiskersPipelineExtensions
                 var headers = ((HttpContext)state).Response.Headers;
                 headers["X-Content-Type-Options"] = "nosniff";
                 headers["X-Frame-Options"] = "DENY";
-                headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+                headers["Content-Security-Policy"] = "frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'";
                 headers["Referrer-Policy"] = "same-origin";
                 return Task.CompletedTask;
             }, ctx);
@@ -661,7 +661,7 @@ public static class WhiskersPipelineExtensions
 
         // Bring the SQLite metrics database up to the current schema via EF Core migrations. On a legacy
         // EnsureCreated database (no migration history) this baselines onto migrations without recreating
-        // existing tables — see Services/Persistence/DatabaseInitializer and docs/adr/0003.
+        // existing tables — see Services/Persistence/DatabaseInitializer and docs/architecture/adr/0003.
         // R1-34: the pre-upgrade backup was taken by the UpgradeGuard warm-up (Order 45, before anything rewrote data);
         // a failed migration logs the way back, and the upgrade counts as finished only when both schemas are current.
         var upgradeLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Upgrade");

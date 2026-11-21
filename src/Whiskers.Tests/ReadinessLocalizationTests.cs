@@ -137,13 +137,13 @@ public class ReadinessLocalizationTests
             config: new() { ["Oidc:Enabled"] = "true", ["Oidc:RequireHttpsMetadata"] = "false" }, untrustedPeer: "172.18.0.2"),
             ["172.18.0.2"]);
         yield return new("mTLS: one host migrated, one shared, keys exposed", MtlsMigrated,
-            ["Rabenhof", "Zirkuswagen", "whiskers-client-rabenhof-g1", "1"]);
+            ["Host-d", "Host-e", "whiskers-client-host-d-g1", "1"]);
         yield return new("mTLS: live arguments stopped, unreadable, mismatched", MtlsLive,
-            ["Rabenhof", "Zirkuswagen", "Burgcloud", MtlsCertificateService.SharedClientCommonName]);
+            ["Host-d", "Host-e", "Host-b", MtlsCertificateService.SharedClientCommonName]);
         yield return new("mTLS: everything narrowed, operator host, invalid id", MtlsNarrowed,
-            ["Rabenhof", "Handmade", "bad id", "whiskers-client-rabenhof-g1", MtlsCertificateService.SharedClientCommonName]);
+            ["Host-d", "Handmade", "bad id", "whiskers-client-host-d-g1", MtlsCertificateService.SharedClientCommonName]);
         yield return new("mTLS: unfinished switch, unreadable hosts", MtlsUnfinished,
-            ["Rabenhof", "Zirkuswagen", "Burgcloud", "whiskers-client-zirkuswagen-g1", "whiskers-client-burgcloud-g1"]);
+            ["Host-d", "Host-e", "Host-b", "whiskers-client-host-e-g1", "whiskers-client-host-b-g1"]);
         yield return new("guardrails: fail-closed, record missing, unconfirmed, recorded", Guardrails,
             ["guardrails.json: unexpected token", "table missing"]);
         yield return new("keys: sealed, plaintext, locked, operator-managed; rotation done and unfinished", KeysAndRotation,
@@ -393,8 +393,8 @@ public class ReadinessLocalizationTests
     /// and one key file readable by everybody.</summary>
     private static async Task<IReadOnlyList<ReadinessCheck>> MtlsMigrated(IStringLocalizer<SharedResource> text)
     {
-        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
-        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        using var w = new CredentialWorld(true, ("host-d", "100.64.0.9"), ("host-e", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("host-d", null, default)).Ok);
         ProtectKeys(w.Root);
         var checks = Mtls(w, text).MtlsClientCredentialChecks().ToList();
         Expose(w.Store.SharedPaths.Key);
@@ -406,12 +406,12 @@ public class ReadinessLocalizationTests
     /// wider list.</summary>
     private static async Task<IReadOnlyList<ReadinessCheck>> MtlsLive(IStringLocalizer<SharedResource> text)
     {
-        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"), ("burgcloud", "100.64.0.11"));
-        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        using var w = new CredentialWorld(true, ("host-d", "100.64.0.9"), ("host-e", "100.64.0.10"), ("host-b", "100.64.0.11"));
+        Assert.True((await w.Service.MigrateClientAsync("host-d", null, default)).Ok);
         var checks = (await Mtls(w, text).LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync)).ToList();
-        w.Host("zirkuswagen").GhostunnelStopped = true;
-        w.Host("burgcloud").Unreachable = true;
-        w.Host("rabenhof").RunningAllow = [MtlsCertificateService.SharedClientCommonName, "whiskers-client-rabenhof-g1"];
+        w.Host("host-e").GhostunnelStopped = true;
+        w.Host("host-b").Unreachable = true;
+        w.Host("host-d").RunningAllow = [MtlsCertificateService.SharedClientCommonName, "whiskers-client-host-d-g1"];
         checks.AddRange(await Mtls(w, text).LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync));
         return checks;
     }
@@ -420,8 +420,8 @@ public class ReadinessLocalizationTests
     /// whose id cannot be a directory name, and a narrowed host whose certificate cannot be read (no expiry).</summary>
     private static async Task<IReadOnlyList<ReadinessCheck>> MtlsNarrowed(IStringLocalizer<SharedResource> text)
     {
-        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("handmade", "100.64.0.12"));
-        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        using var w = new CredentialWorld(true, ("host-d", "100.64.0.9"), ("handmade", "100.64.0.12"));
+        Assert.True((await w.Service.MigrateClientAsync("host-d", null, default)).Ok);
         var own = Path.Combine(w.Root, "operator");
         Directory.CreateDirectory(own);
         File.Copy(w.Store.SharedPaths.Cert, Path.Combine(own, "client.crt"));
@@ -438,7 +438,7 @@ public class ReadinessLocalizationTests
             Id = "bad id", Name = "bad id", ConnectionType = ConnectionType.TCP, TcpUseTls = true,
             TcpClientCertPath = w.Store.SharedPaths.Cert, TcpClientKeyPath = w.Store.SharedPaths.Key,
         });
-        File.WriteAllText(w.Server("rabenhof").TcpClientCertPath!, "not a certificate");
+        File.WriteAllText(w.Server("host-d").TcpClientCertPath!, "not a certificate");
         checks.AddRange(Mtls(w, text).MtlsClientCredentialChecks().Where(c => c.Id == Ids.MtlsIdentity));
         return checks;
     }
@@ -447,12 +447,12 @@ public class ReadinessLocalizationTests
     /// the shared identity, one on its own.</summary>
     private static async Task<IReadOnlyList<ReadinessCheck>> MtlsUnfinished(IStringLocalizer<SharedResource> text)
     {
-        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"), ("burgcloud", "100.64.0.11"));
-        Assert.True((await w.Service.MigrateClientAsync("zirkuswagen", null, default)).Ok);
-        Assert.True((await w.Service.MigrateClientAsync("burgcloud", null, default)).Ok);
-        await w.Store.WriteJournalAsync("zirkuswagen", w.Store.ReadJournal("zirkuswagen")! with { Phase = 3 }, default);
-        w.Host("rabenhof").Unreachable = true;
-        w.Host("burgcloud").Unreachable = true;
+        using var w = new CredentialWorld(true, ("host-d", "100.64.0.9"), ("host-e", "100.64.0.10"), ("host-b", "100.64.0.11"));
+        Assert.True((await w.Service.MigrateClientAsync("host-e", null, default)).Ok);
+        Assert.True((await w.Service.MigrateClientAsync("host-b", null, default)).Ok);
+        await w.Store.WriteJournalAsync("host-e", w.Store.ReadJournal("host-e")! with { Phase = 3 }, default);
+        w.Host("host-d").Unreachable = true;
+        w.Host("host-b").Unreachable = true;
         return await Mtls(w, text).MtlsChecksAsync(w.Service.ReadLiveAllowListAsync);
     }
 

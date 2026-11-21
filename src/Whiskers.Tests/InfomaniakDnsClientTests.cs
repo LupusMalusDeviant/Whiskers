@@ -55,7 +55,7 @@ public class InfomaniakDnsClientTests
             ]}
             """);
 
-        var records = await client.ListRecordsAsync(Token, "lupusmalus.dev");
+        var records = await client.ListRecordsAsync(Token, "example.com");
 
         Assert.Equal(3, records.Count);
         Assert.Equal(new DnsRecord("25", "@", "NS", "nsany1.infomaniak.com", 3600), records[0]);
@@ -65,7 +65,7 @@ public class InfomaniakDnsClientTests
 
         var (req, _) = Assert.Single(h.Sent);
         Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("https://api.infomaniak.com/2/zones/lupusmalus.dev/records", req.RequestUri!.ToString());
+        Assert.Equal("https://api.infomaniak.com/2/zones/example.com/records", req.RequestUri!.ToString());
         Assert.Equal("Bearer", req.Headers.Authorization!.Scheme);
         Assert.Equal(Token, req.Headers.Authorization.Parameter);
     }
@@ -76,13 +76,13 @@ public class InfomaniakDnsClientTests
         var (client, h) = Make();
         h.Reply(HttpStatusCode.OK, """{"result":"success","data":{"id":4711}}""");
 
-        var created = await client.CreateRecordAsync(Token, "lupusmalus.dev", new DnsRecord(null, "holler.app", "A", "1.2.3.4", 300));
+        var created = await client.CreateRecordAsync(Token, "example.com", new DnsRecord(null, "holler.app", "A", "1.2.3.4", 300));
 
         Assert.Equal("4711", created.Id);
         Assert.Equal("holler.app", created.Name);
         var (req, body) = Assert.Single(h.Sent);
         Assert.Equal(HttpMethod.Post, req.Method);
-        Assert.EndsWith("/2/zones/lupusmalus.dev/records", req.RequestUri!.ToString());
+        Assert.EndsWith("/2/zones/example.com/records", req.RequestUri!.ToString());
         using var doc = JsonDocument.Parse(body!);
         Assert.Equal("holler.app", doc.RootElement.GetProperty("source").GetString());
         Assert.Equal("A", doc.RootElement.GetProperty("type").GetString());
@@ -96,7 +96,7 @@ public class InfomaniakDnsClientTests
         var (client, h) = Make();
         h.Reply(HttpStatusCode.OK, """{"result":"success","data":{"id":1,"source":".","type":"A","target":"1.2.3.4","ttl":300}}""");
 
-        var created = await client.CreateRecordAsync(Token, "lupusmalus.dev", new DnsRecord(null, "@", "A", "1.2.3.4", 300));
+        var created = await client.CreateRecordAsync(Token, "example.com", new DnsRecord(null, "@", "A", "1.2.3.4", 300));
 
         using var doc = JsonDocument.Parse(h.Sent[0].Body!);
         Assert.Equal(InfomaniakDnsClient.ApexSource, doc.RootElement.GetProperty("source").GetString());
@@ -109,11 +109,11 @@ public class InfomaniakDnsClientTests
         var (client, h) = Make();
         h.Reply(HttpStatusCode.OK, """{"result":"success","data":{"id":5,"source":"holler.app","type":"A","target":"5.6.7.8","ttl":600}}""");
 
-        var updated = await client.UpdateRecordAsync(Token, "lupusmalus.dev", "5", new DnsRecord("5", "holler.app", "A", "5.6.7.8", 600));
+        var updated = await client.UpdateRecordAsync(Token, "example.com", "5", new DnsRecord("5", "holler.app", "A", "5.6.7.8", 600));
 
         var (req, body) = Assert.Single(h.Sent);
         Assert.Equal(HttpMethod.Put, req.Method);
-        Assert.EndsWith("/2/zones/lupusmalus.dev/records/5", req.RequestUri!.ToString());
+        Assert.EndsWith("/2/zones/example.com/records/5", req.RequestUri!.ToString());
         using var doc = JsonDocument.Parse(body!);
         Assert.Equal("5.6.7.8", doc.RootElement.GetProperty("target").GetString());
         Assert.Equal(600, doc.RootElement.GetProperty("ttl").GetInt32());
@@ -127,11 +127,11 @@ public class InfomaniakDnsClientTests
         var (client, h) = Make();
         h.Reply(HttpStatusCode.OK, """{"result":"success","data":true}""");
 
-        await client.DeleteRecordAsync(Token, "lupusmalus.dev", "5");
+        await client.DeleteRecordAsync(Token, "example.com", "5");
 
         var (req, _) = Assert.Single(h.Sent);
         Assert.Equal(HttpMethod.Delete, req.Method);
-        Assert.EndsWith("/2/zones/lupusmalus.dev/records/5", req.RequestUri!.ToString());
+        Assert.EndsWith("/2/zones/example.com/records/5", req.RequestUri!.ToString());
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class InfomaniakDnsClientTests
         h.Reply(HttpStatusCode.OK, """{"result":"error","error":{"code":"validation_failed","description":"target is invalid"}}""");
 
         var ex = await Assert.ThrowsAsync<DnsProviderException>(() =>
-            client.CreateRecordAsync(Token, "lupusmalus.dev", new DnsRecord(null, "x", "A", "1.2.3.4", 300)));
+            client.CreateRecordAsync(Token, "example.com", new DnsRecord(null, "x", "A", "1.2.3.4", 300)));
 
         Assert.Contains("target is invalid", ex.Message);
     }
@@ -167,7 +167,7 @@ public class InfomaniakDnsClientTests
         var (client, h) = Make();
         h.Reply(HttpStatusCode.BadGateway, "<html>" + new string('x', 1000) + "</html>");
 
-        var ex = await Assert.ThrowsAsync<DnsProviderException>(() => client.ListRecordsAsync(Token, "lupusmalus.dev"));
+        var ex = await Assert.ThrowsAsync<DnsProviderException>(() => client.ListRecordsAsync(Token, "example.com"));
 
         Assert.Equal(502, ex.StatusCode);
         Assert.True(ex.Message.Length < 500, "excerpt must be bounded");
@@ -178,7 +178,7 @@ public class InfomaniakDnsClientTests
     {
         var (client, h) = Make();
 
-        await Assert.ThrowsAsync<DnsProviderException>(() => client.ListRecordsAsync("", "lupusmalus.dev"));
+        await Assert.ThrowsAsync<DnsProviderException>(() => client.ListRecordsAsync("", "example.com"));
 
         Assert.Empty(h.Sent);
     }

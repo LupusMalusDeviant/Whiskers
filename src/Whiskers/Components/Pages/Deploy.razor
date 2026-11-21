@@ -122,7 +122,7 @@
             </MudItem>
 
             <MudItem xs="12">
-                @if (_role >= AppRole.Operator)
+                @if (_role >= CapabilityCatalog.RoleOf("app.deploy"))
                 {
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromForm"
                                Disabled="_deploying" StartIcon="@Icons.Material.Filled.RocketLaunch">
@@ -152,7 +152,7 @@
                        StartIcon="@Icons.Material.Filled.CheckCircle">
                 @L["Deploy_Button_Validate"]
             </MudButton>
-            @if (_role >= AppRole.Operator)
+            @if (_role >= CapabilityCatalog.RoleOf("compose.deploy"))
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployFromCompose"
                            Disabled="@(_deploying || string.IsNullOrWhiteSpace(_composeYaml))"

@@ -601,6 +601,7 @@ public class TaskExecutor : ITaskExecutor
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = NotificationEventTypes.AutomationSuspended,
+                ThrottleSubject = NotificationThrottleSubjects.Task(task.Id),
                 ContainerName = task.TargetName ?? task.Name,
                 ImageInfo = $"Scheduled task \"{task.Name}\" was suspended: {lost}. It stays off until an admin takes it over in Scheduled tasks and switches it on again.",
             });
@@ -620,6 +621,7 @@ public class TaskExecutor : ITaskExecutor
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = NotificationEventTypes.AutomationRefused,
+                ThrottleSubject = NotificationThrottleSubjects.Task(task.Id),
                 ContainerName = task.TargetName ?? task.Name,
                 ImageInfo = $"Scheduled task \"{task.Name}\" did not run. {reason} An admin can take it over in Scheduled tasks.",
             });

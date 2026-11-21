@@ -82,6 +82,12 @@ public static class MutationTargets
         "config" => "section",
         "account" => "account",
         "identity" => "binding",
+        // Contract 0020: the old owner of a handover (and of a hold), and a personal handover notice.
+        "automation-owner" => "fromOwner",
+        "handover-notice" => "notice",
+        // Contract 0018 part E: MCP onboard_server names its server `server` (the Servers page passes `serverId`, which wins
+        // when both are given; the tool runs on the decided target either way).
+        "server" when capability.Id == "server.onboard" && !Has(args, "serverId") && Has(args, "server") => "server",
         "host" or "server" => "serverId",
         _ => null,
     };
@@ -168,7 +174,9 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "host" => await HostAsync(request, capability, target, ct),
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
-            "server" when capability.Id == "server.onboard" => OnboardTarget(target),
+            "server" when capability.Id == "server.onboard" => await WithCloudVmAsync(request, ServerArgumentAgrees(request, OnboardTarget(target)), ct),
+            // Contract 0018 part B: a registration creates its record; the id is decided by the registration.
+            "server" when capability.Id == "server.create" => Pass(target),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
                 mustExist: capability.Id != "server.save"),
             "network" => await NetworkAsync(request, capability, target, ct),
@@ -180,7 +188,8 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "webhook" => await WebhookAsync(request, capability, target),
             "volume" => await VolumeAsync(request, capability, target, ct),
             "log-alert" => await LogAlertAsync(capability, target),
-            "config" or "account" or "identity" or "whiskers" or "fleet" => await RecordAsync(request, capability, target, ct),
+            "config" or "account" or "identity" or "whiskers" or "fleet" or "automation-owner" or "handover-notice" =>
+                await RecordAsync(request, capability, target, ct),
             // Contract 0012 (D2): every kind has a branch; one without is refused, never passed through.
             _ => Refuse($"'{capability.Id}' acts on a '{capability.TargetKind}', which Whiskers cannot resolve."),
         };
@@ -300,13 +309,13 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
     private async Task<TargetResolution> HostAsync(MutationRequest request, Capability capability, MutationTarget target,
         CancellationToken ct)
     {
-        // Contract 0017, amendment 2 (B3): only this resolver vouches for a script; a caller's own claim is dropped.
+        // Contract 0022, amendment 2 (B3): only this resolver vouches for a script; a caller's own claim is dropped.
         target = target with { TrustedScript = null };
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
         // Contract 0012 (D11): an nginx site, a systemd unit or a firewall rule on the server, against the host's listing.
         if (resolution.Target is { } onServer && CapabilityCatalog.HostObjects.Contains(capability.Id))
             return await HostObjectAsync(request, capability, onServer);
-        // Contract 0017 (point 4): a call of a script the policy trusts on this server, pinned to the hash read there.
+        // Contract 0022 (point 4): a call of a script the policy trusts on this server, pinned to the hash read there.
         if (resolution.Target is { } execHost && capability.Id == "host.exec")
             return await TrustedScriptAsync(request, resolution, execHost, ct);
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
@@ -483,6 +492,22 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
     }
 
     /// <summary>
+    /// Contract 0018 part E (review r1): <c>onboard_server</c> names its server <c>server</c>; when a call also passes
+    /// <c>serverId</c> (which decides), a <c>server</c> naming another server is refused, never silently ignored. Only on
+    /// the MCP surface, where <c>server</c> is the tool's argument; a page passes <c>serverId</c> only.
+    /// </summary>
+    private static TargetResolution ServerArgumentAgrees(MutationRequest request, TargetResolution resolution)
+    {
+        if (resolution.Target is not { } target || request.Surface != MutationSurface.Mcp) return resolution;
+        if (MutationTargets.String(request.Arguments, "server") is not { } named
+            || MutationTargets.String(request.Arguments, "serverId") is null)
+            return resolution;
+        return string.Equals(named.Trim(), target.Id, StringComparison.OrdinalIgnoreCase)
+            ? resolution
+            : Refuse($"The arguments name two servers: server '{named}' and serverId '{target.Id}'; name one.");
+    }
+
+    /// <summary>
     /// <c>server.onboard</c> (INV-59, #187): onboarding works on a server that is already in the inventory, so the
     /// decision is on exactly that server — by its id, then by its id in another case — never on the default server or
     /// a display name, and an unknown or ambiguous id is refused. The onboarding then runs on the canonical id, so
@@ -512,6 +537,56 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         });
     }
 
+    /// <summary>
+    /// Contract 0018 (INV-30, INV-25, INV-64): an onboarding with a bootstrap (<c>bootstrap</c> other than <c>none</c>)
+    /// reads the record's bound VM from the provider and records it in <see cref="MutationTarget.CloudVm"/>, so the
+    /// approval binds the VM's id, name and public IP and the card names it. When the VM cannot be read — provider
+    /// error or timeout, vault locked, no credential, no binding, an empty answer, or a VM without the record's public IP
+    /// — the call is refused here, before policy runs: no approval is raised.
+    /// </summary>
+    private async Task<TargetResolution> WithCloudVmAsync(MutationRequest request, TargetResolution resolution, CancellationToken ct)
+    {
+        if (resolution.Target is not { } target) return resolution;
+        if (!request.Arguments.TryGetValue("bootstrap", out var bootstrap) || bootstrap.ValueKind == JsonValueKind.Null
+            || (bootstrap.ValueKind == JsonValueKind.String && string.Equals(bootstrap.GetString(), "none", StringComparison.OrdinalIgnoreCase)))
+            return resolution;
+        const string unreadable = "The bound cloud VM cannot be read, so the bootstrap is refused";
+        var server = _services.GetService<IServerConfigService>()?.GetServers().FirstOrDefault(s => s.Id == target.Id);
+        if (server is null) return Refuse($"{unreadable}: the server is gone.");
+        if (server.CloudProvider != Whiskers.Models.CloudProvider.Hetzner || server.CloudServerId is not { } vmId)
+            return Refuse($"{unreadable}: the record is bound to no Hetzner VM.");
+        if (_services.GetService<Whiskers.Services.Hetzner.IHetznerService>() is not { } hetzner
+            || _services.GetService<Whiskers.Services.Vault.IVaultService>() is not { } vault)
+            return Refuse($"{unreadable}: no Hetzner client or vault.");
+        try
+        {
+            var token = Whiskers.Services.Cloud.CloudCredentials.KeyOf(server, vault)
+                        ?? throw new InvalidOperationException("the record has no Hetzner token");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            var vm = await hetzner.GetServerAsync(token, vmId, cts.Token)
+                     ?? throw new InvalidOperationException($"Hetzner knows no VM {vmId}");
+            var ip = server.SshHost?.Trim();
+            if (string.IsNullOrEmpty(ip) || !string.Equals(vm.Ipv4, ip, StringComparison.Ordinal))
+                throw new InvalidOperationException("IP and VM no longer match");
+            var labels = string.Join(",", (vm.Labels ?? []).OrderBy(l => l.Key, StringComparer.Ordinal).Select(l => $"{l.Key}={l.Value}"));
+            return resolution with
+            {
+                Target = target with
+                {
+                    CloudVm = $"{vm.Id}|{vm.Name}|{ip}",
+                    CloudVmCreated = vm.Created,
+                    CloudVmLabels = labels,
+                },
+            };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or OperationCanceledException
+                                       or System.Text.Json.JsonException)
+        {
+            return Refuse($"{unreadable}: {Whiskers.Utils.SecretRedactor.Redact(ex.Message)}.");
+        }
+    }
+
     private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)
     {
         if (!mustExist)
@@ -538,7 +613,21 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         var (server, error) = ResolveServer(target.ServerId);
         if (server is null) return Refuse(error!, target.ServerId);
         if (Creates.Contains(capability.Id))
-            return Pass(target with { ServerId = server.Id });
+        {
+            // Contract 0021: a LAN driver (the call's own argument; absent is the method's default, bridge) carries a
+            // LanNetwork exposure, so ExposureChangeRule decides it like a compose exposure. Nothing is withheld: name
+            // and driver are typed by the caller and audited.
+            var name = MutationTargets.String(request.Arguments, "name") ?? target.Name ?? target.Id;
+            var driver = !request.Arguments.TryGetValue("driver", out var d)
+                         || d.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined
+                ? "bridge"
+                // Anything but a string is no driver Whiskers knows: it counts as LAN (D2, fail closed).
+                : d.ValueKind == System.Text.Json.JsonValueKind.String ? d.GetString() ?? "bridge" : d.GetRawText();
+            var created = target with { ServerId = server.Id };
+            return Pass(capability.Id == "network.create" && LanDrivers.CreateIdentity(name ?? "", driver) is { } lan
+                ? created with { Exposures = created.Exposures.Append(lan).Distinct(StringComparer.Ordinal).ToList() }
+                : created);
+        }
         if (string.IsNullOrWhiteSpace(target.Id))
             return Refuse("Network ID or name is required.");
         var docker = _services.GetService<IDockerService>();
@@ -559,6 +648,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         // else (removal) every attached container, which the removal cuts off.
         var related = new List<string>();
         var resources = new List<IReadOnlyList<string>>();
+        var exposures = new List<string>();
         string? relatedContainerId = null;
         if (!ContainerScoped.Contains(capability.Id))
         {
@@ -576,6 +666,10 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             related.Add(container.Name);
             resources.Add(Aliases(container.Id, container.Name));
             relatedContainerId = container.Id;
+            // Contract 0021: connecting a container to a LAN network gives it its own address on the LAN.
+            if (capability.Id == "network.connect" && LanDrivers.IsLan(network.Driver))
+                exposures.Add(ComposeExposures.Identity(container.Name.TrimStart('/'), ExposureKind.LanNetwork,
+                    network.Name, network.Driver));
         }
         return Done(target with
         {
@@ -583,6 +677,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             Related = related.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
             RelatedResources = resources.Where(g => g.Count > 0).ToList(),
             RelatedContainerId = relatedContainerId,
+            Exposures = target.Exposures.Concat(exposures).Distinct(StringComparer.Ordinal).ToList(),
         });
     }
 

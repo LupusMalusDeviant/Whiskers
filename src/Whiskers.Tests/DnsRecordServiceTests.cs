@@ -76,7 +76,7 @@ public class DnsRecordServiceTests
     {
         var (svc, p) = Make();
 
-        var r = await svc.SetAsync("lupusmalus.dev", "holler.app", "a", "1.2.3.4", null);
+        var r = await svc.SetAsync("example.com", "holler.app", "a", "1.2.3.4", null);
 
         Assert.Equal(DnsSetAction.Created, r.Action);
         Assert.Null(r.Before);
@@ -90,7 +90,7 @@ public class DnsRecordServiceTests
         var (svc, p) = Make();
         p.Records.Add(new DnsRecord("1", "holler.app", "A", "1.2.3.4", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "holler.app.lupusmalus.dev", "A", "5.6.7.8", 600);
+        var r = await svc.SetAsync("example.com", "holler.app.example.com", "A", "5.6.7.8", 600);
 
         Assert.Equal(DnsSetAction.Updated, r.Action);
         Assert.Equal("1.2.3.4", r.Before!.Value);
@@ -98,7 +98,7 @@ public class DnsRecordServiceTests
         Assert.Equal(600, r.After.Ttl);
         Assert.Equal("1", r.After.Id);
         Assert.Single(p.Records);
-        Assert.Contains(p.Calls, c => c.StartsWith("update lupusmalus.dev #1"));
+        Assert.Contains(p.Calls, c => c.StartsWith("update example.com #1"));
         Assert.DoesNotContain(p.Calls, c => c.StartsWith("create"));
     }
 
@@ -108,10 +108,10 @@ public class DnsRecordServiceTests
         var (svc, p) = Make();
         p.Records.Add(new DnsRecord("1", "holler.app", "A", "1.2.3.4", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "holler.app", "A", "1.2.3.4", 300);
+        var r = await svc.SetAsync("example.com", "holler.app", "A", "1.2.3.4", 300);
 
         Assert.Equal(DnsSetAction.Unchanged, r.Action);
-        Assert.Equal(new[] { "list lupusmalus.dev" }, p.Calls);
+        Assert.Equal(new[] { "list example.com" }, p.Calls);
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class DnsRecordServiceTests
         var (svc, p) = Make();
         p.Records.Add(new DnsRecord("1", "@", "TXT", "\"v=spf1 -all\"", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "v=spf1 -all", 300);
+        var r = await svc.SetAsync("example.com", "@", "TXT", "v=spf1 -all", 300);
 
         Assert.Equal(DnsSetAction.Unchanged, r.Action);
     }
@@ -132,12 +132,12 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "rr", "A", "1.1.1.1", 300));
         p.Records.Add(new DnsRecord("2", "rr", "A", "2.2.2.2", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "rr", "A", "3.3.3.3", 300);
+        var r = await svc.SetAsync("example.com", "rr", "A", "3.3.3.3", 300);
 
         Assert.Equal(DnsSetAction.Updated, r.Action);
         var only = Assert.Single(p.Records);
         Assert.Equal("3.3.3.3", only.Value);
-        Assert.Contains("delete lupusmalus.dev #2", p.Calls);
+        Assert.Contains("delete example.com #2", p.Calls);
         // What went away is named in the result (Fable review H3).
         Assert.Equal("2.2.2.2", Assert.Single(r.Removed).Value);
     }
@@ -149,7 +149,7 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "@", "TXT", "\"v=spf1 include:mail.example -all\"", 300));
         p.Records.Add(new DnsRecord("2", "@", "TXT", "google-site-verification=abc", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "whiskers-verify=xyz", 300);
+        var r = await svc.SetAsync("example.com", "@", "TXT", "whiskers-verify=xyz", 300);
 
         Assert.Equal(DnsSetAction.Created, r.Action);
         Assert.Empty(r.Removed);
@@ -164,12 +164,12 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "@", "TXT", "v=spf1 -all", 300));
         p.Records.Add(new DnsRecord("2", "@", "TXT", "google-site-verification=abc", 300));
 
-        var same = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "google-site-verification=abc", 300);
+        var same = await svc.SetAsync("example.com", "@", "TXT", "google-site-verification=abc", 300);
         Assert.Equal(DnsSetAction.Unchanged, same.Action);
 
-        var r = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "google-site-verification=abc", 600);
+        var r = await svc.SetAsync("example.com", "@", "TXT", "google-site-verification=abc", 600);
         Assert.Equal(DnsSetAction.Updated, r.Action);
-        Assert.Contains("update lupusmalus.dev #2", p.Calls[^1]);
+        Assert.Contains("update example.com #2", p.Calls[^1]);
         Assert.Equal(300, p.Records.Single(x => x.Id == "1").Ttl);
         Assert.Equal(2, p.Records.Count);
     }
@@ -183,7 +183,7 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("3", "rr", "A", "3.3.3.3", 300));
         p.FailDeleteOf = "3";
 
-        var partial = await Assert.ThrowsAsync<DnsPartialSetException>(() => svc.SetAsync("lupusmalus.dev", "rr", "A", "9.9.9.9", 300));
+        var partial = await Assert.ThrowsAsync<DnsPartialSetException>(() => svc.SetAsync("example.com", "rr", "A", "9.9.9.9", 300));
 
         Assert.Equal("1.1.1.1", partial.Before.Value);
         Assert.Equal("9.9.9.9", partial.After.Value);
@@ -199,11 +199,11 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "rr", "A", "1.1.1.1", 300));
         p.Records.Add(new DnsRecord("2", "rr", "A", "2.2.2.2", 300));
 
-        var r = await svc.SetAsync("lupusmalus.dev", "rr", "A", "2.2.2.2", 300);
+        var r = await svc.SetAsync("example.com", "rr", "A", "2.2.2.2", 300);
 
         Assert.Equal("2", Assert.Single(p.Records).Id);   // never #1 rewritten into a duplicate of #2
         Assert.Equal("1", Assert.Single(r.Removed).Id);
-        Assert.Contains("delete lupusmalus.dev #1", p.Calls);
+        Assert.Contains("delete example.com #1", p.Calls);
     }
 
     [Fact]
@@ -213,7 +213,7 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "@", "TXT", "\"v=spf1 -all\"", 300));
         p.Records.Add(new DnsRecord("2", "@", "TXT", "verify=abc", 300));
 
-        var removed = await svc.DeleteAsync("lupusmalus.dev", "@", "TXT", "v=spf1 -all");
+        var removed = await svc.DeleteAsync("example.com", "@", "TXT", "v=spf1 -all");
 
         Assert.Equal("1", Assert.Single(removed).Id);
         Assert.Equal("2", Assert.Single(p.Records).Id);
@@ -226,8 +226,8 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("1", "rr", "A", "1.1.1.1", 300));
         p.Records.Add(new DnsRecord(null, "rr", "A", "2.2.2.2", 300));
 
-        await Assert.ThrowsAsync<DnsProviderException>(() => svc.SetAsync("lupusmalus.dev", "rr", "A", "3.3.3.3", 300));
-        Assert.Equal(["list lupusmalus.dev"], p.Calls);
+        await Assert.ThrowsAsync<DnsProviderException>(() => svc.SetAsync("example.com", "rr", "A", "3.3.3.3", 300));
+        Assert.Equal(["list example.com"], p.Calls);
     }
 
     [Fact]
@@ -235,11 +235,11 @@ public class DnsRecordServiceTests
     {
         var (svc, p) = Make();
         p.Records.Add(new DnsRecord("1", "www", "A", "1.2.3.4", 300));
-        p.Records.Add(new DnsRecord("2", "alias", "CNAME", "www.lupusmalus.dev", 300));
+        p.Records.Add(new DnsRecord("2", "alias", "CNAME", "www.example.com", 300));
 
-        var ex1 = await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("lupusmalus.dev", "www", "CNAME", "x.example", null));
+        var ex1 = await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("example.com", "www", "CNAME", "x.example", null));
         Assert.Contains("CNAME", ex1.Message);
-        var ex2 = await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("lupusmalus.dev", "alias", "A", "1.2.3.4", null));
+        var ex2 = await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("example.com", "alias", "A", "1.2.3.4", null));
         Assert.Contains("CNAME", ex2.Message);
         Assert.Equal(2, p.Records.Count);
     }
@@ -252,7 +252,7 @@ public class DnsRecordServiceTests
         p.Records.Add(new DnsRecord("2", "x", "A", "2.2.2.2", 300));
         p.Records.Add(new DnsRecord("3", "x", "TXT", "keep", 300));
 
-        var removed = await svc.DeleteAsync("lupusmalus.dev", "x.lupusmalus.dev.", "A");
+        var removed = await svc.DeleteAsync("example.com", "x.example.com.", "A");
 
         Assert.Equal(2, removed.Count);
         var left = Assert.Single(p.Records);
@@ -263,20 +263,20 @@ public class DnsRecordServiceTests
     public async Task Delete_of_a_missing_record_is_a_noop()
     {
         var (svc, p) = Make();
-        Assert.Empty(await svc.DeleteAsync("lupusmalus.dev", "nope", "A"));
-        Assert.Equal(new[] { "list lupusmalus.dev" }, p.Calls);
+        Assert.Empty(await svc.DeleteAsync("example.com", "nope", "A"));
+        Assert.Equal(new[] { "list example.com" }, p.Calls);
     }
 
     [Fact]
     public async Task Zone_fence_blocks_zones_outside_the_allow_list()
     {
-        var (svc, p) = Make("lupusmalus.dev");
+        var (svc, p) = Make("example.com");
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => svc.ListAsync("other.dev"));
         Assert.Contains("nicht freigegeben", ex.Message);
         Assert.Empty(p.Calls);
 
-        await svc.ListAsync("LupusMalus.dev."); // case + trailing dot are normalised, not rejected
+        await svc.ListAsync("Example.com."); // case + trailing dot are normalised, not rejected
         Assert.Single(p.Calls);
     }
 
@@ -287,7 +287,7 @@ public class DnsRecordServiceTests
         var svc = new DnsRecordService(new[] { provider }, new Monitor(new DnsSettings { ApiToken = "" }), NullLogger<DnsRecordService>.Instance);
 
         Assert.False(svc.IsConfigured);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ListAsync("lupusmalus.dev"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ListAsync("example.com"));
         Assert.Empty(provider.Calls);
     }
 
@@ -310,7 +310,7 @@ public class DnsRecordServiceTests
             var settings = new DnsSettings { Provider = "infomaniak", ApiTokenRef = "dns:apitoken:1" };
             var svc = new DnsRecordService(new[] { provider }, new Monitor(settings), NullLogger<DnsRecordService>.Instance, vault);
             Assert.True(svc.IsConfigured);
-            await svc.ListAsync("lupusmalus.dev");
+            await svc.ListAsync("example.com");
             Assert.Equal(token, provider.LastToken);
 
             var disabled = new Whiskers.Services.Vault.VaultService(
@@ -318,7 +318,7 @@ public class DnsRecordServiceTests
                 NullLogger<Whiskers.Services.Vault.VaultService>.Instance, path);
             await disabled.InitializeAsync();
             var locked = new DnsRecordService(new[] { new FakeProvider() }, new Monitor(settings), NullLogger<DnsRecordService>.Instance, disabled);
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => locked.ListAsync("lupusmalus.dev"));
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => locked.ListAsync("example.com"));
             Assert.Contains("Vault", ex.Message);
         }
         finally
@@ -333,29 +333,42 @@ public class DnsRecordServiceTests
         var provider = new FakeProvider();
         var svc = new DnsRecordService(new[] { provider }, new Monitor(new DnsSettings { Provider = "cloudflare", ApiToken = "t" }), NullLogger<DnsRecordService>.Instance);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ListAsync("lupusmalus.dev"));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ListAsync("example.com"));
         Assert.Contains("infomaniak", ex.Message);
     }
 
     [Theory]
     [InlineData("@", "@")]
     [InlineData("", "@")]
-    [InlineData("lupusmalus.dev", "@")]
-    [InlineData("lupusmalus.dev.", "@")]
+    [InlineData("example.com", "@")]
+    [InlineData("example.com.", "@")]
     [InlineData("Holler.App", "holler.app")]
-    [InlineData("holler.app.lupusmalus.dev", "holler.app")]
-    [InlineData("holler.app.lupusmalus.dev.", "holler.app")]
+    [InlineData("holler.app.example.com", "holler.app")]
+    [InlineData("holler.app.example.com.", "holler.app")]
     [InlineData("*.apps", "*.apps")]
     [InlineData("_acme-challenge", "_acme-challenge")]
     public void NormalizeName_strips_the_zone_and_maps_the_apex(string input, string expected)
-        => Assert.Equal(expected, DnsRecordService.NormalizeName(input, "lupusmalus.dev"));
+        => Assert.Equal(expected, DnsRecordService.NormalizeName(input, "example.com"));
 
     [Theory]
     [InlineData("bad name")]
     [InlineData("-lead")]
     [InlineData("a..b")]
     public void NormalizeName_rejects_invalid_labels(string input)
-        => Assert.Throws<ArgumentException>(() => DnsRecordService.NormalizeName(input, "lupusmalus.dev"));
+        => Assert.Throws<ArgumentException>(() => DnsRecordService.NormalizeName(input, "example.com"));
+
+    /// <summary>A line break at the end of a label is not part of a valid name ("$" would match before it).</summary>
+    [Theory]
+    [InlineData("name", "www\n.app")]
+    [InlineData("zone", "example\n.org")]
+    [InlineData("cname", "target\n.example.org")]
+    public void A_label_ending_in_a_line_break_is_refused(string kind, string input)
+        => Assert.Throws<ArgumentException>(() => _ = kind switch
+        {
+            "name" => DnsRecordService.NormalizeName(input, "example.com"),
+            "zone" => DnsRecordService.NormalizeZone(input),
+            _ => DnsRecordService.NormalizeValue("CNAME", input),
+        });
 
     [Theory]
     [InlineData("A", "1.2.3.4", "1.2.3.4")]
@@ -388,8 +401,8 @@ public class DnsRecordServiceTests
     public async Task Ttl_outside_the_providers_range_is_rejected_before_any_call()
     {
         var (svc, p) = Make();
-        await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("lupusmalus.dev", "x", "A", "1.2.3.4", 10));
-        await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("lupusmalus.dev", "x", "A", "1.2.3.4", 100000));
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("example.com", "x", "A", "1.2.3.4", 10));
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync("example.com", "x", "A", "1.2.3.4", 100000));
         Assert.Empty(p.Calls);
     }
 }

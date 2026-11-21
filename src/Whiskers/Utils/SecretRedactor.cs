@@ -42,17 +42,118 @@ public static class SecretRedactor
     // Secret-bearing key names, English and German (UI strings and tool output are partly German:
     // "Temporäres root-Passwort: …" passed straight through before).
     private const string SecretKeys =
-        @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer";
+        @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credentials?|private[_-]?key";
 
     // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
+    // "authorization" has its own rule (AuthorizationValue), which keeps the scheme; here it would cut the value
+    // after the scheme word.
     private static readonly Pair KeyedSecret = new(
-        $@"(?i)({SecretKeys})\s*[=:]\s*{NotRedacted}\S+",
+        $@"(?i)((?!authorization)(?:{SecretKeys}))\s*[=:]\s*{NotRedacted}\S+",
+        RegexOptions.Compiled);
+
+    // INV-51 (contract 0017 C2): "Authorization: <scheme> <credentials>" and "Authorization=<…>" (Proxy-Authorization
+    // and HTTP_AUTHORIZATION included) lose the whole value. The scheme word stays readable only when it is one of
+    // Basic, Bearer, Digest, Negotiate, NTLM and more text follows it ("Authorization: Basic ***"); any other value,
+    // a one-word token included, goes whole ("Authorization: ***"). Where the value ends:
+    //  - the header opens a quoted argument ('Authorization: …', "Proxy-Authorization: …"): at the closing quote; an
+    //    escaped quote or a backslash-newline continuation inside belongs to the value (Digest parameters). When the
+    //    closing quote is glued to more text ("Authorization: "$(cat secret) or "…"secret"), the quoting is no
+    //    boundary and the unquoted rule below applies;
+    //  - the quote that opens it is itself escaped (\"Authorization: …\" inside a JSON string or a quoted command):
+    //    at the matching escaped quote; a deeper-escaped quote (\\\") inside belongs to the value;
+    //  - the quote that opens it is a JSON unicode escape (backslash-u0022 / -u0027): at the same escape;
+    //  - otherwise: at the end of the line, whatever it holds (backslashes and escaped quotes included).
+    // A value this rule already wrote ("***" followed by the end, whitespace, one of , ; } ] ) or a closing quote — what
+    // this rule and 1.0.0 could have written) is left alone, so applying it twice, or to the re-serialized JSON of
+    // values it redacted, changes nothing; "***secret", "***\secret", "***"secret", "***-x", "***.x", "***:x" are
+    // values like any other. Ending at the line end masks more than the value when
+    // the header is not quoted: the safe direction. A scheme with its credential on the next line loses that line too.
+    // Known limit: a 1.0.0 row already holding "Authorization=*** <credential>" is not redacted again.
+    private const string Finished = @"\*\*\*(?:$|\s|[,;}\])]|['""](?:$|[,;}\])]))";
+    private const string FinishedQuoted = @"\*\*\*(?:$|\s|[,;}\])]|['""](?:$|[\s,;}\])]))";
+    private static readonly Pair AuthorizationValue = new(
+        // A prefix (Proxy-, X-Upstream-) is at most 64 characters: unbounded, a long word of repeated keys after a
+        // quote costs quadratic time.
+        @"(?i)(?:(?<esc>\\)?(?<q>['""])(?<pre>[\w-]{0,64}?)|(?<uq>\\u00(?:22|27))(?<pre>[\w-]{0,64}?))?(?<key>authorization)" +
+        // lq: the key stands right after a quote. A quoted header this rule already wrote must not be taken again as
+        // an unquoted one (checked after the key, so the look back runs only where the key is).
+        // (An alternation, not "(…)?": the optimizer drops an optional zero-width group and its capture.)
+        @"(?:(?<lq>(?<=['""][\w-]{0,64}authorization))|(?<!['""][\w-]{0,64}authorization))" +
+        // The separator and the scheme are atomic: giving back a space or the scheme word must not let a value this
+        // rule wrote ("Basic ***") match again as a new value.
+        // Separators: ":", "=", "->" and URL-encoded (%3A, %20, +).
+        @"(?>(?<sep>[ \t]*(?:[=:]|->|%3A)(?:\s|%20|\+)*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)(?:\s|%20|\+)+)?)" +
+        @"(?(q)" +
+            // escaped opening quote: up to the matching escaped quote
+            $@"(?(esc)(?!{FinishedQuoted})(?>(?:\\\\\\\k<q>|\\\r?\n|(?!\\\k<q>)[^\r\n])+)" +
+            // plain opening quote: up to the unescaped closing quote, which must not be glued to more text
+            // (whitespace, the end or , ; ) ] } may follow it)
+            $@"|(?!{FinishedQuoted})(?>(?:\\(?:\r?\n|[^\r\n])|(?!\k<q>)[^\r\n\\])+)(?!\k<q>[^\s,;)\]}}]))" +
+        @"|(?(uq)" +
+            // a deeper-escaped unicode quote (\\ in front) belongs to the value
+            $@"(?!{FinishedQuoted})(?>(?:\\\\\k<uq>|(?!\k<uq>)[^\r\n])+)" +
+            $@"|(?(lq)(?!{FinishedQuoted})|(?!{Finished}))[^\r\n]+))",
+        RegexOptions.Compiled);
+
+    // A quoted key and value, as a Python dict, a PHP array, a log or an escaped JSON string print headers:
+    // 'Authorization': 'Basic x', "Authorization" => "x", \"Authorization\": \"Basic x\" (also with deeper escapes
+    // or backslash-u0022 quotes)  →  the value becomes ***. The plain JSON form "authorization": "x" is JsonSecret's.
+    private static readonly Pair QuotedAuthorizationKey = new(
+        // Up to three levels of escaping, bounded so a run of backslashes costs linear time.
+        @"(?i)(?<kq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?<key>[\w-]{0,64}authorization)\k<kq>(?<sep>\s*(?:=>|[=:])\s*)" +
+        // A deeper-escaped quote inside an escaped value belongs to the value: for a value quoted with \" (or the
+        // unicode escape), a quote with 2 + 4n more backslashes in front; for \\\" one with 4 + 8n more — counted from
+        // the start of the backslash run (no backslash before it), so a literal backslash at the end of a value
+        // never swallows the closing quote. A plain ' or " value has no deeper form: \' and \" are escapes inside it.
+        @"(?<vq>'|""|(?<l1>\\""|\\u00(?:22|27))|(?<l2>\\{3}"")|\\{5}""|\\{7}"")" +
+        @"(?>(?:(?(l1)(?<!\\)(?:\\{4})*\\{2}\k<vq>|(?(l2)(?<!\\)(?:\\{8})*\\{4}\k<vq>|(?!)))" +
+        @"|(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
+        RegexOptions.Compiled);
+
+    // A Basic credential wherever it stands (nginx proxy_set_header, headers.Add("Authorization", "Basic …"), HAR
+    // files, URL-encoded): "Basic" and a base64-like word of 8+ characters with a digit, an uppercase letter after its
+    // first character, or + / =  →  "Basic ***". Prose ("Basic authentication") stays.
+    private static readonly Pair BasicCredential = new(
+        @"\b(?<scheme>(?i:basic))(?<sep>[ \t]+|%20|\+)(?=[A-Za-z0-9+/][A-Za-z0-9+/]*?[A-Z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}",
         RegexOptions.Compiled);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
     private static readonly Pair JsonSecret = new(
-        $@"(?i)""([\w-]*(?:{SecretKeys})[\w-]*)""\s*:\s*""(?:[^""\\]|\\.)*""",
+        // The key is bounded (128): unbounded, a quote before a long word of repeated key names cost quadratic time.
+        $@"(?i)""(?=[\w-]{{0,128}}?(?:{SecretKeys}))([\w-]{{1,128}})""\s*:\s*""(?:[^""\\]|\\.)*""",
         RegexOptions.Compiled);
+
+    // A key longer than JsonSecret's bound (taken whole, atomically, so linear): masked when it names a secret anywhere
+    // in it — fail closed rather than skipped.
+    private static readonly Pair LongJsonKey = new(
+        @"""(?<key>(?>[\w-]{129,}))""(?<sep>\s*:\s*)""(?:[^""\\]|\\.)*""",
+        RegexOptions.Compiled);
+    private static readonly Regex SecretKeyName = new(
+        $@"(?i){SecretKeys}", RegexOptions.Compiled, Timeout);
+
+    // What JsonSecret leaves (INV-51): a secret-named key in double quotes, single quotes ({'password': 'x'}) or escaped
+    // quotes ({\"password\": \"x\"}, up to three levels), with '.' or ' ' in it ("db.password"), after ':', '=' or '=>',
+    // whose value is a quoted string (also unclosed: masked to the end of the line), an array or object (masked up to the
+    // first closing bracket or the end) or a bare word (a number, true, null)  →  the value becomes a quoted "***" in the
+    // key's quoting, so JSON stays JSON. The key is bounded (128) and taken atomically, the value's runs are atomic and
+    // their alternatives disjoint: linear.
+    private static readonly Pair QuotedSecretKey = new(
+        $@"(?i)(?<kq>\\{{0,3}}""|')(?=[\w. -]{{0,128}}?(?:{SecretKeys}))(?<key>(?>[\w. -]{{1,128}}))\k<kq>(?<sep>\s*(?:=>|[:=])\s*)" +
+        // A backslash that ends the line or the text belongs to an unclosed value (it escapes nothing).
+        @"(?<val>(?<vq>\\{0,3}""|')(?>(?:(?!\k<vq>)(?:\\[^\r\n]|\\(?=[\r\n]|$)|[^\\\r\n]))*)(?:\k<vq>|(?=[\r\n]|$))" +
+        @"|\[(?>[^\]]*)(?:\]|$)|\{(?>[^}]*)(?:\}|$)" +
+        // A bare word ends at whitespace or , ; } ] — unless it holds a quote or a backslash (abc"def", \x41…): then it
+        // runs to the next whitespace, so no tail after the quote stays readable.
+        @"|(?>[^\s,;}\]""'\\]*)[""'\\](?>\S*)|(?>[^\s,;}\]""'\\]+))",
+        RegexOptions.Compiled);
+
+    // A count of tokens ("input_tokens": 1234, "token_count": 56): a key whose name ends in a count suffix and whose value is
+    // digits only. A key without that suffix (token, access_token, api_token) is masked whatever its value.
+    private static readonly Regex TokenCountKey = new(
+        @"(?i)(?:[_. -]tokens|tokens?[_. -]?count)\z", RegexOptions.Compiled, Timeout);
+    private static readonly Regex Digits = new(@"\A[0-9]{1,18}\z", RegexOptions.Compiled, Timeout);
+
+    private static bool IsTokenCount(string key, string value) => TokenCountKey.IsMatch(key) && Digits.IsMatch(value);
 
     // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
     private static readonly Pair BearerToken = new(
@@ -72,7 +173,8 @@ public static class SecretRedactor
     // use RedactJson.
     private const string SqlGap = @"(?:\s|/\*.*?(?:\*/|$)|(?:--|\#)[^\n]*(?:\n|$))";
     private static readonly Pair SqlPassword = new(
-        $@"(?is)\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
+        // Not a quoted key ('password': 'x' is QuotedSecretKey's — read as SQL it masked the separator, not the value).
+        $@"(?is)(?<!['""])\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
         $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|(?<=\s|=|\(|\*/)""(?:[^""\\]|""""|\\.)*(?:""|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
         RegexOptions.Compiled);
 
@@ -192,6 +294,23 @@ public static class SecretRedactor
         s = SlackWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
         s = HookKey.Replace(s, m => $"{m.Groups[1].Value}***");
         s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+        s = LongJsonKey.Replace(s, m => SecretKeyName.IsMatch(m.Groups["key"].Value)
+            ? $"\"{m.Groups["key"].Value}\":\"***\""
+            : m.Value);
+        s = QuotedAuthorizationKey.Replace(s, m =>
+            $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value}" +
+            $"{m.Groups["vq"].Value}***{m.Groups["vq"].Value}");
+        s = AuthorizationValue.Replace(s, m =>
+            $"{m.Groups["esc"].Value}{m.Groups["q"].Value}{m.Groups["uq"].Value}{m.Groups["pre"].Value}{m.Groups["key"].Value}" +
+            $"{m.Groups["sep"].Value}" + (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
+        s = QuotedSecretKey.Replace(s, m => m.Groups["key"].Value.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+                                            || IsTokenCount(m.Groups["key"].Value, m.Groups["val"].Value)
+            ? m.Value   // QuotedAuthorizationKey's (with its escape levels; already applied above), or a token count
+            :
+            // The separator without its spaces, as JsonSecret writes it: a second pass changes nothing.
+            $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value.Trim()}" +
+            $"{m.Groups["kq"].Value}***{m.Groups["kq"].Value}");
+        s = BasicCredential.Replace(s, m => $"{m.Groups["scheme"].Value}{m.Groups["sep"].Value}***");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
         return s;

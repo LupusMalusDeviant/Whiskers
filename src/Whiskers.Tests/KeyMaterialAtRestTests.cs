@@ -63,12 +63,12 @@ public sealed class KeyMaterialAtRestTests
         new KeyMaterialMigration(TestVault.Usable, w.KeyFiles, w.Paths, NullLogger<KeyMaterialMigration>.Instance).Run();
 
         // Per-host migration, renewal and rotation: every key is written sealed.
-        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
-        probes.Add(w.ReadKeyPem(w.ConfigPaths("rabenhof").Key));
-        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: false, default)).Ok);
-        probes.Add(w.ReadKeyPem(w.ConfigPaths("rabenhof").Key));
-        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: true, default)).Ok);
-        probes.Add(w.ReadKeyPem(w.ConfigPaths("rabenhof").Key));
+        Assert.True((await w.Service.MigrateClientAsync("host-d", null, default)).Ok);
+        probes.Add(w.ReadKeyPem(w.ConfigPaths("host-d").Key));
+        Assert.True((await w.Service.RenewClientAsync("host-d", rotate: false, default)).Ok);
+        probes.Add(w.ReadKeyPem(w.ConfigPaths("host-d").Key));
+        Assert.True((await w.Service.RenewClientAsync("host-d", rotate: true, default)).Ok);
+        probes.Add(w.ReadKeyPem(w.ConfigPaths("host-d").Key));
 
         // An SSH upload.
         var servers = new ServerConfigService(Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),

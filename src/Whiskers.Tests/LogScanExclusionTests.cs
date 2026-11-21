@@ -17,7 +17,7 @@ namespace Whiskers.Tests;
 /// </summary>
 public class LogScanExclusionTests
 {
-    private static readonly HashSet<string> LocalHost = new(StringComparer.OrdinalIgnoreCase) { "badwolf" };
+    private static readonly HashSet<string> LocalHost = new(StringComparer.OrdinalIgnoreCase) { "host-a" };
 
     private static LogScanExclusions Build(params string[] manualNames) =>
         new(NullLogger<LogScanExclusions>.Instance,
@@ -27,8 +27,8 @@ public class LogScanExclusionTests
 
     private static ServerConfig ReachedOverTcp(string host = "100.64.0.1", int port = 2376) => new()
     {
-        Id = "badwolf",
-        Name = "Badwolf",
+        Id = "host-a",
+        Name = "Host-A",
         ConnectionType = ConnectionType.TCP,
         TcpHost = host,
         TcpPort = port
@@ -38,8 +38,8 @@ public class LogScanExclusionTests
     {
         Id = "id-" + name,
         Name = name,
-        ServerId = "badwolf",
-        ServerName = "Badwolf",
+        ServerId = "host-a",
+        ServerName = "Host-A",
         Ports = ports.Select(p => new PortMapping { IP = p.Ip, PublicPort = p.Public, PrivatePort = p.Private }).ToList()
     };
 
@@ -99,7 +99,7 @@ public class LogScanExclusionTests
     {
         // No port to match against. Guessing here would be exactly the name-based matching this avoids.
         var detector = Build();
-        var server = new ServerConfig { Id = "badwolf", Name = "Badwolf", ConnectionType = ConnectionType.Local };
+        var server = new ServerConfig { Id = "host-a", Name = "Host-A", ConnectionType = ConnectionType.Local };
 
         var found = detector.Evaluate(server, new[] { Container("socket-proxy", ("0.0.0.0", 2375, 2375)) });
 
@@ -134,10 +134,10 @@ public class LogScanExclusionTests
         var detector = Build();
 
         var remote = Container("serverwatch");
-        remote.ServerId = "hetzner-apps";
+        remote.ServerId = "host-c";
 
         var found = detector.Evaluate(
-            new ServerConfig { Id = "hetzner-apps", Name = "AppServer", ConnectionType = ConnectionType.Local },
+            new ServerConfig { Id = "host-c", Name = "Host-C", ConnectionType = ConnectionType.Local },
             new[] { remote });
 
         Assert.Empty(found);
@@ -149,7 +149,7 @@ public class LogScanExclusionTests
         var detector = Build();
 
         var found = detector.Evaluate(
-            new ServerConfig { Id = "badwolf", Name = "Badwolf", ConnectionType = ConnectionType.Local },
+            new ServerConfig { Id = "host-a", Name = "Host-A", ConnectionType = ConnectionType.Local },
             new[] { Container("serverwatch") });
 
         Assert.Equal("configured", Assert.Single(found).Reason);

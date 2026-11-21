@@ -42,7 +42,7 @@ public class DnsModuleTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        new DnsModule().ConfigureServices(services, Config(("Dns:ApiToken", "x"), ("Dns:AllowedZones:0", "lupusmalus.dev")));
+        new DnsModule().ConfigureServices(services, Config(("Dns:ApiToken", "x"), ("Dns:AllowedZones:0", "example.com")));
         using var sp = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
         var svc = sp.GetRequiredService<IDnsRecordService>();
@@ -78,13 +78,13 @@ public class DnsModuleTests
             ("Dns:Provider", "infomaniak"),
             ("Dns:ApiToken", "abc"),
             ("Dns:DefaultTtl", "600"),
-            ("Dns:AllowedZones:0", "lupusmalus.dev"),
+            ("Dns:AllowedZones:0", "example.com"),
             ("Dns:AllowedZones:1", "example.org")));
         using var sp = services.BuildServiceProvider();
 
         var s = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Whiskers.Configuration.DnsSettings>>().Value;
         Assert.Equal(600, s.DefaultTtl);
-        Assert.Equal(new[] { "lupusmalus.dev", "example.org" }, s.AllowedZones);
+        Assert.Equal(new[] { "example.com", "example.org" }, s.AllowedZones);
         Assert.True(s.IsConfigured);
     }
 }

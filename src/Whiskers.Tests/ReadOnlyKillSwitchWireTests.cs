@@ -97,7 +97,7 @@ public class ReadOnlyKillSwitchWireTests
             .Where(c => c.McpTool is not null && McpPermissionLevels.Normalize(c.RequiredLevel) != McpPermissionLevels.Read)
             .Select(c => c.McpTool!).Order(StringComparer.Ordinal).ToList();
         Assert.Equal(catalogued, mutating.Select(m => m.Tool.Name).Order(StringComparer.Ordinal).ToList());
-        Assert.Equal(47, mutating.Count);
+        Assert.Equal(49, mutating.Count);   // contract 0018 part E: add_server, onboard_server
 
         var id = 1000;
         foreach (var (tool, _) in mutating)
@@ -555,6 +555,8 @@ public class ReadOnlyKillSwitchWireTests
             "object" => new JsonObject(),
             _ when name.Contains("container", StringComparison.OrdinalIgnoreCase) => JsonValue.Create("web-1"),
             _ when name.Equals("serverId", StringComparison.OrdinalIgnoreCase) => JsonValue.Create("local"),
+            // Contract 0018 part E: onboard_server names its server `server`; the doubles hold "local".
+            _ when name.Equals("server", StringComparison.Ordinal) => JsonValue.Create("local"),
             _ => JsonValue.Create("x"),
         };
     }

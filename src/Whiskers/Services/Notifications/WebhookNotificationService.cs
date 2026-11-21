@@ -21,7 +21,7 @@ public class WebhookNotificationService : IWebhookNotificationService
         _http = http;
         _settings = settings;
         _logger = logger;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
     }
 
     public IReadOnlyList<OutboundEndpoint> Targets =>
@@ -33,7 +33,7 @@ public class WebhookNotificationService : IWebhookNotificationService
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Url)) return false;
         if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         await PostAsync(c, evt, ct);
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Webhook notification sent: {EventType}", evt.EventType);
         return true;
     }

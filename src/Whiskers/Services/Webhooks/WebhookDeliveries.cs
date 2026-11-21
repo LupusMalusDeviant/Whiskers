@@ -18,6 +18,9 @@ public enum WebhookReply
     RateLimited,
     /// <summary>The queue is full; nothing was recorded, the provider may deliver it again.</summary>
     Busy,
+    /// <summary>A valid delivery while a restore is staged: nothing was recorded, the provider may deliver it again after
+    /// the restart. Only answered after the signature was checked, so an unsigned caller cannot learn of the restore.</summary>
+    Maintenance,
 }
 
 /// <summary>The answer to a delivery. <see cref="State"/> is the run's state: queued, running, succeeded, failed,

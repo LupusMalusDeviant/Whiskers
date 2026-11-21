@@ -24,8 +24,10 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new ForbiddenArgumentRule(),
         // Contract 0006: agent and API keys only (PC-D1 keeps it out of CreateForHumans).
         new ExposureChangeRule(),
+        // Contract 0018: a cloud bootstrap always needs an approval here, whatever the preset (never in CreateForHumans).
+        new CloudBootstrapRule(),
         new ConfirmationRule(),
-        // Contract 0017 (D-1): additions to the trusted scripts need a second Admin.
+        // Contract 0022 (D-1): additions to the trusted scripts need a second Admin.
         new TrustedScriptApprovalRule(),
     });
 
@@ -39,7 +41,7 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new PrincipalCeilingRule(),
         new ReadOnlyModeRule(),
         new ProtectedResourceRule(),
-        // Contract 0017 (D-1): a person adding a trusted script is asked for a second Admin when the policy says so.
+        // Contract 0022 (D-1): a person adding a trusted script is asked for a second Admin when the policy says so.
         new TrustedScriptApprovalRule(),
     });
 

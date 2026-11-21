@@ -62,4 +62,17 @@ public interface IWebhookService
     /// <summary>Fires a genuine end-to-end test trigger: builds a test payload, signs it with the
     /// stored secret and runs it through the same validation path as an external caller.</summary>
     Task<(bool Success, string Output)> TriggerSignedTestAsync(string webhookId);
+
+    /// <summary>Contract 0020: <c>Owner := to</c> only while it is <paramref name="fromOwnerId"/>; <c>Enabled := false</c>;
+    /// versioned diff as <see cref="SetOwnerAsync"/>. Called only from <c>AutomationHandover</c>.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("automation.handover")]
+    Task<Whiskers.Services.Mutations.HandoverWrite> HandOverAsync(string webhookId, string fromOwnerId, string toOwnerId,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand a webhook over.");
+
+    /// <summary>Contract 0020 (D11 c): <c>Enabled := false</c> only while the owner is <paramref name="ownerId"/>; the owner
+    /// stays. Inside <c>account.create</c> only.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("automation.hold")]
+    Task<Whiskers.Services.Mutations.HandoverWrite> HoldAsync(string webhookId, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold a webhook.");
 }

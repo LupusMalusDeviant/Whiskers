@@ -118,6 +118,9 @@ public static class VerificationContracts
                 "the agent stack is installed by a script; the next health check shows whether the host reports."),
             ["server.save"] = VerificationContract.None(OwnRecord),
             ["server.remove"] = VerificationContract.None(OwnRecord),
+            ["server.create"] = VerificationContract.None(OwnRecord),
+            ["server.hostkey_replace"] = VerificationContract.None(
+                "Whiskers' own record and known_hosts file: the new line is read back with ssh-keygen before the pin is recorded."),
             ["endpointcheck.save"] = VerificationContract.None(OwnRecord),
             ["endpointcheck.delete"] = VerificationContract.None(OwnRecord),
             ["endpointcheck.run"] = VerificationContract.None(
@@ -142,6 +145,8 @@ public static class VerificationContracts
             ["hetzner.server_type_change"] = VerificationContract.None(
                 "the type changes when Hetzner's resize action finishes, minutes later; the action's status is checked when it is accepted."),
             ["hetzner.snapshot_delete"] = VerificationContract.ReadBack("Hetzner no longer finds the image."),
+            ["hetzner.ssh_key_create"] = VerificationContract.None("composed by server.onboard only; the key is deleted again at the end of the run."),
+            ["hetzner.ssh_key_delete"] = VerificationContract.None("composed by server.onboard only; a failed delete is a clean-up warning of the run."),
 
             // Automation and monitoring control
             ["scheduler.create"] = VerificationContract.None(OwnRecord),
@@ -163,6 +168,9 @@ public static class VerificationContracts
                 "each container it patches is updated as container.update, which is verified."),
             ["autoupdate.policy_set"] = VerificationContract.None(OwnRecord),
             ["automation.owner_set"] = VerificationContract.None(OwnRecord),
+            ["automation.handover"] = VerificationContract.None(OwnRecord),
+            ["automation.handover_acknowledge"] = VerificationContract.None(OwnRecord),
+            ["automation.hold"] = VerificationContract.None(OwnRecord),
             ["vpn.bootstrap"] = VerificationContract.None(
                 "the VPN CLI's own exit code decides (a failure is recorded as failed); the mesh state is read live on the status page, not by the gateway."),
 

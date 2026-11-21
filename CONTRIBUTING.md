@@ -1,6 +1,6 @@
 # Contributing to Whiskers
 
-Thanks for your interest in Whiskers! It's an early-stage (`0.x`) project, so issues, ideas
+Thanks for your interest in Whiskers! It is preparing its 1.0.0 release, and issues, ideas
 and pull requests are very welcome.
 
 ## Ground rules
@@ -9,7 +9,7 @@ and pull requests are very welcome.
   so we can agree on the approach before you invest time.
 - **Security issues:** please do **not** open a public issue, follow [SECURITY.md](SECURITY.md).
 - **Security-critical areas and protected layers** are listed in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#security-critical-areas-and-change-control); changes there
+  [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md#security-critical-areas-and-change-control); changes there
   need an explicit decision.
 - Be respectful. Assume good intent.
 
@@ -23,7 +23,7 @@ dotnet run            # or: docker compose up -d --build  (from the repo root)
 ```
 
 For local development without SSO, set `Auth__Disabled=true` and
-`ASPNETCORE_ENVIRONMENT=Development`. See [docs/configuration.md](docs/configuration.md) for configuration.
+`ASPNETCORE_ENVIRONMENT=Development`. See [docs/operations/configuration.md](docs/operations/configuration.md) for configuration.
 
 **Windows:** C# sources, `.razor` files and everything under `deploy/` are checked out with LF line endings
 (`.gitattributes`), because raw and verbatim strings in them become shell scripts and compose files on Linux hosts.
@@ -48,7 +48,7 @@ git rm --cached -r -q . && git reset --hard
   interface-first; update the relevant per-folder `README.md` in the **same** commit.
 - **Touching MCP tools?** Declare the level on the method with `[McpToolLevel]`, add the matching
   `McpPermissionLevels.DefaultToolLevels` entry, list the type in its module's `McpToolTypes`, and refresh
-  [`docs/mcp-tool-catalog.md`](docs/mcp-tool-catalog.md) (the failing test writes a `.actual` file to diff
+  [`docs/guide/mcp-tool-catalog.md`](docs/guide/mcp-tool-catalog.md) (the failing test writes a `.actual` file to diff
   against). The tests enforce all of it — a tool without a level is registered, listed, and denied to the
   agent on every call with nothing logged. If the change adds or renames a tool, say so in the CHANGELOG
   **and note that MCP clients must reconnect**: connectors read the tool list once, at session start, so a
@@ -57,7 +57,7 @@ git rm --cached -r -q . && git reset --hard
   every changed `packages.lock.json` (CI restores in locked mode and fails on a stale one). The SDK is the exact
   version in `global.json`; moving it also moves the Dockerfile's SDK image and the lock files
   ([deploy/README.md](deploy/README.md#pinned-build-inputs-r1-52)).
-- **Changed README.md, SECURITY.md, `docs/security-architecture.md` or `docs/operations/production-checklist.md`?**
+- **Changed README.md, SECURITY.md, `docs/architecture/security-architecture.md` or `docs/operations/production-checklist.md`?**
   Every claim-shaped block carries `<!-- claim:ID -->` or `<!-- claim-free:reason -->`, and every claim is a row of
   [`docs/v1/CLAIMS.md`](docs/v1/CLAIMS.md) with a test ([contract 0011](docs/contracts/0011-self-report-claims.md)).
   A changed block fails `ClaimRegisterTests`, which writes `CLAIMS.md.actual` with the new fingerprints to diff

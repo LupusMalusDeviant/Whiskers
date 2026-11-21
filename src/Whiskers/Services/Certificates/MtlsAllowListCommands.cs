@@ -261,12 +261,13 @@ public static partial class MtlsAllowListCommands
     private static string RequireSuffix(string suffix) =>
         IsSafeSuffix(suffix) ? suffix : throw new ArgumentException($"'{suffix}' is not a run suffix.", nameof(suffix));
 
-    [GeneratedRegex("^/[A-Za-z0-9._/-]+$")]
+    // \z, not $: a .NET "$" also matches before a final "\n", which would carry a line break into the script.
+    [GeneratedRegex("^/[A-Za-z0-9._/-]+\\z")]
     private static partial Regex PathRegex();
 
-    [GeneratedRegex("^[a-z0-9][a-z0-9_-]{0,62}$")]
+    [GeneratedRegex("^[a-z0-9][a-z0-9_-]{0,62}\\z")]
     private static partial Regex ProjectRegex();
 
-    [GeneratedRegex("^[a-z0-9]{1,24}$")]
+    [GeneratedRegex("^[a-z0-9]{1,24}\\z")]
     private static partial Regex SuffixRegex();
 }

@@ -35,7 +35,7 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   ✅ **Scheduler** (first with a nav entry + MCP tools), ✅ **LogMonitor** (first needing a no-op Core default
   for a cross-feature consumer), ✅ **VolumeBackups** (no-op for a cross-**module** consumer — the Scheduler
   task executor), and ✅ **Webhooks** (no-op for a Core `Program.cs` endpoint that can't move) are done — each
-  has its own README + `docs/modules/<id>.md`. ✅ **HostManagement** (Nginx/Systemd/Firewall/SslCerts as one
+  has its own README + `docs/guide/modules/<id>.md`. ✅ **HostManagement** (Nginx/Systemd/Firewall/SslCerts as one
   module — needs 4 Core no-ops because the mixed `ServerTools` MCP class stays Core) and ✅ **Deployment**
   (`/deploy` + `/apps` — 3 Core no-ops because the mixed `ContainerTools` stays Core) and ✅ **Cve** (§3.5 —
   dedicated `CveTools` moves with it; no-ops for the Core Dashboard/ContainerDetail/Settings consumers; the C8
@@ -52,7 +52,7 @@ Toggling a module is **restart-only** (no hot-toggle) — `Features:{id}:Enabled
   lean Core surface (dashboard, health, graph, diff, notifications feed, audit log, compose editor,
   servers/networks, agent-history, settings, help) plus the mixed MCP tool
   classes (`ContainerTools`, `ServerTools`) — these are Core, not pending extraction.
-- **§6 DoD (nearly complete):** a `docs/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ +
+- **§6 DoD (nearly complete):** a `docs/guide/modules/` index ✅ + an `ARCHITECTURE.md` "Module System" chapter ✅ +
   a DI-level all-on/all-off/only-core matrix test ✅ + a full-app `WebApplicationFactory` boot-matrix test ✅
   (`BootMatrixTests`, boots the real app under ValidateOnBuild in each configuration, pings `/healthz` and checks
   the complete module set it ended up with against `ModuleCatalog.All()`, plus the authentication setup — `Features:<id>:Enabled` is read while the builder is set up, so a

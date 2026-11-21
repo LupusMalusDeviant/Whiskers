@@ -26,6 +26,20 @@ public interface IHetznerService
 
     [MutatingOperation("hetzner.rescue_enable")]
     Task<HetznerActionResponse?> EnableRescueAsync(string token, long id, CancellationToken ct = default);
+    /// <summary>Contract 0018 part D: rescue mode that accepts the listed project SSH keys (<c>ssh_keys</c>). The rescue
+    /// root password in the answer is not passed on by the bootstrap.</summary>
+    [MutatingOperation("hetzner.rescue_enable")]
+    Task<HetznerActionResponse?> EnableRescueWithKeysAsync(string token, long id, IReadOnlyList<long> sshKeyIds, CancellationToken ct = default);
+
+    /// <summary>Contract 0018 part D: <c>POST /ssh_keys</c> (needs a read-write token). Only composed by <c>server.onboard</c>.</summary>
+    [MutatingOperation("hetzner.ssh_key_create")]
+    Task<HetznerSshKey> CreateSshKeyAsync(string token, string name, string publicKey, IReadOnlyDictionary<string, string> labels,
+        CancellationToken ct = default);
+
+    /// <summary>Contract 0018 part D: <c>DELETE /ssh_keys/{id}</c>. Only composed by <c>server.onboard</c>.</summary>
+    [MutatingOperation("hetzner.ssh_key_delete")]
+    Task DeleteSshKeyAsync(string token, long sshKeyId, CancellationToken ct = default);
+
     [MutatingOperation("hetzner.rescue_disable")]
     Task<HetznerAction?> DisableRescueAsync(string token, long id, CancellationToken ct = default);
 

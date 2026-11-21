@@ -31,13 +31,13 @@ public sealed class LoopShutdownTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { /* temp dir */ }
     }
 
-    private static readonly Whiskers.Models.ServerConfig Badwolf = new()
+    private static readonly Whiskers.Models.ServerConfig HostA = new()
     {
-        Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
+        Id = "host-a", Name = "Host-A", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
     };
 
     private static ContainerInfo Web() =>
-        new() { Id = "c1", Name = "web", Image = "nginx:1", ServerId = "badwolf", ServerName = "Badwolf", State = "running" };
+        new() { Id = "c1", Name = "web", Image = "nginx:1", ServerId = "host-a", ServerName = "Host-A", State = "running" };
 
     // ---- image updates --------------------------------------------------------------------------------------------
 
@@ -77,7 +77,7 @@ public sealed class LoopShutdownTests : IDisposable
         gate.SetResult("sha256:other");                    // the read answers after the stop
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cycle.WaitAsync(Wait));   // ends with the stop
 
-        Assert.Null(store.Get("c1", "badwolf"));
+        Assert.Null(store.Get("c1", "host-a"));
         Assert.Null(store.LastCheckAt);
         Assert.False(store.IsChecking);
         Assert.Empty(notifications.Events);
@@ -90,7 +90,7 @@ public sealed class LoopShutdownTests : IDisposable
     {
         var docker = new FakeDocker(Web(), new ContainerInfo
         {
-            Id = "c2", Name = "api", Image = "redis:7", ServerId = "badwolf", ServerName = "Badwolf", State = "running",
+            Id = "c2", Name = "api", Image = "redis:7", ServerId = "host-a", ServerName = "Host-A", State = "running",
         })
         {
             DigestWithToken = (_, _) => Task.FromResult<string?>("sha256:local"),
@@ -128,7 +128,7 @@ public sealed class LoopShutdownTests : IDisposable
 
         await checker.CheckAllImagesAsync(CancellationToken.None).WaitAsync(Wait);
 
-        Assert.True(store.Get("c1", "badwolf")?.UpdateAvailable);
+        Assert.True(store.Get("c1", "host-a")?.UpdateAvailable);
         Assert.NotNull(store.LastCheckAt);
         Assert.Single(notifications.Events);
         Assert.Contains("ImageUpdatesChanged", hub);
@@ -143,7 +143,7 @@ public sealed class LoopShutdownTests : IDisposable
         services.AddSingleton<Whiskers.Services.Docker.IDockerService>(docker);
         services.AddSingleton<INotificationService>(notifications);
         services.AddSingleton(RecordingHub.Create(hub));
-        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(Badwolf));
+        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(HostA));
         var sp = services.BuildServiceProvider();
         var store = new ImageUpdateStore(dataPaths: new DataPathOptions(_dir));
         var checker = new ImageUpdateChecker(sp, store, registry,
@@ -208,7 +208,7 @@ public sealed class LoopShutdownTests : IDisposable
         var notifications = new FakeNotifications();
         var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
         var hub = new RecordedHub();
-        var servers = new FakeServerConfig(Badwolf);
+        var servers = new FakeServerConfig(HostA);
         var suspension = new Whiskers.Services.Observability.LoopSuspensionService(new FakeNotifications(), servers,
             NullLogger<Whiskers.Services.Observability.LoopSuspensionService>.Instance, new NoOutcomes());
         var monitor = new ContainerHealthMonitor(docker, health, notifications, RecordingHub.Create(hub), settings,

@@ -2483,6 +2483,15 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_KubeconfigRefused" xml:space="preserve">
     <value>Dieses kubeconfig wird abgelehnt: {0}. Whiskers startet keine Credential-Plugins (exec, auth-provider) und liest keine Dateien, die ein kubeconfig nennt. Bitte ein in sich geschlossenes kubeconfig mit eingebettetem Token oder client-certificate-data/client-key-data einfügen, z. B. für einen ServiceAccount.</value>
   </data>
+  <data name="Servers_Error_SshHostRequired" xml:space="preserve">
+    <value>Ein SSH-Server braucht einen Host (Hostname oder IP-Adresse).</value>
+  </data>
+  <data name="Servers_Error_SshUserRequired" xml:space="preserve">
+    <value>Ein SSH-Server braucht einen Benutzer.</value>
+  </data>
+  <data name="Servers_Field_SshPassword_HelperKeep" xml:space="preserve">
+    <value>Für diesen Server ist ein Passwort im Speicher hinterlegt; es wird vor dem Schlüssel verwendet. Feld leer lassen, um es zu behalten, oder ausschalten, um den Schlüssel zu nutzen.</value>
+  </data>
   <data name="Servers_Error_SshHostInvalid" xml:space="preserve">
     <value>Der SSH-Host muss ein Hostname oder eine IP-Adresse sein (Buchstaben, Ziffern, Punkte und innere Bindestriche; er darf nicht mit „-“ beginnen).</value>
   </data>
@@ -3071,15 +3080,6 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Cves_Tooltip_Verified" xml:space="preserve">
     <value>Installierte Paketversion gematcht</value>
   </data>
-  <data name="Error_DevMode_Heading" xml:space="preserve">
-    <value>Entwicklungsmodus</value>
-  </data>
-  <data name="Error_DevMode_Info" xml:space="preserve">
-    <value>Der Wechsel zur &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung zeigt detailliertere Informationen über den aufgetretenen Fehler an.</value>
-  </data>
-  <data name="Error_DevMode_Warning" xml:space="preserve">
-    <value>&lt;strong&gt;Die Entwicklungsumgebung sollte für bereitgestellte Anwendungen nicht aktiviert werden.&lt;/strong&gt; Sie kann dazu führen, dass sensible Informationen aus Ausnahmen an Endbenutzer angezeigt werden. Für lokales Debugging aktivieren Sie die &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung, indem Sie die Umgebungsvariable &lt;strong&gt;ASPNETCORE_ENVIRONMENT&lt;/strong&gt; auf &lt;strong&gt;Development&lt;/strong&gt; setzen und die App neu starten.</value>
-  </data>
   <data name="Error_PageTitle" xml:space="preserve">
     <value>Fehler</value>
   </data>
@@ -3599,6 +3599,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Networks_Header_Title" xml:space="preserve">
     <value>Docker-Netzwerke</value>
   </data>
+  <data name="Networks_Hint_LanDriver" xml:space="preserve">
+    <value>Container in einem macvlan-Netzwerk bekommen eine eigene Adresse im LAN; die Firewall des Hosts schützt sie nicht.</value>
+  </data>
   <data name="Networks_PageTitle" xml:space="preserve">
     <value>Netzwerke - Whiskers</value>
   </data>
@@ -4024,6 +4027,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="ScheduledTasksView_Snackbar_AlreadyRunning" xml:space="preserve">
     <value>Task '{0}' läuft bereits.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_Maintenance" xml:space="preserve">
+    <value>Eine Wiederherstellung läuft und Whiskers startet gleich neu; Task '{0}' wurde nicht gestartet.</value>
   </data>
   <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
     <value>Aktiv</value>
@@ -5819,6 +5825,36 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
     <value>Die Authentifizierung ist abgeschaltet; Anmelde-Identitäten lassen sich hier nicht ändern.</value>
   </data>
+  <data name="Onboarding_AuthKey_Panel" xml:space="preserve">
+    <value>Onboarding: Tailscale-Auth-Key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Intro" xml:space="preserve">
+    <value>Optional. Mit einem Auth-Key nimmt das Onboarding neue Hosts ohne Login-Link ins Tailnet auf. Der Key liegt nur im Vault; einen kurzlebigen, getaggten Key verwenden.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Set" xml:space="preserve">
+    <value>Ein Auth-Key ist gespeichert.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Unset" xml:space="preserve">
+    <value>Kein Auth-Key gespeichert: Das Onboarding zeigt einen Login-Link.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Label" xml:space="preserve">
+    <value>Neuer Auth-Key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Save" xml:space="preserve">
+    <value>Key speichern</value>
+  </data>
+  <data name="Onboarding_AuthKey_Clear" xml:space="preserve">
+    <value>Key entfernen</value>
+  </data>
+  <data name="Onboarding_AuthKey_NoVault" xml:space="preserve">
+    <value>Der Vault ist nicht nutzbar; ein Auth-Key kann nicht gespeichert werden.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Saved" xml:space="preserve">
+    <value>Auth-Key gespeichert.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Cleared" xml:space="preserve">
+    <value>Auth-Key entfernt.</value>
+  </data>
   <data name="DiskHealth_Panel" xml:space="preserve">
     <value>Datenträger-Zustand (SMART, RAID, ZFS)</value>
   </data>
@@ -6442,5 +6478,563 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Readiness_mtlsKeysProtected_FailUnix" xml:space="preserve">
     <value>Nicht 0600: {0}.</value>
+  </data>
+  <data name="Common_Error_ActionFailed" xml:space="preserve">
+    <value>Die Aktion ist fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Common_Error_LoadFailed" xml:space="preserve">
+    <value>Die Daten konnten nicht geladen werden: {0}</value>
+  </data>
+  <data name="Common_Error_ContainersUnavailable" xml:space="preserve">
+    <value>Die Container dieses Servers konnten nicht gelesen werden: {0}</value>
+  </data>
+  <data name="Common_Error_FileTooLarge" xml:space="preserve">
+    <value>Die Datei ist größer als {0} KB.</value>
+  </data>
+  <data name="Settings_Snackbar_RoleExists" xml:space="preserve">
+    <value>{0} hat bereits eine Rolle — ändern Sie sie in der Liste.</value>
+  </data>
+  <data name="LogSearchView_Snackbar_InvalidPattern" xml:space="preserve">
+    <value>Suche nicht ausgeführt: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_SqlFileUnsupported" xml:space="preserve">
+    <value>{0} nimmt hier keine SQL-Dateien an — es wurde nichts ausgeführt.</value>
+  </data>
+  <data name="ContainerDetail_Db_ImportUnsupported" xml:space="preserve">
+    <value>Dateien vom Typ {0} werden für {1} hier nicht importiert (PostgreSQL und MySQL: .sql, MongoDB: .json) — es wurde nichts ausgeführt.</value>
+  </data>
+  <data name="Error_SeeLog" xml:space="preserve">
+    <value>Der Fehler wurde protokolliert. Nennen Sie bei einer Meldung die Anfrage-ID oben.</value>
+  </data>
+  <data name="AiTriggersView_Event_unhealthy" xml:space="preserve">
+    <value>Container unhealthy</value>
+  </data>
+  <data name="AiTriggersView_Event_oom_killed" xml:space="preserve">
+    <value>Container OOM-gekillt</value>
+  </data>
+  <data name="AiTriggersView_Event_stopped" xml:space="preserve">
+    <value>Container gestoppt</value>
+  </data>
+  <data name="AiTriggersView_Event_restart_loop" xml:space="preserve">
+    <value>Restart-Loop (Crash-Loop)</value>
+  </data>
+  <data name="AiTriggersView_Event_image_update" xml:space="preserve">
+    <value>Image-Update verfügbar</value>
+  </data>
+  <data name="AiTriggersView_Event_cve_finding" xml:space="preserve">
+    <value>Neue CVE gefunden</value>
+  </data>
+  <data name="AiTriggersView_Event_log_alert" xml:space="preserve">
+    <value>Log-Alert / Fehler im Log</value>
+  </data>
+  <data name="AiTriggersView_Event_server_unreachable" xml:space="preserve">
+    <value>Server nicht erreichbar</value>
+  </data>
+  <data name="AiTriggersView_Event_server_recovered" xml:space="preserve">
+    <value>Server wieder erreichbar</value>
+  </data>
+  <data name="AiTriggersView_Event_auto_update_failed" xml:space="preserve">
+    <value>Auto-Update fehlgeschlagen</value>
+  </data>
+  <data name="AiTriggersView_Event_high_cpu" xml:space="preserve">
+    <value>Hohe CPU-Last (Schwellwert)</value>
+  </data>
+  <data name="AiTriggersView_Event_high_memory" xml:space="preserve">
+    <value>Hohe RAM-Last (Schwellwert)</value>
+  </data>
+  <data name="AiTriggersView_Event_metric_anomaly" xml:space="preserve">
+    <value>Metrik-Ausreißer (Anomalie)</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expiring" xml:space="preserve">
+    <value>Zertifikat läuft bald ab</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expired" xml:space="preserve">
+    <value>Zertifikat abgelaufen</value>
+  </data>
+  <data name="SelfStatus_PageTitle" xml:space="preserve">
+    <value>Whiskers-Selbststatus</value>
+  </data>
+  <data name="SelfStatus_Header_Title" xml:space="preserve">
+    <value>Whiskers über sich selbst</value>
+  </data>
+  <data name="SelfStatus_Header_Subtitle" xml:space="preserve">
+    <value>Ob die Hintergrundprüfungen wirklich laufen — erst lesen, dann dem Ausbleiben von Alarmen trauen.</value>
+  </data>
+  <data name="SelfStatus_Alert_Stalled" xml:space="preserve">
+    <value>{0} von {1} Schleife/Server-Paaren haben zuletzt keinen Durchlauf abgeschlossen. Solange eine Schleife hängt, bedeutet ihr Schweigen nichts — Befunde dieser Server sind weder gute noch schlechte Nachrichten.</value>
+  </data>
+  <data name="SelfStatus_Alert_AllRunning" xml:space="preserve">
+    <value>Jede Schleife mit festgelegtem Takt hat zuletzt einen Durchlauf abgeschlossen — fehlende Befunde dürfen beim Wort genommen werden.</value>
+  </data>
+  <data name="SelfStatus_Alert_NoCycleYet" xml:space="preserve">
+    <value>Noch keine Schleife hat einen Durchlauf verbucht. Kurz nach dem Start ist das normal; nach zehn Minuten heißt es, dass jede Hintergrundschleife scheitert, bevor sie etwas verbuchen kann.</value>
+  </data>
+  <data name="SelfStatus_Heading_Loops" xml:space="preserve">
+    <value>Schleifen</value>
+  </data>
+  <data name="SelfStatus_Th_Loop" xml:space="preserve">
+    <value>Schleife</value>
+  </data>
+  <data name="SelfStatus_Th_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="SelfStatus_Th_State" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="SelfStatus_Th_LastSuccess" xml:space="preserve">
+    <value>Letzter Erfolg</value>
+  </data>
+  <data name="SelfStatus_Th_Cycle" xml:space="preserve">
+    <value>Durchlauf</value>
+  </data>
+  <data name="SelfStatus_Th_CyclesFailed" xml:space="preserve">
+    <value>Durchläufe / fehlgeschlagen</value>
+  </data>
+  <data name="SelfStatus_Th_Cadence" xml:space="preserve">
+    <value>Takt</value>
+  </data>
+  <data name="SelfStatus_Heading_Load" xml:space="preserve">
+    <value>Last und Circuit-Zustand</value>
+  </data>
+  <data name="SelfStatus_Th_Circuit" xml:space="preserve">
+    <value>Circuit</value>
+  </data>
+  <data name="SelfStatus_Th_Background" xml:space="preserve">
+    <value>Hintergrund</value>
+  </data>
+  <data name="SelfStatus_Th_Interactive" xml:space="preserve">
+    <value>Interaktiv</value>
+  </data>
+  <data name="SelfStatus_Th_BackgroundChecks" xml:space="preserve">
+    <value>Hintergrundprüfungen</value>
+  </data>
+  <data name="SelfStatus_Paused" xml:space="preserve">
+    <value>pausiert — {0}</value>
+  </data>
+  <data name="SelfStatus_Running" xml:space="preserve">
+    <value>laufen</value>
+  </data>
+  <data name="SelfStatus_Heading_NotRead" xml:space="preserve">
+    <value>Container, die nicht gelesen werden</value>
+  </data>
+  <data name="SelfStatus_AllScanned" xml:space="preserve">
+    <value>Die Logs jedes Containers werden durchsucht.</value>
+  </data>
+  <data name="SelfStatus_Th_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="SelfStatus_Th_Why" xml:space="preserve">
+    <value>Warum</value>
+  </data>
+  <data name="SelfStatus_Th_Detail" xml:space="preserve">
+    <value>Detail</value>
+  </data>
+  <data name="SelfStatus_Unreadable" xml:space="preserve">
+    <value>nicht lesbar</value>
+  </data>
+  <data name="SelfStatus_Excluded" xml:space="preserve">
+    <value>ausgenommen</value>
+  </data>
+  <data name="SelfStatus_Heading_Outcomes" xml:space="preserve">
+    <value>Haben die automatischen Aktionen geholfen?</value>
+  </data>
+  <data name="SelfStatus_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="SelfStatus_NoActions" xml:space="preserve">
+    <value>Whiskers hat in den letzten 7 Tagen keine automatischen Aktionen ausgeführt.</value>
+  </data>
+  <data name="SelfStatus_Th_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="SelfStatus_Th_Effective" xml:space="preserve">
+    <value>Wirksam</value>
+  </data>
+  <data name="SelfStatus_Th_Worked" xml:space="preserve">
+    <value>Gewirkt / nichts geändert</value>
+  </data>
+  <data name="SelfStatus_Th_NotMeasurable" xml:space="preserve">
+    <value>Nicht messbar</value>
+  </data>
+  <data name="SelfStatus_Th_StillOpen" xml:space="preserve">
+    <value>Noch offen</value>
+  </data>
+  <data name="SelfStatus_Unreliable" xml:space="preserve">
+    <value>unzuverlässig</value>
+  </data>
+  <data name="SelfStatus_Outcomes_Note" xml:space="preserve">
+    <value>Eine Aktion, die nichts geändert hat, heißt meist: Die Ursache lag woanders als dort, wohin die Aktion zielte. Bei Whiskers' eigenen Drosselungen heißt es mehr: Ein Server wurde ohne Nutzen aus der Überwachung genommen. Das Zurücknehmen ist bewusst noch nicht automatisch — der Plan verlangt zuerst vier Wochen dieser Zahlen.</value>
+  </data>
+  <data name="SelfStatus_Heading_Timeline" xml:space="preserve">
+    <value>Was passiert ist</value>
+  </data>
+  <data name="SelfStatus_Timeline_Window" xml:space="preserve">
+    <value>letzte 6 Stunden · Zeiten in {0}</value>
+  </data>
+  <data name="SelfStatus_Timeline_Empty" xml:space="preserve">
+    <value>In den letzten sechs Stunden hat sich an der Flotte nichts geändert.</value>
+  </data>
+  <data name="SelfStatus_Failed" xml:space="preserve">
+    <value>fehlgeschlagen</value>
+  </data>
+  <data name="SelfStatus_UnknownActor" xml:space="preserve">
+    <value>unbekannt</value>
+  </data>
+  <data name="SelfStatus_AuditLogLink" xml:space="preserve">
+    <value>Audit-Log</value>
+  </data>
+  <data name="SelfStatus_Legend" xml:space="preserve">
+    <value>Ein &lt;b&gt;übersprungener&lt;/b&gt; Server wird von dieser Schleife bewusst nicht abgedeckt — kein Fehler, aber von ihm kommen auch keine Befunde. &lt;b&gt;Nicht bewertet&lt;/b&gt; heißt: Die Schleife nennt keinen Takt, also gibt es keine Grundlage für ein Urteil; eine erfundene Schwelle würde diese Seite zur Lärmquelle machen. &lt;b&gt;Nicht lesbare&lt;/b&gt; Container sind ein Fehler, vor dem der Scan zurückweicht und den er erneut versucht; &lt;b&gt;ausgenommene&lt;/b&gt; sind Absicht — Whiskers' eigener Zugangsweg, dessen Logs das Protokoll dieses Scans sind. Beide behalten Health-, Metrik- und CVE-Überwachung; nur ihr Log-Inhalt wird übersprungen.</value>
+  </data>
+  <data name="SelfStatus_Verdict_Stalled" xml:space="preserve">
+    <value>hängt</value>
+  </data>
+  <data name="SelfStatus_Verdict_Skipped" xml:space="preserve">
+    <value>übersprungen — {0}</value>
+  </data>
+  <data name="SelfStatus_Verdict_Unjudged" xml:space="preserve">
+    <value>nicht bewertet</value>
+  </data>
+  <data name="SelfStatus_Verdict_Ok" xml:space="preserve">
+    <value>ok</value>
+  </data>
+  <data name="Servers_O18_StandingKeyBadge" xml:space="preserve">
+    <value>Stehender Bootstrap-Key</value>
+  </data>
+  <data name="Servers_O18_PinnedHostKey" xml:space="preserve">
+    <value>Gepinnter SSH-Host-Key</value>
+  </data>
+  <data name="Servers_O18_MismatchText" xml:space="preserve">
+    <value>Der Host zeigt einen anderen SSH-Host-Key als den gepinnten: neu installiert, eine IP eines anderen Servers oder ein Angriff. Nichts wurde ersetzt. Beide Fingerprints vergleichen.</value>
+  </data>
+  <data name="Servers_O18_PinnedFingerprint" xml:space="preserve">
+    <value>Gepinnter Fingerprint</value>
+  </data>
+  <data name="Servers_O18_ServedFingerprint" xml:space="preserve">
+    <value>Jetzt gezeigter Fingerprint</value>
+  </data>
+  <data name="Servers_O18_ReplacePin" xml:space="preserve">
+    <value>Pin ersetzen…</value>
+  </data>
+  <data name="Servers_O18_RemoveBootstrapAccess" xml:space="preserve">
+    <value>Bootstrap-Zugang entfernen</value>
+  </data>
+  <data name="Servers_O18_PublicIp" xml:space="preserve">
+    <value>Öffentliche IP</value>
+  </data>
+  <data name="Servers_O18_PublicIp_Help" xml:space="preserve">
+    <value>Die öffentliche IPv4- (Hetzner) oder IPv6-Adresse; für den Bootstrap verbindet sich Whiskers als root auf Port 22.</value>
+  </data>
+  <data name="Servers_O18_Registered" xml:space="preserve">
+    <value>Server {0} angelegt.</value>
+  </data>
+  <data name="Servers_O18_MatchedVm" xml:space="preserve">
+    <value>Zugeordnete VM</value>
+  </data>
+  <data name="Servers_O18_Created" xml:space="preserve">
+    <value>erstellt</value>
+  </data>
+  <data name="Servers_O18_Labels" xml:space="preserve">
+    <value>Labels</value>
+  </data>
+  <data name="Servers_O18_CredentialOf" xml:space="preserve">
+    <value>Hinterlegter Zugang von Server {0}.</value>
+  </data>
+  <data name="Servers_O18_Advanced" xml:space="preserve">
+    <value>Erweitert</value>
+  </data>
+  <data name="Servers_O18_RescueOffer" xml:space="preserve">
+    <value>Zugang über das Hetzner-Rescue-System: der Server wird zweimal neu gestartet (jeweils normal, ein Hard-Reset nur, wenn er nicht zurückkommt; etwa 3 Minuten); seine Platte bleibt unverändert bis auf eine Zeile in /root/.ssh/authorized_keys, die am Ende wieder entfernt wird.</value>
+  </data>
+  <data name="Servers_O18_BoundVm" xml:space="preserve">
+    <value>Gebundene VM (wie Hetzner sie jetzt meldet)</value>
+  </data>
+  <data name="Servers_O18_VmNameDiffers" xml:space="preserve">
+    <value>Die VM heißt '{0}', der Server-Eintrag '{1}'. Prüfen, ob es die richtige VM ist.</value>
+  </data>
+  <data name="Servers_O18_ConfirmVm" xml:space="preserve">
+    <value>Das ist die richtige VM: '{0}'</value>
+  </data>
+  <data name="Servers_O18_ReplaceText" xml:space="preserve">
+    <value>Mit dem neuen Pin vertraut Whiskers dem Key, den der Host jetzt zeigt. Das braucht die Freigabe eines Admins (Seite Freigaben); nach der Freigabe erneut klicken.</value>
+  </data>
+  <data name="Servers_O18_ReplaceCompared" xml:space="preserve">
+    <value>Ich habe beide Fingerprints mit dem Host verglichen</value>
+  </data>
+  <data name="Servers_O18_PinnedBefore0018" xml:space="preserve">
+    <value>vor 0018 gepinnt</value>
+  </data>
+  <data name="Servers_O18_SourceRescueDisk" xml:space="preserve">
+    <value>von der Platte gelesen (Rescue)</value>
+  </data>
+  <data name="Servers_O18_SourceOperator" xml:space="preserve">
+    <value>von einem Admin ersetzt</value>
+  </data>
+  <data name="Servers_O18_SourceFirstContact" xml:space="preserve">
+    <value>Erstkontakt</value>
+  </data>
+  <data name="Servers_O18_NotAvailable" xml:space="preserve">
+    <value>Nicht verfügbar: die Cloud-VM oder der Dienst lässt sich nicht lesen.</value>
+  </data>
+  <data name="Servers_O18_CredentialPassword" xml:space="preserve">
+    <value>mit Passwort</value>
+  </data>
+  <data name="Servers_O18_CredentialKey" xml:space="preserve">
+    <value>mit der Schlüsseldatei {0}</value>
+  </data>
+  <data name="Servers_O18_CredentialNone" xml:space="preserve">
+    <value>kein Schlüssel und kein Passwort hinterlegt</value>
+  </data>
+  <data name="Servers_O18_PinReplaced" xml:space="preserve">
+    <value>Host-Key-Pin von {0} ersetzt: {1}</value>
+  </data>
+  <data name="InlineApproval_Title" xml:space="preserve">
+    <value>Freigabe nötig</value>
+  </data>
+  <data name="InlineApproval_NotFound" xml:space="preserve">
+    <value>Freigabe {0} wurde nicht gefunden. Falls es sie gibt, bleibt sie auf der Seite „Freigaben“; nichts wird ausgeführt.</value>
+  </data>
+  <data name="InlineApproval_ChangedSinceApproval" xml:space="preserve">
+    <value>Seit deiner Freigabe geändert: Ziel, Verbindung, Anmeldung oder Richtlinie sind nicht mehr, was freigegeben wurde. Dies ist eine neue Freigabe.</value>
+  </data>
+  <data name="InlineApproval_Intro" xml:space="preserve">
+    <value>Diese Aktion ändert die Steuerebene von Whiskers selbst und braucht die Freigabe eines Admins. Die Freigabe ist ein eigener Schritt und wird aufgezeichnet.</value>
+  </data>
+  <data name="InlineApproval_Capability" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="InlineApproval_Target" xml:space="preserve">
+    <value>Ziel (Server / Workload)</value>
+  </data>
+  <data name="InlineApproval_Reason" xml:space="preserve">
+    <value>Grund</value>
+  </data>
+  <data name="InlineApproval_Level" xml:space="preserve">
+    <value>Stufe und Regel</value>
+  </data>
+  <data name="InlineApproval_Id" xml:space="preserve">
+    <value>Freigabe</value>
+  </data>
+  <data name="InlineApproval_TimeLeft" xml:space="preserve">
+    <value>Verbleibende Zeit</value>
+  </data>
+  <data name="InlineApproval_Arguments" xml:space="preserve">
+    <value>Argumente wie aufgezeichnet (Inhalte zurückgehalten)</value>
+  </data>
+  <data name="InlineApproval_YourInput" xml:space="preserve">
+    <value>Deine Eingabe (nicht mit der Freigabe gespeichert)</value>
+  </data>
+  <data name="InlineApproval_SelfDecision" xml:space="preserve">
+    <value>Du gibst deine eigene Anfrage frei. Das wird aufgezeichnet.</value>
+  </data>
+  <data name="InlineApproval_ApprovedBy" xml:space="preserve">
+    <value>Freigegeben von {0}. Mit „Jetzt ausführen“ startest du die Aktion.</value>
+  </data>
+  <data name="InlineApproval_RejectedBy" xml:space="preserve">
+    <value>Abgelehnt von {0}. Nichts wird ausgeführt.</value>
+  </data>
+  <data name="InlineApproval_Close" xml:space="preserve">
+    <value>Schließen (offen lassen)</value>
+  </data>
+  <data name="InlineApproval_RunNow" xml:space="preserve">
+    <value>Jetzt ausführen</value>
+  </data>
+  <data name="InlineApproval_Reject" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="InlineApproval_Approve" xml:space="preserve">
+    <value>Freigeben und ausführen</value>
+  </data>
+  <data name="InlineApproval_AlreadyUsed" xml:space="preserve">
+    <value>Deine Freigabe wurde bereits um {0} verwendet (Vorgang {1}); hier lief nichts. Die neue Freigabe {2} wartet auf der Seite „Freigaben“.</value>
+  </data>
+  <data name="InlineApproval_Refused_Rejected" xml:space="preserve">
+    <value>Freigabe {0} wurde von {1} abgelehnt; nichts lief.</value>
+  </data>
+  <data name="InlineApproval_Refused_Expired" xml:space="preserve">
+    <value>Freigabe {0} ist abgelaufen; nichts lief.</value>
+  </data>
+  <data name="InlineApproval_Refused_LeftPending" xml:space="preserve">
+    <value>Freigabe {0} bleibt auf der Seite „Freigaben“ offen; nichts lief. Sobald sie dort freigegeben ist, starte die Aktion erneut.</value>
+  </data>
+  <data name="InlineApproval_Refused_ApprovedAfterClose" xml:space="preserve">
+    <value>Freigabe {0} wurde von {1} erteilt, aber ihr Dialog war schon geschlossen; nichts lief. Wiederhole die Aktion innerhalb von {2} Minuten, dann läuft sie einmal.</value>
+  </data>
+  <data name="ApprovalsView_InDialog" xml:space="preserve">
+    <value>im Dialog</value>
+  </data>
+  <data name="AutomationHandover_Title" xml:space="preserve">
+    <value>Automatisierung von {0} übergeben</value>
+  </data>
+  <data name="AutomationHandover_LoadError" xml:space="preserve">
+    <value>Die Automatisierung konnte nicht gelesen werden: {0}</value>
+  </data>
+  <data name="AutomationHandover_Result_Title" xml:space="preserve">
+    <value>Ergebnis der Übergabe</value>
+  </data>
+  <data name="AutomationHandover_WasOn" xml:space="preserve">
+    <value>war an</value>
+  </data>
+  <data name="AutomationHandover_WasOff" xml:space="preserve">
+    <value>war aus</value>
+  </data>
+  <data name="AutomationHandover_On" xml:space="preserve">
+    <value>an</value>
+  </data>
+  <data name="AutomationHandover_Off" xml:space="preserve">
+    <value>aus</value>
+  </data>
+  <data name="AutomationHandover_Step_Items" xml:space="preserve">
+    <value>1. Elemente: übergebbare Elemente sind vorausgewählt; ausgegraute Elemente können nicht übergeben werden.</value>
+  </data>
+  <data name="AutomationHandover_Step_Owner" xml:space="preserve">
+    <value>2. Neuer Besitzer: eine Person, die jetzt handeln kann. Elemente, die diese Person nicht halten kann, werden abgewählt.</value>
+  </data>
+  <data name="AutomationHandover_NoCandidates" xml:space="preserve">
+    <value>Es ist keine Person verfügbar, die jetzt handeln kann.</value>
+  </data>
+  <data name="AutomationHandover_Label_NewOwner" xml:space="preserve">
+    <value>Neuer Besitzer</value>
+  </data>
+  <data name="AutomationHandover_Summary" xml:space="preserve">
+    <value>{0} Elemente von {1} an {2}. Alle sind danach aus; jedes wird durch Einschalten fortgesetzt. Im Audit-Log festgehalten; {2} wird benachrichtigt.</value>
+  </data>
+  <data name="AutomationHandover_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="AutomationHandover_Button_Close" xml:space="preserve">
+    <value>Schließen</value>
+  </data>
+  <data name="AutomationHandover_Button_Back" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="AutomationHandover_Button_Next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
+  <data name="AutomationHandover_Button_HandOver" xml:space="preserve">
+    <value>Übergeben</value>
+  </data>
+  <data name="AutomationHandover_Button_Open" xml:space="preserve">
+    <value>Übergeben…</value>
+  </data>
+  <data name="AutomationHandover_Why_Key" xml:space="preserve">
+    <value>von einem MCP-Schlüssel besessen oder erstellt: auf seiner Seite übernehmen</value>
+  </data>
+  <data name="AutomationHandover_Why_CannotJudge" xml:space="preserve">
+    <value>nicht beurteilbar: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Refused" xml:space="preserve">
+    <value>Nur ein Admin kann Automatisierung übergeben.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_CheckFailed" xml:space="preserve">
+    <value>Die Übergabe wurde abgelehnt: {0}</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Done" xml:space="preserve">
+    <value>{0} Elemente übergeben; jedes bleibt aus, bis es eingeschaltet wird.</value>
+  </data>
+  <data name="AutomationHandover_Snackbar_Error" xml:space="preserve">
+    <value>Die Übergabe ist fehlgeschlagen: {0}</value>
+  </data>
+  <data name="AutomationHandover_Status_HandedOver" xml:space="preserve">
+    <value>übergeben</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedOwnerChanged" xml:space="preserve">
+    <value>übersprungen: der Besitzer hat sich inzwischen geändert</value>
+  </data>
+  <data name="AutomationHandover_Status_SkippedGone" xml:space="preserve">
+    <value>übersprungen: inzwischen gelöscht</value>
+  </data>
+  <data name="AutomationHandover_Status_Failed" xml:space="preserve">
+    <value>fehlgeschlagen: unverändert</value>
+  </data>
+  <data name="AutomationHandover_Status_NotAttempted" xml:space="preserve">
+    <value>nicht versucht</value>
+  </data>
+  <data name="AutomationHandover_Kind_ScheduledTask" xml:space="preserve">
+    <value>Geplante Aufgaben</value>
+  </data>
+  <data name="AutomationHandover_Kind_Webhook" xml:space="preserve">
+    <value>Webhooks</value>
+  </data>
+  <data name="AutomationHandover_Kind_GitDeployApp" xml:space="preserve">
+    <value>Git-Deploy-Apps</value>
+  </data>
+  <data name="AutomationHandover_Kind_AiTrigger" xml:space="preserve">
+    <value>KI-Trigger</value>
+  </data>
+  <data name="AutomationHandover_Kind_EndpointCheck" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="AutomationHandover_Kind_FleetFeature" xml:space="preserve">
+    <value>Flottenfunktionen</value>
+  </data>
+  <data name="AutomationHandover_Section_Title" xml:space="preserve">
+    <value>Besitzer, die nicht mehr handeln können</value>
+  </data>
+  <data name="AutomationHandover_Section_Intro" xml:space="preserve">
+    <value>Besitzer, deren Automatisierung nicht mehr in ihrem Namen laufen kann. Ein Admin übergibt sie an eine andere handlungsfähige Person; jedes Element bleibt aus, bis jemand es einschaltet.</value>
+  </data>
+  <data name="AutomationHandover_Section_None" xml:space="preserve">
+    <value>Alle Besitzer können noch handeln.</value>
+  </data>
+  <data name="AutomationHandover_Link" xml:space="preserve">
+    <value>In Einstellungen → Automatisierungs-Besitzer übergeben</value>
+  </data>
+  <data name="AutomationOwners_State_Active" xml:space="preserve">
+    <value>kann handeln, aber es fehlt eine Stufe, die die Elemente brauchen</value>
+  </data>
+  <data name="AutomationOwners_Button_ResumeAs" xml:space="preserve">
+    <value>Als {0} fortsetzen</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_Resumed" xml:space="preserve">
+    <value>{0} fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Nicht fortgesetzt: Besitzer oder Zustand haben sich inzwischen geändert.</value>
+  </data>
+  <data name="AutomationOwners_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Der eingetragene Besitzer kann es nicht ausführen; stattdessen übernehmen.</value>
+  </data>
+  <data name="Checks_Button_Resume" xml:space="preserve">
+    <value>Fortsetzen</value>
+  </data>
+  <data name="Checks_Snackbar_Resumed" xml:space="preserve">
+    <value>Check fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeChanged" xml:space="preserve">
+    <value>Nicht fortgesetzt: Besitzer oder Zustand haben sich inzwischen geändert.</value>
+  </data>
+  <data name="Checks_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>Der eingetragene Besitzer kann ihn nicht ausführen; stattdessen durch Speichern übernehmen.</value>
+  </data>
+  <data name="GitDeployView_Chip_Held" xml:space="preserve">
+    <value>angehalten</value>
+  </data>
+  <data name="GitDeployView_Button_Resume" xml:space="preserve">
+    <value>Fortsetzen</value>
+  </data>
+  <data name="GitDeployView_Snackbar_Resumed" xml:space="preserve">
+    <value>'{0}' fortgesetzt; der Besitzer bleibt unverändert.</value>
+  </data>
+  <data name="GitDeployView_Snackbar_ResumeRefused" xml:space="preserve">
+    <value>'{0}' wurde nicht fortgesetzt: der eingetragene Besitzer kann es nicht ausführen; stattdessen übernehmen.</value>
+  </data>
+  <data name="HandoverNotice_Text" xml:space="preserve">
+    <value>{0} hat dir am {3} {1} Automatisierungen von {2} übergeben. Sie bleiben aus, bis sie eingeschaltet werden.</value>
+  </data>
+  <data name="HandoverNotice_Button_Show" xml:space="preserve">
+    <value>Anzeigen</value>
+  </data>
+  <data name="HandoverNotice_Button_Acknowledge" xml:space="preserve">
+    <value>Bestätigen</value>
+  </data>
+  <data name="HandoverNotice_Snackbar_Error" xml:space="preserve">
+    <value>Der Hinweis konnte nicht bestätigt werden: {0}</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_OwnedAutomation" xml:space="preserve">
+    <value>Dieses Konto besaß {0} Automatisierungen; sie stoppen jetzt. In Einstellungen → Automatisierungs-Besitzer übergeben.</value>
+  </data>
+  <data name="Mutation_Refused_AutomationHeld" xml:space="preserve">
+    <value>Die Automatisierung wurde übergeben oder angehalten und wartet darauf, dass ein Admin sie fortsetzt; nichts lief.</value>
   </data>
 </root>

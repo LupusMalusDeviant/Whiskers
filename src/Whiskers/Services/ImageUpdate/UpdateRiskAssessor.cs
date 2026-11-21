@@ -17,7 +17,7 @@ public sealed record ImageContract(
 {
     /// <summary>Compose stamps <c>com.docker.compose.project</c> onto every image it BUILDS; a pulled image
     /// never carries it. The registry digest is no substitute — under the containerd image store a local
-    /// build gets a RepoDigest too (AppServer, 2026-10-25).</summary>
+    /// build gets a RepoDigest too (Host-C, 2026-10-25).</summary>
     public bool IsComposeBuilt => Labels?.ContainsKey("com.docker.compose.project") == true;
 
     public static ImageContract Empty { get; } = new([], [], null, new HashSet<string>(), new HashSet<string>(),

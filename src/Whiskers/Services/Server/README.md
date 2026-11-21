@@ -28,7 +28,7 @@ Two things follow from that, both learned the hard way (2026-08-27):
 - **A caller that parses output must check `CommandResult.OutputTruncated` first.** The truncation marker is a
   courtesy for humans and garbage to a parser — its first byte is `0xE2`, which a JSON reader reports as
   `'0xE2' is an invalid start of a value`. That message points at the parser and says nothing about the limit.
-  The Trivy scanner failed this way on the Authentik image for months while quietly serving stale CVE results.
+  The Trivy scanner failed this way on an identity-provider image for months while quietly serving stale CVE results.
 - **A caller reading a *document* rather than a log can raise the cap for its own call** via the
   `maxOutputChars` parameter. It applies to stdout only; stderr keeps the default, because a raised cap is
   granted for the document a caller wants, not for whatever the command decides to complain about. The cap
@@ -46,6 +46,6 @@ four pages resolvable when the module is off.
 
 ## Related
 
-- The mTLS/`nsenter` shell plane is implemented in [`../Docker/DockerService.cs`](../Docker/DockerService.cs); see [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md).
+- The mTLS/`nsenter` shell plane is implemented in [`../Docker/DockerService.cs`](../Docker/DockerService.cs); see [docs/architecture/ARCHITECTURE.md](../../../../docs/architecture/ARCHITECTURE.md).
 - Exposed to AI agents via the firewall/Nginx/systemd/SSL MCP tools in [`../../Mcp/Tools/`](../../Mcp/Tools/).
 - Secret redaction for command output: [`../../Utils/SecretRedactor.cs`](../../Utils/SecretRedactor.cs).

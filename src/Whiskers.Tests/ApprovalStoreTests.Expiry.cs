@@ -97,10 +97,10 @@ public partial class ApprovalStoreTests
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
             DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default, string? decidedVia = null)
         {
             if (ApprovalRecords.IsDecision(status) && !OnConsume) time.Now += Wait;   // the lock is released only now
-            return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, stillDecidable, ct);
+            return inner.ResolveAsync(approvalId, status, at, by, grantExpiresAt, selfApproved, stillDecidable, ct, decidedVia);
         }
 
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,

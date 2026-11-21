@@ -199,12 +199,26 @@ internal static class HelpContentEn
                     After that the server is **SSH-free** — and the bootstrap credentials are **removed
                     automatically**: the password from memory, the SSH key from disk. No standing access
                     is left behind.
+
+                    **A fresh Hetzner server** needs only **name and IP**: Whiskers finds the stored Hetzner
+                    API key by the server's exact IP, boots the rescue system, injects a one-time key, reads
+                    the real host key from disk and pins it, then onboards as above. This **reboots the server
+                    twice**, so it runs only for a server with no pinned host key and no mTLS state yet; the
+                    dialog names the reboots before you confirm.
+
+                    **Host key**: on every onboarding the server's SSH host key is pinned before the first
+                    command, recorded in the audit log and shown. A changed key is refused; only a signed-in
+                    admin can replace the pin. Over MCP the same is available as `add_server` and
+                    `onboard_server` (Admin only; a rescue bootstrap always needs an approval).
                     """),
                 new("Cloud, Networks, Backups", """
                     - **Cloud**: power on/off, reboot, snapshots and metrics straight at the provider —
                       even when SSH/Docker happens to be unreachable. Works as soon as a provider + API key
                       is set per server.
-                    - **Networks**: create Docker networks, connect/disconnect containers.
+                    - **Networks**: create Docker networks, connect/disconnect containers. A **macvlan** or
+                      **ipvlan** network puts a container straight onto your LAN without a published port, so
+                      it counts as an exposure change: the agent and API keys need a confirmation, and a
+                      person's action sends a notification.
                     - **Backups**: volume backups as compressed archives; recommended before risky actions.
                     """),
             }),
@@ -402,13 +416,25 @@ internal static class HelpContentEn
                     When the agent triggers an action that the guardrail says needs a **confirmation**,
                     an **approval** is created: what, by which agent/actor, which tool, with which
                     parameters, plus an optional diff. You get a push notification at the bell
-                    (and, if configured, Mattermost/Matrix).
+                    (and on every configured channel, see **Notifications**).
                     """,
                     Shot("Approvals page with pending requests")),
                 new("Approve / Reject", """
                     On the **Approvals** page you click **Approve** or **Reject**. If you approve, the
                     action continues; if you reject, the agent aborts it cleanly. Expired requests lapse
                     automatically.
+                    """),
+                new("Approving in the Dialog", """
+                    When **your own action** in the UI needs an approval (for example re-onboarding a server,
+                    restarting or updating a protected container, an mTLS step or a deploy that touches
+                    Whiskers itself), an admin gets a separate dialog: check the summary, then click
+                    **Approve and run** (armed after 1.5 seconds). The action continues as one operation
+                    with one audit trail; the audit notes that it was approved in the dialog.
+
+                    Closing the dialog leaves the approval **pending** on the Approvals page, but nothing runs
+                    once the dialog is gone: repeat the action. With **"require a second approver"** on, the
+                    dialog waits for another admin. Removing a container, restoring a self-backup and
+                    replacing a host key are still approved on the Approvals page.
                     """),
             }),
 
@@ -461,9 +487,10 @@ internal static class HelpContentEn
                     """,
                     Shot("Opened notification list")),
                 new("Channels & Deep Links", """
-                    Besides the in-app bell, Whiskers can additionally send to **Mattermost** or
-                    **Matrix**. Many notifications are **clickable** and jump straight to the right
-                    place — an image update, for example, straight to the affected container.
+                    Besides the in-app bell, Whiskers can additionally send to **Mattermost**, **Matrix**,
+                    **Telegram**, **ntfy**, **Discord**, **Slack**, **email** or a **generic webhook**. Many
+                    notifications are **clickable** and jump straight to the right place — an image update,
+                    for example, straight to the affected container.
                     """),
             }),
 
@@ -477,6 +504,18 @@ internal static class HelpContentEn
                     Settings are writable by **admins** only.
                     """,
                     Shot("Settings page with groups and metric thresholds")),
+                new("Deleting an Account and Its Automations", """
+                    Scheduled tasks, webhooks, AI triggers, endpoint checks, Git deploy apps and features
+                    such as AutoPatch **run as the account that owns them**. When that account is deleted
+                    or loses its rights, they **stop**.
+
+                    Under **Settings > Automation owners** an admin hands them over, to another person who
+                    holds the rights they need or to themselves. Handed-over items stay **off** (a Git deploy
+                    app stays held) until someone switches them on; the handover is recorded in the audit log,
+                    and the next run names it. A per-item **Take over** makes you the owner, and for a fleet
+                    feature such as AutoPatch switches it on at once. Signing in again with the same address
+                    never gives them back.
+                    """),
             }),
 
         new("mcp", "MCP Server (AI Integration)", "Hub",

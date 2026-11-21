@@ -41,9 +41,9 @@ public class RootEquivalentAdminTests
         "db.query",
         // Root-run configuration and trust on a host
         "nginx.update", "certificate.renew_mtls", "certificate.issue_mtls", "mtls.client_migrate", "mtls.client_renew",
-        "server.onboard", "server.save", "hetzner.rescue_enable", "vpn.bootstrap", "selfbackup.restore", "volume.restore",
+        "server.onboard", "server.save", "server.create", "server.hostkey_replace", "hetzner.rescue_enable", "vpn.bootstrap", "selfbackup.restore", "volume.restore",
         // Who and what may do any of the above
-        "aitrigger.save", "automation.owner_set", "config.save", "config.whitelist", "config.roles",
+        "aitrigger.save", "automation.owner_set", "automation.handover", "config.save", "config.whitelist", "config.roles",
         "config.mcp_permissions", "config.agent", "mcp.key_create", "guardrails.save", "guardrails.kill_switch_off",
         "vault.secret_set", "registry.save", "account.create", "account.password_reset", "identity.binding_confirm",
     ];

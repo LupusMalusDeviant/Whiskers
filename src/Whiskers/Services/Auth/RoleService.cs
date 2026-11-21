@@ -231,7 +231,7 @@ public class RoleService : IRoleService, IInitializable
     private static void EnsureAdminRemains(UserRoleData current, UserRoleData next)
     {
         if (current.Roles.Any(r => r.Role == AppRole.Admin) && !next.Roles.Any(r => r.Role == AppRole.Admin))
-            throw new InvalidOperationException("At least one user must keep the Admin role.");
+            throw new LastAdminException();
     }
 
     // Deep copy: cached/persisted state can never be aliased by a caller's mutable object, and

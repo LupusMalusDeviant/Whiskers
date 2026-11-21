@@ -48,6 +48,7 @@ public sealed class MutationScope : IDisposable
         Arguments = request?.Arguments;
         TriggerId = request?.TriggerId ?? parent?.TriggerId;
         _serverId = request?.Target.ServerId;
+        DecidedTarget = request?.Target;
         // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
         _decided = new HashSet<string>(StringComparer.Ordinal);
         if (request is not null)
@@ -142,6 +143,25 @@ public sealed class MutationScope : IDisposable
         for (var scope = this; scope is not null; scope = scope._parent)
             if (scope._serverId == serverId && scope._exposures.Contains(identity))
                 return true;
+        return false;
+    }
+
+    /// <summary>Contract 0021: whether a scope of this flow that authorizes <paramref name="capabilityId"/> (it decided
+    /// it, or a capability that composes it) decided the exposure <paramref name="identity"/> on the server the call acts
+    /// on. Servers compare case-insensitively (the scope guard already bound the call to the decided server and handed
+    /// it the canonical id); a call that names no server matches only a decision taken without one (fail closed).</summary>
+    public bool CoversExposureFor(string capabilityId, string? serverId, string identity)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+        {
+            if (!string.Equals(scope.CapabilityId, capabilityId, StringComparison.Ordinal)
+                && !MutationCompositions.Allows(scope.CapabilityId, capabilityId))
+                continue;
+            if (!scope._exposures.Contains(identity)) continue;
+            if (string.IsNullOrEmpty(scope._serverId)
+                || (!string.IsNullOrEmpty(serverId) && string.Equals(scope._serverId, serverId, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
         return false;
     }
 
@@ -331,6 +351,11 @@ public sealed class MutationScope : IDisposable
     public string CapabilityId { get; }
     public string OperationId { get; }
 
+    /// <summary>The target the gateway resolved and decided this operation on (the request's recorded form), for this
+    /// scope only; <c>null</c> outside the gateway. Contract 0018 part E: <c>onboard_server</c> runs with what the decision
+    /// saw — whether the host held mTLS state and which host the record reached (INV-59) — never a second lookup.</summary>
+    public MutationTarget? DecidedTarget { get; }
+
     /// <summary>Who the gateway let this mutation run for (an agent with its <c>OnBehalfOf</c>), when known.</summary>
     public MutationPrincipal? Principal { get; }
 
@@ -351,13 +376,18 @@ public sealed class MutationScope : IDisposable
     /// deployment later runs, so the provisioning tools make them its owner.</summary>
     public string? ApprovedBy { get; internal set; }
 
-    /// <summary>Contract 0017, amendment 2 (B2): the rules of this operation's decision that a used approval covered,
+    /// <summary>Contract 0022, amendment 2 (B2): the rules of this operation's decision that a used approval covered,
     /// set by the gateway for this scope only; empty when it ran without one.</summary>
     public IReadOnlySet<string> ApprovedRules { get; internal set; } = new HashSet<string>(StringComparer.Ordinal);
 
-    /// <summary>Contract 0017, amendment 3 (C4): the arguments of the call this scope was decided for (what an approval
+    /// <summary>Contract 0022, amendment 3 (C4): the arguments of the call this scope was decided for (what an approval
     /// bound to); <c>null</c> for a scope opened without a request.</summary>
     internal IReadOnlyDictionary<string, System.Text.Json.JsonElement>? Arguments { get; }
+
+    /// <summary>The level the gateway decided this operation at (the capability's, raised by a stored level and by what
+    /// the arguments make of it, R1-05), set for this scope only; <c>null</c> outside the gateway. A delegate whose
+    /// object can change between the decision and the run (a scheduled task) checks that it still needs no more.</summary>
+    public string? DecidedLevel { get; internal set; }
 
     /// <summary>
     /// Reports on the current scope that the mutation failed although the code returns normally — for tools that

@@ -16,9 +16,9 @@ public sealed class MtlsClientKeyLoaderTests
     public async Task The_loaded_certificate_presents_the_sealed_key_in_a_tls_handshake()
     {
         using var w = new CredentialWorld();
-        var paths = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+        var paths = await w.Store.IssueAsync(w.Server("host-d"), 1, default);
         Assert.True(SealedKeyFiles.IsSealedFile(paths.Key));
-        var record = w.With("rabenhof", paths);
+        var record = w.With("host-d", paths);
 
         using var client = w.KeyLoader.Load(record);
         Assert.True(client.HasPrivateKey);
@@ -33,7 +33,7 @@ public sealed class MtlsClientKeyLoaderTests
     public async Task The_shared_plaintext_key_still_loads_until_it_is_sealed()
     {
         using var w = new CredentialWorld();
-        using var client = w.KeyLoader.Load(w.Server("rabenhof"));
+        using var client = w.KeyLoader.Load(w.Server("host-d"));
         Assert.True(client.HasPrivateKey);
         Assert.Equal(client.Thumbprint, await HandshakeAsync(w.Ca, client));
     }
@@ -42,12 +42,12 @@ public sealed class MtlsClientKeyLoaderTests
     public async Task A_key_moved_to_another_slot_or_a_locked_vault_is_refused_with_its_reason()
     {
         using var w = new CredentialWorld();
-        var paths = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+        var paths = await w.Store.IssueAsync(w.Server("host-d"), 1, default);
         var other = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(paths.Key)!)!, "g1-s9");
         Directory.CreateDirectory(other);
         File.Copy(paths.Cert, Path.Combine(other, "client.crt"));
         File.Copy(paths.Key, Path.Combine(other, "client.key"));
-        var moved = w.With("rabenhof", new MtlsClientCredentialPaths(Path.Combine(other, "client.crt"), Path.Combine(other, "client.key"), paths.Ca, 1));
+        var moved = w.With("host-d", new MtlsClientCredentialPaths(Path.Combine(other, "client.crt"), Path.Combine(other, "client.key"), paths.Ca, 1));
         Assert.Throws<SealedKeyException>(() => w.KeyLoader.Load(moved));
 
         // A vault opened with another key is locked: the cause is named, nothing falls back to another key.
@@ -60,7 +60,7 @@ public sealed class MtlsClientKeyLoaderTests
             NullLogger<VaultService>.Instance, Path.Combine(vaultDir, "vault.json"));
         await wrong.InitializeAsync();
         var loader = new MtlsClientKeyLoader(new SealedKeyFiles(wrong, w.Paths), w.Paths);
-        var refused = Assert.Throws<SealedKeyException>(() => loader.Load(w.With("rabenhof", paths)));
+        var refused = Assert.Throws<SealedKeyException>(() => loader.Load(w.With("host-d", paths)));
         Assert.Equal(SealedKeyFiles.VaultLockedReason, refused.Message);
     }
 
@@ -73,8 +73,8 @@ public sealed class MtlsClientKeyLoaderTests
         var store = new MtlsClientCredentialStore(w.Fleet, NullLogger<MtlsClientCredentialStore>.Instance, w.Paths, w.Servers,
             new SealedKeyFiles(off, w.Paths));
 
-        await Assert.ThrowsAsync<SealedKeyException>(() => store.IssueAsync(w.Server("rabenhof"), 1, default));
-        Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, MtlsClientCredentialStore.HostsDirName, "rabenhof")));
+        await Assert.ThrowsAsync<SealedKeyException>(() => store.IssueAsync(w.Server("host-d"), 1, default));
+        Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, MtlsClientCredentialStore.HostsDirName, "host-d")));
         Assert.Empty(w.Fleet.Commands);   // nothing was sent to step-ca
     }
 

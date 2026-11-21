@@ -13,7 +13,8 @@ public class CapabilityCatalogTests
     public void Every_write_or_admin_mcp_tool_maps_to_exactly_one_capability_with_the_same_level()
     {
         var mutatingTools = McpPermissionLevels.DefaultToolLevels
-            .Where(kv => kv.Value != McpPermissionLevels.Read && kv.Key != "instruct_agent")
+            .Where(kv => kv.Value != McpPermissionLevels.Read && kv.Key != "instruct_agent"
+                         && !CapabilityTableConsistencyTests.AdminLevelReads.Contains(kv.Key))   // contract 0018: reads
             .ToList();
 
         foreach (var (tool, level) in mutatingTools)
@@ -47,9 +48,10 @@ public class CapabilityCatalogTests
         foreach (var c in _catalog.All)
         {
             Assert.Matches("^[a-z]+\\.[a-z_]+$", c.Id);
-            // R1-49: changing one's own password is the one read-level capability (every signed-in user, own account
-            // only — the service refuses anyone else's); everything else changes shared state and needs write or admin.
-            if (c.Id == "account.password_change")
+            // R1-49: changing one's own password is a read-level capability (every signed-in user, own account
+            // only — the service refuses anyone else's); so is acknowledging one's own handover notice (contract 0020).
+            // Everything else changes shared state and needs write or admin.
+            if (c.Id is "account.password_change" or "automation.handover_acknowledge")
                 Assert.Equal(McpPermissionLevels.Read, c.RequiredLevel);
             else
                 Assert.Contains(c.RequiredLevel, new[] { McpPermissionLevels.Write, McpPermissionLevels.Admin });

@@ -9,7 +9,7 @@ Every MCP request carries a `Bearer <API-KEY>` header. The middleware authentica
 | File | Purpose |
 |---|---|
 | `McpBearerAuthMiddleware.cs` | Authenticates MCP requests by Bearer token before the Google OAuth challenge kicks in (so API clients aren't redirected to a login page). The key's principal carries the subject `mcp-key:<key record id>` (`NameIdentifier`, issuer `Whiskers.McpBearer`; never the secret, its hash or hint), which the MCP SDK binds each stateful session to: another key on that session gets `403`. A key with an empty or duplicated record id is refused with `401` (contract 0016). |
-| `McpGuardrailFilter.cs` | `tools/call` filter registered on the MCP server. A tool that maps to a capability (a mutation) runs inside the [Mutation Gateway](../Services/Mutations/): tool switch and level, target resolution, guardrail policy, approval, audit intent and outcome. Any other tool passes `DirectMcpCallGuard`. Reports each call's outcome (executed, denied, failed, pending approval, verification failed; with the gateway's operation id) to `McpCallOutcomes`, keyed by its JSON-RPC id (R1-20). Fails closed when the caller cannot be identified or the guardrails are missing. For the tools of `McpErrorEnvelope.Tools` every refusal, pending approval or verification failure is answered as that envelope, with the operation id (and approval id while it waits). |
+| `McpGuardrailFilter.cs` | `tools/call` filter registered on the MCP server. A tool that maps to a capability (a mutation) runs inside the [Mutation Gateway](../Services/Mutations/): tool switch and level, target resolution, guardrail policy, approval, audit intent and outcome. Any other tool passes `DirectMcpCallGuard`. Reports each call's outcome (executed, denied, failed, pending approval, verification failed; with the gateway's operation id) to `McpCallOutcomes`, keyed by its JSON-RPC id (R1-20). Fails closed when the caller cannot be identified or the guardrails are missing. For the tools of `McpErrorEnvelope.Tools` every refusal, pending approval or verification failure is answered as that envelope, with the operation id (and approval id while it waits). While a restore is staged (`IMaintenanceStateService`, F3) every call is refused first with `MaintenanceRefusal` (as `denied` for the envelope tools), before the gateway, the guard or the outcome report — nothing runs or is recorded into the database the restore replaces. |
 | `Prompts/OperationsPrompts.cs` | User-invokable MCP prompts (`triage_unhealthy_containers`, `security_review_server`, `plan_safe_update`, `investigate_host_load`). Text only — they run nothing; the tools they lead to stay scope- and guardrail-checked. |
 | `Resources/WhiskersResources.cs` | Read-only MCP resources about the MCP surface itself: `whiskers://tools/catalog` and `whiskers://me/permissions` (the caller's own scope). No secrets, no infrastructure data. |
 | *(repo root)* `lhm.plugin.json` | LobeHub Marketplace manifest. Regenerate after the tool/prompt/resource surface changes or on a release: run Whiskers locally, then `npx -y @lobehub/market-cli plugin init --url http://127.0.0.1:<port>/mcp --dir <tmp> --force`, copy the capability arrays over and set `version`. Never publish a `cloudEndpoint` — Whiskers is self-hosted. |
@@ -21,7 +21,7 @@ Every MCP request carries a `Bearer <API-KEY>` header. The middleware authentica
 | `McpToolLevelCatalog.cs` | Reads those declarations by reflection and shapes them like `DefaultToolLevels` so the two can be compared, plus the method-name → wire-name (snake_case) derivation. Never on the request path — a bug here fails a test, not a request. Feeds the tool-catalog snapshot (Plan-0013 WP3). |
 | `McpToolParameters.cs` | Which tools declare a `serverId` parameter (read once by reflection). The gateway's MCP adapter passes the resolved server to each of them, also when the client left it out, so a tool never acts on another machine than the one the gateway decided on (R1-06). |
 
-| `McpToolCatalogRenderer.cs` | Renders the tool catalog (name, level, module, description) as the Markdown checked in at [`../../../docs/mcp-tool-catalog.md`](../../../docs/mcp-tool-catalog.md). Deterministic output, so a change to the served surface always shows up as a reviewable diff. |
+| `McpToolCatalogRenderer.cs` | Renders the tool catalog (name, level, module, description) as the Markdown checked in at [`../../../docs/guide/mcp-tool-catalog.md`](../../../docs/guide/mcp-tool-catalog.md). Deterministic output, so a change to the served surface always shows up as a reviewable diff. |
 
 Enforced by three test classes, each answering a different question:
 
@@ -55,7 +55,7 @@ ORDER BY DeniedPct DESC;
 --    descriptions do not say what the tool is for — the agent picks by description.
 SELECT ToolName FROM McpToolCalls
 WHERE Timestamp > datetime('now', '-90 days')   -- look-back window, as above
-GROUP BY ToolName;   -- compare against docs/mcp-tool-catalog.md
+GROUP BY ToolName;   -- compare against docs/guide/mcp-tool-catalog.md
 ```
 
 There is no dedicated view for this yet; it is a periodic manual check.

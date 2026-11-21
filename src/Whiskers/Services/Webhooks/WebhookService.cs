@@ -31,6 +31,12 @@ public class WebhookService : IWebhookService
     private readonly IStringLocalizer<SharedResource>? _text;
     // R1-31 (INV-52): the signing secrets are stored encrypted with a key derived from the vault's.
     private readonly Whiskers.Services.Vault.IVaultService? _vault;
+    // A restore is staged (F3): a valid delivery is not recorded or queued (its run would be refused by the gateway).
+    private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
+    // Contract 0020: the first-run ledger of handed-over webhooks.
+    private readonly IHandoverLedger? _handovers;
+
+    private static AutomationItemRef ItemOf(string webhookId) => new(AutomationKind.Webhook, webhookId);
 
     // R1-10 (INV-42): accepted deliveries wait here for one of a bounded number of workers; runs on the same resource
     // never overlap. A queue slot is reserved before a delivery is recorded, so an accepted delivery always runs. The
@@ -62,8 +68,11 @@ public class WebhookService : IWebhookService
         IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger,
         IOptions<WebhookOptions>? options = null, TimeProvider? time = null, IHostApplicationLifetime? lifetime = null,
         IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null, Whiskers.Services.Vault.IVaultService? vault = null,
-        IComposeRunner? composeRunner = null)
+        IComposeRunner? composeRunner = null, Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null,
+        IHandoverLedger? handovers = null)
     {
+        _handovers = handovers;
+        _maintenance = maintenance;
         _vault = vault;
         // Built only when the parts it needs are there; a run without them is refused (fail closed).
         _composeRunner = composeRunner ?? (executor is null || docker is null ? null : new ComposeRunner(executor, docker));
@@ -122,6 +131,7 @@ public class WebhookService : IWebhookService
                 before.Owner = ownerId;
                 Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", from, AuditView(before));
             }
+            HandoverNotes.ForgetQuietly(_handovers, ItemOf(webhookId), _logger);   // contract 0020: a takeover as today
             return true;
         }
         finally { _config.Release(); }
@@ -219,9 +229,52 @@ public class WebhookService : IWebhookService
             if (enabled && string.IsNullOrEmpty(webhook.Secret))
                 throw new InvalidOperationException("Webhook has no secret — regenerate its secret before enabling it.");
             var before = AuditView(webhook);
+            var resumed = enabled && !webhook.Enabled;
             webhook.Enabled = enabled;
             await db.SaveChangesAsync();
             Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, AuditView(webhook));   // R1-22
+            // Contract 0020 (D7): switching a handed-over webhook on is its resume; the owner stays.
+            if (resumed) HandoverNotes.RecordResumeInScope(_handovers, ItemOf(webhookId), _logger);
+        }
+        finally { _config.Release(); }
+    }
+
+    public Task<HandoverWrite> HandOverAsync(string webhookId, string fromOwnerId, string toOwnerId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromOwnerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toOwnerId);
+        return SwitchOffAsync(webhookId, fromOwnerId, toOwnerId, ct);
+    }
+
+    public Task<HandoverWrite> HoldAsync(string webhookId, string ownerId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        return SwitchOffAsync(webhookId, ownerId, ownerId, ct);
+    }
+
+    /// <summary>Contract 0020: owner <paramref name="from"/> → <paramref name="to"/> (the same for a hold) and switched
+    /// off, compare-and-set under the configuration lock, with the versioned diff (R1-22).</summary>
+    private async Task<HandoverWrite> SwitchOffAsync(string webhookId, string from, string to, CancellationToken ct)
+    {
+        await _config.WaitAsync(ct);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var before = await db.Webhooks.AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == webhookId, ct);
+            if (before is null) return new(HandoverItemStatus.SkippedGone, webhookId, false);
+            if (before.Owner != from) return new(HandoverItemStatus.SkippedOwnerChanged, before.Name, before.Enabled);
+            var changed = await db.Webhooks
+                .Where(w => w.WebhookId == webhookId && w.Owner == from)
+                .ExecuteUpdateAsync(s => s.SetProperty(w => w.Owner, to).SetProperty(w => w.Enabled, false), ct);
+            if (changed != 1) return new(HandoverItemStatus.SkippedOwnerChanged, before.Name, before.Enabled);
+            var view = AuditView(before);
+            var wasOn = before.Enabled;
+            before.Owner = to;
+            before.Enabled = false;
+            ConfigChange.Record($"webhook:{webhookId}", view, AuditView(before));   // R1-22
+            return new(HandoverItemStatus.HandedOver, before.Name, wasOn);
         }
         finally { _config.Release(); }
     }
@@ -240,6 +293,7 @@ public class WebhookService : IWebhookService
                 db.Webhooks.Remove(webhook);
                 await db.SaveChangesAsync();
                 Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, null);   // R1-22
+                HandoverNotes.ForgetQuietly(_handovers, ItemOf(webhookId), _logger);   // contract 0020
             }
         }
         finally { _config.Release(); }
@@ -273,6 +327,11 @@ public class WebhookService : IWebhookService
         // Signature and freshness by the webhook's provider; the key identifies the delivery (signed, never metadata).
         var (key, problem) = WebhookSignatures.Verify(webhook, request, _time.GetUtcNow(), _options.TimestampTolerance);
         if (key is null) return Reject(webhookId, problem!);
+        if (_maintenance?.IsMaintenance == true)
+        {
+            _logger.LogWarning("Webhook {Name}: a restore is in progress; the delivery is refused for now", webhook.Name);
+            return new WebhookAcceptance(WebhookReply.Maintenance);
+        }
         return await QueueAsync(webhook, key, request.SourceIp, null, ct);
     }
 
@@ -993,7 +1052,8 @@ public class WebhookService : IWebhookService
                 var names = string.Join(", ", told.Select(w => $"\"{w.Name}\"").Distinct(StringComparer.Ordinal));
                 await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, told[0],
                     $"{told.Count} webhook deliveries accepted before Whiskers stopped did not run ({names}). " +
-                    "Each needs a new delivery (a new delivery id, or for GitHub a new push).");
+                    "Each needs a new delivery (a new delivery id, or for GitHub a new push).",
+                    NotificationThrottleSubjects.Webhooks(told.Select(w => w.Id)));
             }
             return (recorded, complete);
         }
@@ -1544,7 +1604,10 @@ public class WebhookService : IWebhookService
     /// <summary>The audit action of an automatic switch-off (the owner lost the authority, or there is none).</summary>
     public const string SuspendAction = "webhook.suspended";
 
-    private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message)
+    /// <param name="throttleSubject">Contract 0017, amendment 4 (G2): the throttle subject; the webhook's own by
+    /// default, the set of webhooks for a notice that names several.</param>
+    private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message,
+        string? throttleSubject = null)
     {
         _logger.LogWarning("Webhook {Name}: {Message}", webhook.Name, message);
         if (scope.ServiceProvider.GetService<INotificationService>() is not { } notify) return;
@@ -1553,6 +1616,7 @@ public class WebhookService : IWebhookService
             await notify.SendAsync(new NotificationEvent
             {
                 EventType = eventType,
+                ThrottleSubject = throttleSubject ?? NotificationThrottleSubjects.Webhook(webhook.Id),
                 ContainerName = webhook.Name,
                 ImageInfo = message,
             });

@@ -240,10 +240,15 @@ public class ExecutionDeadlineTests
     {
         var runner = new HangingRunner();
         var service = AutoPatch(runner);
+        // Long enough that the cycle reaches the hanging runner before the deadline fires, also on a loaded CI host:
+        // with 200 ms the deadline could cancel the cycle before PatchAsync was entered, and the runner then never saw
+        // the cancellation it is here to prove (CI flake on 2026-11-16).
+        var deadline = TimeSpan.FromSeconds(2);
 
-        Assert.True(service.StartPreview("admin@example.com", Short));
-        Assert.False(service.StartPreview("admin@example.com", Short));   // one cycle at a time
-        await service.Preview!.WaitAsync(Wait);
+        Assert.True(service.StartPreview("admin@example.com", deadline));
+        Assert.False(service.StartPreview("admin@example.com", deadline));   // one cycle at a time
+        await runner.Entered.Task.WaitAsync(Wait);                           // the cycle is inside the hang
+        await service.Preview!.WaitAsync(Wait);                              // and the deadline, not the hang, ends it
 
         Assert.True(runner.SawCancellation);
         Assert.True(service.StartPreview("admin@example.com", Short));    // the slot came back
@@ -263,6 +268,26 @@ public class ExecutionDeadlineTests
         Assert.True(runner.SawCancellation);
         Assert.True(service.Preview!.IsCompleted);
         Assert.False(service.StartPreview("admin@example.com"));         // a stopped service starts nothing
+    }
+
+    [Fact]
+    public async Task A_running_preview_does_not_use_up_tonight_s_patch_window()
+    {
+        var runner = new HangingRunner();
+        var service = AutoPatch(runner);
+        Assert.True(service.StartPreview("admin@example.com"));
+        await runner.Entered.Task.WaitAsync(Wait);
+
+        // The window hour comes while the preview runs: the night is deferred, not recorded as run.
+        await service.RunNightlyRecordedAsync(CancellationToken.None);
+        Assert.Null(service.LastNightlyRun);
+        Assert.Contains("deferred", service.NightDeferred);                       // and the status says so
+        Assert.Contains("deferred", Whiskers.Mcp.Tools.AutoPatchTools.Render(new AutoPatchSettings { Enabled = true }, service.LastCycle,
+            service.IsRunning, service.NightDeferred));
+        Assert.True(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = DateTime.UtcNow.Hour },
+            DateTime.UtcNow, service.LastNightlyRun));
+
+        await service.StopAsync(CancellationToken.None).WaitAsync(Wait);
     }
 
     // ---- Helpers -----------------------------------------------------------

@@ -32,7 +32,7 @@ public sealed class ImageUpdateStorePersistenceTests : IDisposable
     {
         ContainerId = container,
         ContainerName = container,
-        ServerId = "burgcloud",
+        ServerId = "host-b",
         Image = "tecnativa/docker-socket-proxy:latest",
         UpdateAvailable = available
     };

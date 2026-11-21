@@ -69,14 +69,14 @@ public class SelfMetricsEndpointTests
     public async Task The_endpoint_carries_the_loop_health_series() => await WithAppAsync(async (client, services) =>
     {
         var metrics = services.GetRequiredService<ISelfMetrics>();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromSeconds(2), success: true);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromSeconds(2), success: true);
         metrics.RecordSkip("cve", "k3s-cluster", "Kubernetes server, Docker-only loop");
-        metrics.Count("log_fetch_timeouts", "badwolf");
+        metrics.Count("log_fetch_timeouts", "host-a");
 
         var body = await ScrapeAsync(client);
 
         Assert.Contains("whiskers_self_loop_last_success_age_seconds", body);
-        Assert.Contains("loop=\"logmonitor\",server=\"badwolf\"", body);
+        Assert.Contains("loop=\"logmonitor\",server=\"host-a\"", body);
         Assert.Contains("whiskers_self_log_fetch_timeouts_total", body);
 
         // A server a loop deliberately skips must still be visible. Absent, "not monitored here" reads
@@ -103,14 +103,14 @@ public class SelfMetricsEndpointTests
         // one. The pause has to be a series somebody can alert on, or the emergency stop becomes a way to hide
         // a server rather than protect it.
         var suspension = services.GetRequiredService<Whiskers.Services.Observability.ILoopSuspensionService>();
-        GatewayArrange.Run("checks.pause", new Whiskers.Services.Mutations.MutationTarget("server", "badwolf", ServerId: "badwolf"), () => suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "test", automatic: true));
+        GatewayArrange.Run("checks.pause", new Whiskers.Services.Mutations.MutationTarget("server", "host-a", ServerId: "host-a"), () => suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "test", automatic: true));
 
         var body = await ScrapeAsync(client);
 
-        Assert.Contains("whiskers_loops_paused{server=\"badwolf\",automatic=\"true\"} 1", body);
+        Assert.Contains("whiskers_loops_paused{server=\"host-a\",automatic=\"true\"} 1", body);
 
-        GatewayArrange.Run("checks.resume", new Whiskers.Services.Mutations.MutationTarget("server", "badwolf", ServerId: "badwolf"), () => suspension.Resume("badwolf"));
-        Assert.DoesNotContain("whiskers_loops_paused{server=\"badwolf\"", await ScrapeAsync(client));
+        GatewayArrange.Run("checks.resume", new Whiskers.Services.Mutations.MutationTarget("server", "host-a", ServerId: "host-a"), () => suspension.Resume("host-a"));
+        Assert.DoesNotContain("whiskers_loops_paused{server=\"host-a\"", await ScrapeAsync(client));
     });
 
     [Fact]
@@ -132,7 +132,7 @@ public class SelfMetricsEndpointTests
         // first unparsable line. The monitoring would go dark because of a request header, which is exactly
         // the class of failure this whole work package exists to catch.
         var metrics = services.GetRequiredService<ISelfMetrics>();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(1234.5), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(1234.5), success: true, TimeSpan.FromMinutes(1));
 
         var request = new HttpRequestMessage(HttpMethod.Get, "/metrics");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ScrapeToken);
@@ -228,17 +228,17 @@ public class SelfMetricsEndpointTests
         var store = services.GetRequiredService<Whiskers.Services.Cve.ICveFindingsStore>();
         store.Set(new Whiskers.Models.Cve.CveScanResult
         {
-            ServerId = "badwolf",
+            ServerId = "host-a",
             Source = Whiskers.Models.Cve.CveSource.Container,
-            ContainerId = "c-authentik",
-            ContainerName = "authentik-worker-1",
+            ContainerId = "c-idp",
+            ContainerName = "idp-worker-1",
             ScannedAt = DateTime.UtcNow.AddDays(-50),   // the scanner broke seven weeks ago
             Findings =
             [
                 new Whiskers.Models.Cve.CveFinding
                 {
-                    ServerId = "badwolf", Source = Whiskers.Models.Cve.CveSource.Container,
-                    ContainerId = "c-authentik", ContainerName = "authentik-worker-1",
+                    ServerId = "host-a", Source = Whiskers.Models.Cve.CveSource.Container,
+                    ContainerId = "c-idp", ContainerName = "idp-worker-1",
                     CveId = "CVE-2026-9999", Package = "openssl",
                     Severity = Whiskers.Models.Cve.CveSeverity.Critical
                 }
@@ -247,10 +247,10 @@ public class SelfMetricsEndpointTests
 
         var body = await ScrapeAsync(client);
 
-        Assert.Contains("whiskers_cve_stale_targets{server=\"badwolf\"} 1", body);
-        Assert.Contains("whiskers_cve_findings{server=\"badwolf\",severity=\"Critical\"} 1", body);
+        Assert.Contains("whiskers_cve_stale_targets{server=\"host-a\"} 1", body);
+        Assert.Contains("whiskers_cve_findings{server=\"host-a\",severity=\"Critical\"} 1", body);
         Assert.Contains("whiskers_cve_distinct_ids 1", body);
-        Assert.Contains("whiskers_cve_data_age_seconds{server=\"badwolf\"}", body);
+        Assert.Contains("whiskers_cve_data_age_seconds{server=\"host-a\"}", body);
     });
 
     [Fact]
@@ -263,8 +263,8 @@ public class SelfMetricsEndpointTests
         var store = services.GetRequiredService<Whiskers.Services.Cve.ICveFindingsStore>();
         store.Set(new Whiskers.Models.Cve.CveScanResult
         {
-            ServerId = "badwolf", Source = Whiskers.Models.Cve.CveSource.Container,
-            ContainerId = "c-authentik", ContainerName = "authentik-worker-1",
+            ServerId = "host-a", Source = Whiskers.Models.Cve.CveSource.Container,
+            ContainerId = "c-idp", ContainerName = "idp-worker-1",
             ScannedAt = DateTime.UtcNow.AddDays(-50)
         });
 
@@ -273,7 +273,7 @@ public class SelfMetricsEndpointTests
         foreach (var line in body.Split('\n').Where(l => l.StartsWith("whiskers_cve_")))
         {
             Assert.DoesNotContain("container=", line);
-            Assert.DoesNotContain("authentik-worker-1", line);
+            Assert.DoesNotContain("idp-worker-1", line);
         }
     });
 
@@ -297,9 +297,9 @@ public class SelfMetricsEndpointTests
         var store = services.GetRequiredService<Whiskers.Services.Cve.ICveFindingsStore>();
         store.Set(new Whiskers.Models.Cve.CveScanResult
         {
-            ServerId = "badwolf", Source = Whiskers.Models.Cve.CveSource.Os, ScannedAt = DateTime.UtcNow.AddHours(-30),
+            ServerId = "host-a", Source = Whiskers.Models.Cve.CveSource.Os, ScannedAt = DateTime.UtcNow.AddHours(-30),
         });
-        const string stale = "whiskers_cve_stale_targets{server=\"badwolf\"} 1";   // 30 h old, past two 12-hour intervals
+        const string stale = "whiskers_cve_stale_targets{server=\"host-a\"} 1";   // 30 h old, past two 12-hour intervals
 
         Reload("12");
         Assert.Contains(stale, await ScrapeAsync(client));

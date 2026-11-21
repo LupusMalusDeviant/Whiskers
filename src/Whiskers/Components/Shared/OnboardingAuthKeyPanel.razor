@@ -1,0 +1,130 @@
+@using System.Text.Json.Nodes
+@using Microsoft.Extensions.Options
+@using Whiskers.Configuration
+@inject IOptionsMonitor<OnboardingSettings> OnboardingOptions
+@inject Whiskers.Services.Persistence.IAppSettingsStore AppSettings
+@inject Whiskers.Services.Vault.IVaultService VaultService
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* Contract 0018 D9: an optional Tailscale auth key for new hosts. The key lives in the vault only (vault.secret_set under
+   a new key); the Onboarding section names it (config.save, section "onboarding"); the replaced key is then removed
+   (vault.secret_delete). Set here only — never in a config file or over MCP. Admin only. *@
+
+@if (_isAdmin)
+{
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@L["Onboarding_AuthKey_Intro"]</MudText>
+<MudText Typo="Typo.caption" Class="mb-2" id="onboarding-authkey-state">
+    @(HasKey ? L["Onboarding_AuthKey_Set"] : L["Onboarding_AuthKey_Unset"])
+</MudText>
+<MudTextField T="string" @bind-Value="_entered" InputType="InputType.Password" Label="@L["Onboarding_AuthKey_Label"]"
+              Variant="Variant.Outlined" Disabled="@_saving" id="onboarding-authkey-input" autocomplete="off" />
+<MudStack Row="true" Class="mt-2">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" id="onboarding-authkey-save"
+               Disabled="@(_saving || string.IsNullOrWhiteSpace(_entered) || !VaultService.IsEnabled)">@L["Onboarding_AuthKey_Save"]</MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="Clear" id="onboarding-authkey-clear"
+               Disabled="@(_saving || !HasKey)">@L["Onboarding_AuthKey_Clear"]</MudButton>
+</MudStack>
+@if (!VaultService.IsEnabled)
+{
+    <MudText Typo="Typo.caption" Color="Color.Warning" id="onboarding-authkey-novault">@L["Onboarding_AuthKey_NoVault"]</MudText>
+}
+}
+
+@code {
+    private bool _isAdmin;
+    private bool _saving;
+    private string? _entered;
+
+    private bool HasKey => !string.IsNullOrWhiteSpace(OnboardingOptions.CurrentValue.Tailscale.AuthKeyRef);
+
+    protected override async Task OnInitializedAsync()
+        => _isAdmin = await CurrentUser.GetRoleAsync() >= CapabilityCatalog.RoleOf("config.save");
+
+    private async Task Save()
+    {
+        var value = _entered?.Trim();
+        if (string.IsNullOrEmpty(value)) return;
+        if (!VaultService.IsEnabled) { Snackbar.Add(L["Onboarding_AuthKey_NoVault"].Value, Severity.Warning); return; }
+        _saving = true;
+        string? newRef = null;
+        try
+        {
+            // The key name only goes into the audited arguments, never the auth key.
+            var key = NewAuthKeyRef();
+            await Mutations.RunAsync("vault.secret_set", new { section = "vault", key },
+                (ResolvedTarget rt, CancellationToken _) => VaultService.SetSecretAsync(key, value));
+            newRef = key;
+            var previous = await WriteRefAsync(key);
+            newRef = null;   // the settings name it now: it stays
+            if (previous is not null && previous != key) await RemoveUnusedAsync(previous);
+            Snackbar.Add(L["Onboarding_AuthKey_Saved"].Value, Severity.Success);
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or MutationFailedException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally
+        {
+            // A key written but never named is removed again.
+            if (newRef is not null) await RemoveUnusedAsync(newRef);
+            _entered = null;
+            _saving = false;
+        }
+    }
+
+    private async Task Clear()
+    {
+        _saving = true;
+        try
+        {
+            var previous = await WriteRefAsync(null);
+            if (previous is not null) await RemoveUnusedAsync(previous);
+            Snackbar.Add(L["Onboarding_AuthKey_Cleared"].Value, Severity.Info);
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or MutationFailedException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally { _saving = false; }
+    }
+
+    /// <summary>Writes <c>Onboarding:Tailscale:AuthKeyRef</c> under the store's lock, keeping every other value of the
+    /// section; returns the reference it replaced.</summary>
+    private async Task<string?> WriteRefAsync(string? reference)
+    {
+        string? previous = null;
+        await Mutations.RunAsync("config.save", new { section = "onboarding" }, (ResolvedRecord rt, CancellationToken _) =>
+            AppSettings.UpdateSectionAsync(OnboardingSettings.SectionName, current =>
+            {
+                var section = current is null ? new JsonObject() : (JsonObject)current.DeepClone();
+                if (section["Tailscale"] is not JsonObject tailscale)
+                {
+                    tailscale = new JsonObject();
+                    section["Tailscale"] = tailscale;
+                }
+                previous = tailscale["AuthKeyRef"]?.GetValue<string>();
+                if (reference is null) tailscale.Remove("AuthKeyRef");
+                else tailscale["AuthKeyRef"] = reference;
+                return section;
+            }));
+        return string.IsNullOrWhiteSpace(previous) ? null : previous;
+    }
+
+    /// <summary>Removes an auth key the settings no longer name — tidying up, so a failure leaves an unused secret.</summary>
+    private async Task RemoveUnusedAsync(string vaultKey)
+    {
+        if (!VaultService.IsEnabled) return;
+        try
+        {
+            await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
+                (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(vaultKey));
+        }
+        catch { /* an unused secret at worst; the settings no longer name it */ }
+    }
+
+    /// <summary>A new vault key for the Tailscale auth key (a save never overwrites the key in use).</summary>
+    public static string NewAuthKeyRef() => $"onboarding:tsauthkey:{Guid.NewGuid():N}";
+}

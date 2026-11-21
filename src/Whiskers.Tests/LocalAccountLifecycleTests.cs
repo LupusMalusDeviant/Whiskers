@@ -36,6 +36,29 @@ public sealed class LocalAccountLifecycleTests
     private const string Viewer = "viewer@local.test";
     private const string Operator = "operator@local.test";
 
+    // ------------------------------------------------------------------------------------------------ whitelist (0017 H2)
+
+    /// <summary>Contract 0017 H2 (review repro): an account an Admin adds while the whitelist is enabled is created, its
+    /// invitation redeemed — and its session must be admitted.</summary>
+    [Fact]
+    public async Task A_local_account_an_admin_added_can_sign_in_while_the_whitelist_is_enabled()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [LocalAccountWorld.Root] });
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+
+        var created = await admin.Mutations.RunAsync("account.create", new { account = "new@local.test", role = "Operator" },
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync("new@local.test", AppRole.Operator, ct));
+        Assert.True(created.Success, created.ToString());
+
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+        Assert.True((await anonymous.Accounts.RedeemRecoveryCodeAsync("new@local.test", created.RecoveryCode!,
+            LocalAccountWorld.NewPassword)).Success);
+
+        var check = await world.Validator.CheckAsync(await world.SessionOfAsync("new@local.test"));
+        Assert.True(check.Valid, $"The account was created and its password set, but its session is refused: {check.Reason}");
+    }
+
     // ------------------------------------------------------------------------------------------------ own password
 
     [Fact]
@@ -235,8 +258,8 @@ public sealed class LocalAccountLifecycleTests
 
         // Demoting or removing the last explicit Admin is refused by the role store (TA-02).
         await using var lone = await LocalAccountWorld.CreateAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.SetRoleAsync(LocalAccountWorld.Root, AppRole.Operator));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.RemoveRoleAsync(LocalAccountWorld.Root));
+        await Assert.ThrowsAsync<LastAdminException>(() => lone.Roles.SetRoleAsync(LocalAccountWorld.Root, AppRole.Operator));
+        await Assert.ThrowsAsync<LastAdminException>(() => lone.Roles.RemoveRoleAsync(LocalAccountWorld.Root));
 
         // R1-27 (contract 0003, rule 6): once the Google/OIDC Admin has an active identity binding there is another
         // Admin who can sign in. A federated session alone (it always has a binding) is no longer "seen signing in".
@@ -1014,6 +1037,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public CountingHasher Hasher { get; }
     /// <summary>The guardrail policy the gateway, the account service and the binding store read (contract 0009).</summary>
     public IGuardrailStore Guardrails { get; }
+    /// <summary>The <c>whitelist.json</c> the world's whitelist service writes.</summary>
+    public string WhitelistPath => new DataPathOptions(_dir).WhitelistJson;
 
     private LocalAccountWorld(string dir, ServiceProvider sp, RoleService roles, WhitelistService whitelist,
         IConfiguration configuration, DataPathOptions paths, RecordingAuditLog audit,
@@ -1154,6 +1179,16 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         ], AuthConstants.FederatedScheme));
     }
 
+    /// <summary>Contract 0020: the hold for a world without automation — nothing is recorded on any address. The account
+    /// service needs one (without it, it creates no account).</summary>
+    private sealed class NothingHeld : IAutomationHold
+    {
+        public static readonly NothingHeld Instance = new();
+
+        public Task<IReadOnlyList<HandoverItemResult>> HoldAllAsync(string ownerId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<HandoverItemResult>>([]);
+    }
+
     /// <summary>The binding store sees the world's roles and whitelist; everything else (the account database's scopes)
     /// comes from the world's provider.</summary>
     private sealed class BindingServices(IRoleService roles, IWhitelistService whitelist, IServiceProvider app,
@@ -1166,15 +1201,17 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             : app.GetService(serviceType);
     }
 
-    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7",
-        Func<IServiceProvider, UserManager<AppUser>>? users = null)
+    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7", IWhitelistService? whitelist = null,
+        Func<IServiceProvider, UserManager<AppUser>>? users = null, IAutomationHold? hold = null,
+        IAutomationOwnerResolver? ownerResolver = null, bool withoutHold = false)
     {
         var scope = _sp.CreateScope();
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
-            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, whitelist ?? Whitelist,
+            withoutHold ? null : hold ?? NothingHeld.Instance, ownerResolver);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

@@ -7,6 +7,7 @@ using Whiskers.Services.Auth;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Scheduler;
+using Whiskers.Services.Notifications;
 
 namespace Whiskers.Tests;
 
@@ -43,6 +44,9 @@ public class AutomationMutationRunnerTests
         public WhitelistData GetWhitelist() => throw new NotSupportedException();
         public Task SaveWhitelistAsync(WhitelistData data) => throw new NotSupportedException();
         public Task AddFirstAdminAsync(string email, Whiskers.Services.Auth.AccessControlWriteGate.Lease lease) => throw new NotSupportedException();
+        public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null) => throw new NotSupportedException();
+        public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     internal sealed class Keys : IMcpPermissionService
@@ -424,6 +428,7 @@ public class AutomationMutationRunnerTests
         Assert.StartsWith("Suspended:", output);
         Assert.False(task.Enabled);
         Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+        Assert.Equal(NotificationThrottleSubjects.Task(task.Id), notify.Events[0].ThrottleSubject);   // contract 0017, G2
         Assert.Equal(MutationStatus.Denied.ToString(), f.Audit.Events.Single(e => e.StartsWith("denied:")).Split(':')[1]);
     }
 
@@ -491,6 +496,7 @@ public class AutomationMutationRunnerTests
         Assert.False(success);
         Assert.True(task.Enabled);
         Assert.Equal("automation_refused", Assert.Single(notify.Events).EventType);
+        Assert.Equal(NotificationThrottleSubjects.Task(task.Id), notify.Events[0].ThrottleSubject);   // contract 0017, G2
         Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
     }
 

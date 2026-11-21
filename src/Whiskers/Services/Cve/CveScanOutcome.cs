@@ -25,7 +25,7 @@ public enum ScanResultAction
 ///
 /// <para><b>But a failed scan with nothing behind it has to be stored anyway.</b> The old code kept the
 /// previous result in both cases, and when there was no previous result it therefore stored nothing at all —
-/// leaving the target absent from every list. On 2026-08-28 two running containers on infomaniak had been in
+/// leaving the target absent from every list. On 2026-08-28 two running containers on web-02 had been in
 /// that state: their local image layers were damaged, Trivy could not export them, and because neither had
 /// ever been scanned successfully there they appeared nowhere. An absent target reads exactly like a clean
 /// one, and the staleness metric cannot help — what is not there cannot age. Storing the failure makes the
@@ -40,7 +40,9 @@ public static class CveScanOutcome
 
         // It failed. Keep real findings if there are any; otherwise record the failure rather than nothing,
         // because "no entry" and "no findings" are indistinguishable everywhere downstream.
-        return previous is null ? ScanResultAction.Store : ScanResultAction.KeepPrevious;
+        // Review 1.0.0 (T1): "real findings" means findings. A stored clean result is no knowledge worth keeping over a
+        // failure — kept, it went on reading "clean" for a host that cannot be scanned at all (a host without apt).
+        return previous is { Findings.Count: > 0 } ? ScanResultAction.KeepPrevious : ScanResultAction.Store;
     }
 
     /// <summary>True when this attempt produced findings worth diffing and notifying about. A failure never

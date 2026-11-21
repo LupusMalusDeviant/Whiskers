@@ -114,7 +114,9 @@ public sealed class MetricRetentionService : IMetricRetentionService, IDisposabl
             string? fixedValue = null, fixedSource = null, stored = null;
             foreach (var provider in providers)
             {
-                if (!provider.TryGet(field.Key, out var raw) || raw is null) continue;
+                // An empty value counts as not set: the compose files pass Metrics__RetentionDays=${METRICS_RETENTIONDAYS:-},
+                // and an unset .env variable must leave the value editable, not fix it read-only.
+                if (!provider.TryGet(field.Key, out var raw) || string.IsNullOrWhiteSpace(raw)) continue;
                 if (IsAppSettings(provider)) stored = raw;
                 else { fixedValue = raw; fixedSource = SourceOf(provider, field); }   // the last such layer wins
             }

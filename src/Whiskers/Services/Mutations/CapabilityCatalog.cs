@@ -48,7 +48,7 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
     public static IReadOnlySet<string> Creates { get; } = new[]
     {
         "network.create", "scheduler.create", "container.create", "logalert.create", "mcp.key_create", "account.create",
-        "selfbackup.create",
+        "selfbackup.create", "server.create",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Capabilities that save an object which may exist or not (an upsert): declared
@@ -182,7 +182,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
             "webhook" => typeof(ResolvedWebhook),
             "volume" => id == "volume.backup" ? typeof(ResolvedVolume) : typeof(ResolvedVolumeBackup),
             "log-alert" => typeof(ResolvedLogAlertRule),
-            "config" or "account" or "identity" or "whiskers" or "fleet" => typeof(ResolvedRecord),
+            "config" or "account" or "identity" or "whiskers" or "fleet" or "automation-owner" or "handover-notice"
+                => typeof(ResolvedRecord),
             // An unknown kind has no type: the catalog test refuses it.
             _ => typeof(ResolvedTarget),
         };
@@ -288,11 +289,18 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("dns.record_delete", "delete_dns_record", W, "dns-zone", Des, Short);
 
         // Cloud servers
-        // Servers page: onboarding installs the agent stack on the host as root.
-        yield return Ui("server.onboard", A, "server", Root, Long);
+        // Servers page and (contract 0018 part E) MCP onboard_server: onboarding installs the agent stack on the host as root.
+        yield return Tool("server.onboard", "onboard_server", A, "server", Root, Long);
         // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
         yield return Ui("server.save", A, "server", Root, Short);
         yield return Ui("server.remove", A, "server", Des, Short);
+        // Contract 0018 part B: a server from name and public IP (SSH to root@ip:22, a stored cloud credential found by the
+        // VM's exact IP and shared by reference). Root-equivalent as server.save: the record decides where root commands
+        // go. Part E: the MCP tool add_server (never a cloud key parameter).
+        yield return Tool("server.create", "add_server", A, "server", Root, Short);
+        // Contract 0018 part C (D3, INV-59): replaces a server's pinned SSH host key — Whiskers' own trust anchor for the
+        // host. Interactive Admin only, with an Admin approval (ControlPlaneResources); no MCP tool, not an agent tool.
+        yield return Ui("server.hostkey_replace", A, "server", Root, Short);
         // R1-57 (contract 0004): endpoint checks run on the host they are bound to. A run executes fixed probe commands
         // through the host executor as host.exec does, so it is RootEquivalent; the monitor runs it as the check's owner.
         yield return Ui("endpointcheck.save", A, "server", Rev, Short);
@@ -316,6 +324,10 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("hetzner.backups_disable", "hetzner_disable_backups", A, "cloud-server", Des, Normal);
         yield return Tool("hetzner.server_type_change", "hetzner_change_server_type", A, "cloud-server", Dis, Long);
         yield return Tool("hetzner.snapshot_delete", "hetzner_delete_snapshot", A, "cloud-server", Des, Normal);
+        // Contract 0018 part D: the project SSH key of one rescue boot. Composed by server.onboard only, never decided on
+        // their own.
+        yield return Ui("hetzner.ssh_key_create", A, "cloud-server", Rev, Normal);
+        yield return Ui("hetzner.ssh_key_delete", A, "cloud-server", Rev, Normal);
 
         // Automation and monitoring control (they cause or suppress future mutations)
         yield return Tool("scheduler.create", "create_scheduled_task", W, "scheduled-task", Root, Short);
@@ -345,6 +357,13 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // The in-app VPN bring-up at start (R1-43, S-07): starts the VPN daemon as root and joins the mesh with the
         // configured key. Unattended, on the authority of the admin who took it over; `tailscale up` waits up to 60 s.
         yield return Ui("vpn.bootstrap", A, "whiskers", Root, Normal);
+        // Contract 0020 (INV-66): an Admin hands the automation of an owner who can no longer act over to another usable
+        // person — one decision on the old owner's record (UI only, D10). The new owner acknowledges the personal
+        // notice (read level, own notices only; the service refuses anyone else's). The hold is nested in account.create
+        // only (D11 c); a direct call is refused by the scope guard.
+        yield return Ui("automation.handover", A, "automation-owner", Root, Short);
+        yield return Ui("automation.handover_acknowledge", McpPermissionLevels.Read, "handover-notice", Rev, Short);
+        yield return Ui("automation.hold", A, "automation-owner", Dis, Short);
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);

@@ -25,4 +25,17 @@ public interface ISchedulerService
     /// false when the task does not exist or its owner changed meanwhile.</summary>
     Task<bool> SetOwnerAsync([MutationTarget] string taskId, string ownerId, string? expectedOwnerId, string? createdVia = null);
     Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50);
+
+    /// <summary>Contract 0020: <c>CreatedBy := to</c> only while it is <paramref name="fromOwnerId"/> (one conditional
+    /// update); <c>Enabled := false</c>; <c>CreatedVia</c> unchanged (D5). Called only from <see cref="AutomationHandover"/>.
+    /// The decided target is the old owner's record, so the task id is no <c>[MutationTarget]</c>.</summary>
+    [MutatingOperation("automation.handover")]
+    Task<HandoverWrite> HandOverAsync(string taskId, string fromOwnerId, string toOwnerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hand a task over.");
+
+    /// <summary>Contract 0020 (D11 c): <c>Enabled := false</c> only while the owner is <paramref name="ownerId"/>; the
+    /// owner stays. Inside <c>account.create</c> only.</summary>
+    [MutatingOperation("automation.hold")]
+    Task<HandoverWrite> HoldAsync(string taskId, string ownerId, CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} cannot hold a task.");
 }

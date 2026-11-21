@@ -241,10 +241,10 @@ public sealed class SustainedAlertTests : IDisposable
         Action<MetricAlertSettings>? configure = null, string? breachFile = null, DateTime? start = null)
     {
         Rig? rig = null;
-        var container = new ContainerInfo { Id = "c1", Name = "web", Image = "nginx", ServerId = "local", ServerName = "Badwolf" };
+        var container = new ContainerInfo { Id = "c1", Name = "web", Image = "nginx", ServerId = "local", ServerName = "Host-A" };
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_db}"));
-        var server = new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true };
+        var server = new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true };
         var config = new FakeServerConfig(server);
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(config);
         services.AddSingleton(Proxy<IDockerService>.Create((m, _) => m.Name switch
@@ -257,7 +257,7 @@ public sealed class SustainedAlertTests : IDisposable
                 : rig.ListingFails || rig.Paused
                 ? new FleetContainerListing
                 {
-                    FailedServers = [new FleetServerFailure("local", "Badwolf", rig.Paused ? "paused" : "timed out", NotAsked: rig.Paused)],
+                    FailedServers = [new FleetServerFailure("local", "Host-A", rig.Paused ? "paused" : "timed out", NotAsked: rig.Paused)],
                 }
                 : new FleetContainerListing
                 {
@@ -280,7 +280,7 @@ public sealed class SustainedAlertTests : IDisposable
                 ? new Dictionary<string, ServerSystemInfo>()
                 : new Dictionary<string, ServerSystemInfo>
                 {
-                    ["local"] = new() { ServerId = "local", ServerName = "Badwolf", IsReachable = true, CpuCount = 2,
+                    ["local"] = new() { ServerId = "local", ServerName = "Host-A", IsReachable = true, CpuCount = 2,
                         CpuUsagePercent = rig.HostCpu, MemoryTotalBytes = 1000, MemoryUsedBytes = 300 },
                 }),
             _ => null,
@@ -392,8 +392,8 @@ public sealed class SustainedAlertTests : IDisposable
         await rig.RunUntilAsync(TimeSpan.FromMinutes(12));
 
         var gap = Assert.Single(OfType(rig.Events, NotificationEventTypes.MetricsGap));
-        Assert.Equal(("local", "Badwolf"), (gap.ServerId, gap.ServerName));
-        Assert.Contains("Badwolf's CPU, memory and disk", gap.ImageInfo);
+        Assert.Equal(("local", "Host-A"), (gap.ServerId, gap.ServerName));
+        Assert.Contains("Host-A's CPU, memory and disk", gap.ImageInfo);
         Assert.Equal("servers", NotificationFormatter.LinkFor(gap));
         Assert.Single(OfType(rig.Events, "metrics_gap_recovered"));
     }
@@ -476,7 +476,7 @@ public sealed class SustainedAlertTests : IDisposable
 
         var gap = Assert.Single(OfType(rig.Events, NotificationEventTypes.MetricsGap));
         Assert.Equal(("local", T0.AddMinutes(8.5)), (gap.ServerId, gap.Timestamp));   // the last listing at 4:30 + more than 3 min
-        Assert.Contains("the containers of Badwolf", gap.ImageInfo);
+        Assert.Contains("the containers of Host-A", gap.ImageInfo);
         Assert.Contains("listing its containers failed", gap.ImageInfo);
         Assert.Contains("high_cpu (web)", gap.ImageInfo);
         Assert.Equal(T0.AddMinutes(12), Assert.Single(OfType(rig.Events, "metrics_gap_recovered")).Timestamp);
@@ -575,7 +575,7 @@ public sealed class SustainedAlertTests : IDisposable
         var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
         Assert.Equal(T0.AddMinutes(10), closed.Timestamp);
         Assert.True(closed.RecoveryUnconfirmed);
-        Assert.Contains("container web is no longer running on Badwolf", closed.ImageInfo);
+        Assert.Contains("container web is no longer running on Host-A", closed.ImageInfo);
         var gapClosed = Assert.Single(OfType(rig.Events, "metrics_gap_recovered"));
         Assert.True(gapClosed.RecoveryUnconfirmed);
         Assert.Equal(("Missing readings alert closed — recovery not confirmed", "Warning"), NotificationFormatter.Describe(gapClosed));
@@ -639,7 +639,7 @@ public sealed class SustainedAlertTests : IDisposable
     [Fact]
     public async Task The_container_alert_of_a_removed_server_is_closed_naming_the_removal()
     {
-        // Follow-up (2026-11-03, review R1-56 NIT-5): it said "no longer running on Badwolf", as if the container stopped.
+        // Follow-up (2026-11-03, review R1-56 NIT-5): it said "no longer running on Host-A", as if the container stopped.
         var rig = NewRig();
         rig.Cpu = 97;
         await rig.RunUntilAsync(TimeSpan.FromMinutes(5));                 // high_cpu at 3
@@ -648,7 +648,7 @@ public sealed class SustainedAlertTests : IDisposable
 
         var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
         Assert.True(closed.RecoveryUnconfirmed);
-        Assert.Contains("the server of container web (Badwolf) was removed from the configuration", closed.ImageInfo);
+        Assert.Contains("the server of container web (Host-A) was removed from the configuration", closed.ImageInfo);
         Assert.DoesNotContain("no longer running", closed.ImageInfo);
     }
 
@@ -724,7 +724,7 @@ public sealed class SustainedAlertTests : IDisposable
         try
         {
             await File.WriteAllTextAsync(file,
-                """{"Thresholds":[{"Series":"c1","Kind":"high_cpu","ServerName":"web","Since":"2026-11-03T11:50:00Z","Reported":"2026-11-03T11:53:00Z","ReportedValue":97,"Peak":97,"LastEnded":null}],"HostLoad":[],"Containers":[{"Id":"c1","ServerId":"local","ServerName":"Badwolf","Name":"web"}]}""");
+                """{"Thresholds":[{"Series":"c1","Kind":"high_cpu","ServerName":"web","Since":"2026-11-03T11:50:00Z","Reported":"2026-11-03T11:53:00Z","ReportedValue":97,"Peak":97,"LastEnded":null}],"HostLoad":[],"Containers":[{"Id":"c1","ServerId":"local","ServerName":"Host-A","Name":"web"}]}""");
             var loaded = await new AlertBreachStore(file).LoadAsync();
             Assert.Single(loaded.Thresholds);
             Assert.Empty(loaded.Gaps ?? []);

@@ -1,0 +1,263 @@
+@* Contract 0019: "Approval needed" — the INV-59 approval raised by the UI action the person just triggered, read back
+   from the store. Approving is a separate, explicit act (D2): its own button, never the default, not bound to Enter,
+   armed only after a delay, and decided through the same store rules as the Approvals page (INV-33/34/37), recorded
+   via "dialog". Closing leaves the approval pending (D5). *@
+@using System.Text.Json
+@using Whiskers.Models.Agent
+@using Whiskers.Services.Approvals
+@implements IDisposable
+@inject IApprovalStore ApprovalStore
+@inject ICurrentUserService CurrentUser
+@inject IStringLocalizer<SharedResource> L
+
+<MudDialog>
+    <DialogContent>
+        @if (_approval is null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@L["InlineApproval_NotFound", ApprovalId]</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="2" Class="sw-inline-approval">
+                @if (ChangedSinceApproval)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" data-testid="inline-approval-changed">@L["InlineApproval_ChangedSinceApproval"]</MudAlert>
+                }
+                <MudText Typo="Typo.body2">@L["InlineApproval_Intro"]</MudText>
+
+                <MudSimpleTable Dense="true" Elevation="0">
+                    <tbody>
+                        <tr><th>@L["InlineApproval_Capability"]</th><td><code data-testid="inline-approval-tool">@_approval.ToolName</code></td></tr>
+                        <tr><th>@L["InlineApproval_Target"]</th><td data-testid="inline-approval-target">@($"{_approval.TargetServer ?? "—"} / {_approval.TargetWorkload ?? "—"}")</td></tr>
+                        <tr><th>@L["InlineApproval_Reason"]</th><td data-testid="inline-approval-reason">@_approval.Reason</td></tr>
+                        <tr><th>@L["InlineApproval_Level"]</th><td>@_approval.Level @(_approval.GuardrailRule is { } rule ? $"({rule})" : "")</td></tr>
+                        <tr><th>@L["InlineApproval_Id"]</th><td><code>@_approval.Id</code></td></tr>
+                        <tr><th>@L["InlineApproval_TimeLeft"]</th><td data-testid="inline-approval-timeleft">@TimeLeftText</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (!string.IsNullOrWhiteSpace(_approval.ParamsJson))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["InlineApproval_Arguments"]</MudText>
+                    <pre class="sw-approval-params" data-testid="inline-approval-params">@_approval.ParamsJson</pre>
+                }
+
+                @if (RequesterPayloads is { Count: > 0 } payloads)
+                {
+                    <MudPaper Outlined="true" Class="pa-2" data-testid="inline-approval-your-input">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["InlineApproval_YourInput"]</MudText>
+                        @foreach (var (name, value) in payloads)
+                        {
+                            <MudText Typo="Typo.caption"><code>@name</code></MudText>
+                            <pre class="sw-approval-params">@PayloadText(value)</pre>
+                        }
+                    </MudPaper>
+                }
+
+                @* Only while the person can decide: under RequireSecondApprover they cannot approve their own request. *@
+                @if (_selfDecision && _refusal is null && _approval.Status == ApprovalStatus.Pending)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" data-testid="inline-approval-self">@L["InlineApproval_SelfDecision"]</MudAlert>
+                }
+
+                @if (_approval.Status == ApprovalStatus.Approved)
+                {
+                    <MudAlert Severity="Severity.Success" Dense="true" data-testid="inline-approval-approved-elsewhere">@L["InlineApproval_ApprovedBy", _approval.ResolvedBy ?? "?"]</MudAlert>
+                }
+                else if (_approval.Status == ApprovalStatus.Rejected)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" data-testid="inline-approval-rejected">@L["InlineApproval_RejectedBy", _approval.ResolvedBy ?? "?"]</MudAlert>
+                }
+                else if (_refusal is { } why)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" data-testid="inline-approval-refusal">@L[ApprovalDecisionMessages.Key(why)]</MudText>
+                }
+
+                @if (_message is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" data-testid="inline-approval-message">@_message</MudAlert>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        @* D2: no button is the default (type="button", no submit, no autofocus); Enter triggers none of them. *@
+        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" data-testid="inline-approval-close"
+                   OnClick="CloseAsync">@L["InlineApproval_Close"]</MudButton>
+        @if (_approval?.Status == ApprovalStatus.Approved && !_decidedHere)
+        {
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Primary" data-testid="inline-approval-run-now"
+                       OnClick="RunNowAsync">@L["InlineApproval_RunNow"]</MudButton>
+        }
+        else
+        {
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Error" data-testid="inline-approval-reject"
+                       Disabled="@(!CanAct)" OnClick="@(() => DecideAsync(false))">@L["InlineApproval_Reject"]</MudButton>
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Warning" data-testid="inline-approval-approve"
+                       Disabled="@(!CanApprove)" OnClick="@(() => DecideAsync(true))">@L["InlineApproval_Approve"]</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>D2: "Approve and run" is armed only this long after the dialog was shown.</summary>
+    public static readonly TimeSpan ArmDelay = TimeSpan.FromSeconds(1.5);
+
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The recorded approval to show and decide.</summary>
+    [Parameter] public string ApprovalId { get; set; } = "";
+
+    /// <summary>The requester's own payload input, from the runner's memory: shown here only, never stored or logged.</summary>
+    [Parameter] public IReadOnlyDictionary<string, JsonElement>? RequesterPayloads { get; set; }
+
+    /// <summary>D4: the call changed since an earlier approval and asked for this new one.</summary>
+    [Parameter] public bool ChangedSinceApproval { get; set; }
+
+    [Parameter] public TimeProvider? Time { get; set; }
+
+    private Approval? _approval;
+    private ApprovalResolver? _resolver;
+    private ApprovalDecisionResult? _refusal;
+    private bool _selfDecision;
+    private bool _busy;
+    private bool _decidedHere;
+    private bool _closed;
+    private string? _message;
+    private DateTime _shownAt;
+    private ITimer? _tick;
+
+    private TimeProvider Clock => Time ?? TimeProvider.System;
+    private DateTime Now => Clock.GetUtcNow().UtcDateTime;
+
+    /// <summary>D2: armed after the delay.</summary>
+    internal bool Armed => Now - _shownAt >= ArmDelay;
+
+    private bool CanAct => !_busy && _approval is { Status: ApprovalStatus.Pending } && _refusal is null;
+
+    private bool CanApprove => CanAct && Armed;
+
+    private string TimeLeftText
+    {
+        get
+        {
+            if (_approval is null) return "—";
+            var left = _approval.ExpiresAt - Now;
+            return left <= TimeSpan.Zero ? "0:00" : $"{(int)left.TotalMinutes}:{left.Seconds:00}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _shownAt = Now;
+        _approval = ApprovalStore.Get(ApprovalId);
+        // The person signed in now, at their current role (R1-15).
+        _resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+        Refresh();
+        ApprovalStore.Changed += OnStoreChanged;
+        // Arms the button and counts the time left down; closes as expired at the end (D5).
+        _tick = Clock.CreateTimer(_ => _ = InvokeAsync(OnTickAsync), null, TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromMilliseconds(500));
+    }
+
+    private void Refresh()
+    {
+        _approval = ApprovalStore.Get(ApprovalId) ?? _approval;
+        _selfDecision = _approval is not null && _resolver is not null && ApprovalEligibility.IsRequester(_approval, _resolver);
+        _refusal = _approval is null ? ApprovalDecisionResult.NotFound
+            : _resolver is null ? ApprovalDecisionResult.InsufficientLevel
+            : _approval.Status == ApprovalStatus.Pending ? ApprovalStore.CanDecide(ApprovalId, _resolver)
+            : null;
+    }
+
+    private void OnStoreChanged() => _ = InvokeAsync(async () =>
+    {
+        Refresh();
+        await CloseIfExpiredAsync();
+        StateHasChanged();
+    });
+
+    /// <summary>The periodic tick: re-reads the approval, closes it as expired at the end, re-renders.</summary>
+    internal async Task OnTickAsync()
+    {
+        Refresh();
+        await CloseIfExpiredAsync();
+        if (!_closed) StateHasChanged();
+    }
+
+    private Task CloseIfExpiredAsync()
+    {
+        if (_closed || _approval is null) return Task.CompletedTask;
+        if (_approval.Status == ApprovalStatus.Expired || _approval.IsExpiredAt(Now))
+            Close(new InlineApprovalResult(InlineApprovalOutcome.Expired));
+        return Task.CompletedTask;
+    }
+
+    private async Task DecideAsync(bool approved)
+    {
+        // D2: the approval is armed only after the delay, whatever the button showed.
+        if (!CanAct || (approved && !Armed)) return;
+        _busy = true;
+        _message = null;
+        try
+        {
+            // Read afresh at the moment of the decision (R1-15, INV-34): a role lowered meanwhile is refused.
+            var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
+            var result = resolver is null
+                ? ApprovalDecisionResult.InsufficientLevel
+                : await ApprovalStore.DecideAsync(ApprovalId, approved, resolver, ApprovalChannel.Dialog);
+            if (result == ApprovalDecisionResult.Decided)
+            {
+                _decidedHere = true;
+                Close(new InlineApprovalResult(approved ? InlineApprovalOutcome.ApprovedHere : InlineApprovalOutcome.Rejected,
+                    result));
+                return;
+            }
+            // Anything but Decided is shown here, and nothing runs.
+            _message = L[ApprovalDecisionMessages.Key(result)].Value;
+            Refresh();
+        }
+        catch (Exception)
+        {
+            _message = L[ApprovalDecisionMessages.Key(ApprovalDecisionResult.NotRecorded)].Value;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>D2: after an approval given elsewhere, running is a click too.</summary>
+    private Task RunNowAsync()
+    {
+        Refresh();
+        if (_approval is { Status: ApprovalStatus.Approved })
+            Close(new InlineApprovalResult(InlineApprovalOutcome.ApprovedElsewhereRun));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>D5: closing leaves the approval pending (the prompt reads rejected or expired from the store).</summary>
+    private Task CloseAsync()
+    {
+        if (_closed) return Task.CompletedTask;
+        _closed = true;
+        MudDialog?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private void Close(InlineApprovalResult result)
+    {
+        if (_closed) return;
+        _closed = true;
+        MudDialog?.Close(DialogResult.Ok(result));
+    }
+
+    private static string PayloadText(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText();
+
+    public void Dispose()
+    {
+        ApprovalStore.Changed -= OnStoreChanged;
+        _tick?.Dispose();
+    }
+}

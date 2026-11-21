@@ -58,11 +58,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         _services = services;
     }
 
-    // Contract 0017 (A5): the audit log is resolved when a save changes the trusted scripts, not at construction (the
+    // Contract 0022 (A5): the audit log is resolved when a save changes the trusted scripts, not at construction (the
     // store is built before the database).
     private readonly IServiceProvider? _services;
 
-    /// <summary>The action of the audit row a change of the trusted scripts writes (contract 0017, point 2).</summary>
+    /// <summary>The action of the audit row a change of the trusted scripts writes (contract 0022, point 2).</summary>
     public const string TrustedScriptsAuditAction = "guardrails.trusted_scripts";
 
     /// <summary>Contract 0010: true once the database confirmed the record that a guardrail policy has existed.</summary>
@@ -533,7 +533,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     }
 
     /// <summary>
-    /// Contract 0017, amendment 1, under the store's lock before anything is written. A4: the additions this save makes
+    /// Contract 0022, amendment 1, under the store's lock before anything is written. A4: the additions this save makes
     /// to the configuration the store holds must be the ones the gateway decided on (<paramref name="expected"/>), and a
     /// save that adds entries while the held active policy requires a second approver must name them. A5: a change of
     /// the list is audited (server, path and hash of each entry added or removed) or nothing is saved. Amendment 3

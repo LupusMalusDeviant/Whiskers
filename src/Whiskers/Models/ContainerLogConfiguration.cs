@@ -12,8 +12,9 @@ namespace Whiskers.Models;
 public sealed record ContainerLogConfiguration(string Driver, string? MaxSize, string? MaxFile, string? LogPath)
 {
     /// <summary>A rotation limit is anything that stops the file growing forever. <c>max-size</c> is the one
-    /// that matters: <c>max-file</c> alone caps the number of files, not the size of each.</summary>
-    public bool RotationConfigured => !string.IsNullOrWhiteSpace(MaxSize);
+    /// that matters: <c>max-file</c> alone caps the number of files, not the size of each. Review 1.0.0: <c>-1</c> is
+    /// json-file's own value for "unlimited" and is no limit.</summary>
+    public bool RotationConfigured => !string.IsNullOrWhiteSpace(MaxSize) && MaxSize.Trim() != "-1";
 
     /// <summary>Whether this driver writes a file on the host that can fill the disk. Drivers that forward
     /// elsewhere (syslog, journald, a remote collector) are outside what this inventory can or should judge.</summary>

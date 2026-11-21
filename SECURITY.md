@@ -34,8 +34,8 @@ to disclose regardless. <!-- claim-free:policy -->
 
 ## Supported versions
 
-Whiskers is currently **stable** (`1.0.x`). Only the latest release / `main` receives security
-fixes. There is no long-term-support branch yet. <!-- claim:SEC-01 -->
+This source tree is the **stable** (`1.0.x`) line. Only the latest release / `main` receives security fixes. There
+is no long-term-support branch yet. <!-- claim:SEC-01 -->
 
 | Version | Supported |
 |---|---|
@@ -63,7 +63,7 @@ built in). <!-- claim:SEC-02 -->
   VictoriaMetrics over the mesh), the Docker API (Docker Engine API over mutual TLS, client CN pinned,
   behind a verb-whitelisting socket proxy) and host control (a one-shot `nsenter` container driven over
   the same mTLS channel). Whiskers holds **no standing SSH key** for an onboarded host. See
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). <!-- claim:SEC-16 -->
+  [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md). <!-- claim:SEC-16 -->
 - **Management ports are bound to the mesh address**: onboarding binds the mTLS Docker proxy (port 2376) and
   `node_exporter` to the host's mesh (WireGuard) address, not to a public interface. <!-- claim:SEC-17 -->
 
@@ -130,7 +130,8 @@ built in). <!-- claim:SEC-02 -->
 ## VAULT_KEY loss, change and rotation
 
 The vault's key also derives the keys for the webhook secrets, the rollback snapshots and the data-protection key ring
-(R1-31). There is no in-place rotation of `VAULT_KEY` yet; what a change or loss does: <!-- claim:SEC-22 -->
+(R1-31). A planned replacement is done in place ([docs/operations/vault-key-rotation.md](docs/operations/vault-key-rotation.md));
+what a change without it, or a loss, does: <!-- claim:SEC-22 -->
 
 - **Changed or lost key:** the vault is locked (it is left unchanged until the right key is set again). Stored
   credentials cannot be read; webhooks refuse every delivery until their secret is regenerated with a usable vault;
@@ -198,15 +199,17 @@ are logged (lines that quote rows are left out). <!-- claim:SEC-12 -->
   there; keep local accounts as a break-glass fallback with long, unique passwords, and delete the ones nobody needs.
   A suspected password leak: reset the account under *Settings > Local accounts* (its sessions end at once); with no
   Admin left who can sign in, issue a one-time recovery code on the host with
-  `docker compose exec serverwatch dotnet Whiskers.dll --recover-local-account <email>`
+  `docker exec whiskers dotnet Whiskers.dll --recover-local-account <email>` (installer; with the repository's
+  compose file `docker compose exec serverwatch …`)
   ([docs/operations/local-accounts.md](docs/operations/local-accounts.md)). <!-- claim-free:advice -->
 - Complete the setup wizard right after installation. It requires the one-time token from
   `/app/data/setup-token.txt` (or `WHISKERS_SETUP_TOKEN`), so an exposed port alone is not enough to claim Admin. <!-- claim:SEC-14 -->
 - Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately. <!-- claim-free:advice -->
-- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it still holds plaintext SSH and
-  mTLS client keys). Without a usable vault Whiskers creates no webhook and keeps no rollback snapshot (an update then
+- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (its SSH and
+  mTLS client keys are sealed when a vault key is set; plaintext only without one, where Whiskers stores no new key
+  and keys stored before stay plaintext). Without a usable vault Whiskers creates no webhook and keeps no rollback snapshot (an update then
   goes ahead without a way back), and writes the data-protection keys as before. Credentials entered in the UI need the vault;
   credentials set by environment variables (`AICHAT_API_KEY`, `AGENT_API_KEY`, `MATTERMOST_WEBHOOK_URL`, …) are not
   stored by Whiskers — keep them in a secret store or a mode-0600 `.env`, never in the image. <!-- claim:SEC-26 -->
@@ -215,4 +218,4 @@ are logged (lines that quote rows are left out). <!-- claim:SEC-12 -->
   privileged because it can manage its own host (nsenter host-shell). If Whiskers only monitors
   *remote* hosts, deploy `docker-compose.hardened.yml` instead (non-root, no `privileged`, dropped
   capabilities, read-only rootfs, Docker via a verb-restricted socket-proxy). See
-  [docs/container-hardening.md](docs/container-hardening.md). <!-- claim:SEC-28 -->
+  [docs/operations/container-hardening.md](docs/operations/container-hardening.md). <!-- claim:SEC-28 -->

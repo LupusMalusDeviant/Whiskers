@@ -138,7 +138,8 @@ public sealed class AuditPathMatrixTests : IDisposable
 
     /// <summary>Whether a tool mutates: above <c>read</c>, or performing a catalog capability.</summary>
     private static bool Mutates(string tool) =>
-        (McpPermissionLevels.DefaultToolLevels.TryGetValue(tool, out var level) && level != McpPermissionLevels.Read)
+        (McpPermissionLevels.DefaultToolLevels.TryGetValue(tool, out var level) && level != McpPermissionLevels.Read
+         && !CapabilityTableConsistencyTests.AdminLevelReads.Contains(tool))
         || new CapabilityCatalog().FindByMcpTool(tool) is not null;
 
     internal static IReadOnlyList<(string Test, AuditPathAttribute Mark)> Marks() =>
@@ -339,6 +340,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         serverId = "local", containerId = "web", name = "web", networkId = "net-1", zone = "example.com", server = "cx-1",
         taskId = "task-1", volumeName = "vol-1", backupId = "bk-1", ruleId = "rule-1", workloadId = "wl-1", appId = "app-1", webhookId = "wh-1",
         section = "general", account = "someone@example.com", binding = "binding-1", checkId = "check-1",
+        fromOwner = "user:gone@example.com", notice = "notice-1",
         // Payloads that must never reach an event (redaction, INV-51).
         password = Probe, token = Probe,
     };
@@ -361,6 +363,7 @@ public sealed class AuditPathMatrixTests : IDisposable
     [AuditPath("U-25", Pending, Approved)]
     [AuditPath("U-37", Pending, Approved)]
     [AuditPath("U-21", Pending, Approved)]
+    [AuditPath("U-41", Pending, Approved)]   // contract 0018: replacing a host-key pin is a control-plane change (INV-59, INV-63)
     public async Task Every_ui_and_terminal_capability_is_one_complete_event_per_attempt(string row, string capabilityId)
     {
         var capability = new CapabilityCatalog().Find(capabilityId);
@@ -433,7 +436,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         Assert.Equal(stopped.Outcome == Executed ? 2 : 1, runs);
         if (stopped.Outcome != Denied)
             // Switching the kill switch off, and changing one's own password (read level) stay possible under it.
-            Assert.Contains(capabilityId, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change" });
+            Assert.Contains(capabilityId, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change", "automation.handover_acknowledge" });
     }
 
     /// <summary>
@@ -524,7 +527,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         var killed = Assert.Single(await CallAsync(Ok));
         AssertComplete(killed, killed.Outcome!, capability.Id, "Mcp");
         if (killed.Outcome != Denied)
-            Assert.Contains(capability.Id, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change" });
+            Assert.Contains(capability.Id, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change", "automation.handover_acknowledge" });
     }
 
     /// <summary>M-xx: the MCP server runs every tool call through <see cref="McpGuardrailFilter"/> — the one place the

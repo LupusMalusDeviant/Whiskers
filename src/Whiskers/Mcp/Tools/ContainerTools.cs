@@ -407,10 +407,8 @@ public class ContainerTools
 
         var envVars = await docker.GetContainerEnvAsync(id, serverId, cancellationToken);
 
-        string[] sensitiveKeywords = ["KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL", "AUTH", "PRIVATE", "PASSPHRASE"];
-        bool IsSensitive(string key) => sensitiveKeywords.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
-
-        var lines = envVars.Select(e => IsSensitive(e.Key)
+        // INV-16/INV-24 (contract 0017 D): the one masking rule the web UI uses — the key, and credentials in a URL value.
+        var lines = envVars.Select(e => EnvMasking.ShouldMask(e.Key, e.Value)
             ? $"  {e.Key}=••••••••"
             : $"  {e.Key}={e.Value}");
 
@@ -540,17 +538,13 @@ public class ContainerTools
 /// same new file.</summary>
 public static class DotEnvMerge
 {
+    /// <summary>Sets the given variables in an existing <c>.env</c>. Every other line — comments, blank lines, other
+    /// variables, their order and line endings — stays as it was: a variable that is already assigned gets its new value
+    /// on each line that assigns it (so no older duplicate wins), a new one is appended at the end.</summary>
     public static (string Content, IReadOnlyList<string> Changed) Merge(string? existingContent, string envVars)
     {
-        var existing = new Dictionary<string, string>();
-        foreach (var line in (existingContent ?? "").Split('\n'))
-        {
-            var trimmed = line.Trim();
-            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
-            var eqIdx = trimmed.IndexOf('=');
-            if (eqIdx > 0)
-                existing[trimmed[..eqIdx]] = trimmed[(eqIdx + 1)..];
-        }
+        var updates = new Dictionary<string, string>(StringComparer.Ordinal);
+        var order = new List<string>();
         var changed = new List<string>();
         foreach (var pair in (envVars ?? "").Split([',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -558,10 +552,29 @@ public static class DotEnvMerge
             if (eqIdx > 0)
             {
                 var key = pair[..eqIdx].Trim();
-                existing[key] = pair[(eqIdx + 1)..].Trim();
+                if (!updates.ContainsKey(key)) order.Add(key);
+                updates[key] = pair[(eqIdx + 1)..].Trim();
                 changed.Add(key);
             }
         }
-        return (string.Join('\n', existing.Select(e => $"{e.Key}={e.Value}")) + "\n", changed);
+
+        var lines = (existingContent ?? "").Split('\n').ToList();
+        if (lines.Count > 0 && lines[^1].Length == 0)
+            lines.RemoveAt(lines.Count - 1);   // the final newline; written again below
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var cr = lines[i].EndsWith('\r');
+            var trimmed = lines[i].Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
+            var eqIdx = trimmed.IndexOf('=');
+            if (eqIdx <= 0) continue;
+            var key = trimmed[..eqIdx].Trim();
+            if (!updates.TryGetValue(key, out var value)) continue;
+            lines[i] = $"{key}={value}" + (cr ? "\r" : "");
+            present.Add(key);
+        }
+        lines.AddRange(order.Where(k => !present.Contains(k)).Select(k => $"{k}={updates[k]}"));
+        return (string.Join('\n', lines) + "\n", changed);
     }
 }

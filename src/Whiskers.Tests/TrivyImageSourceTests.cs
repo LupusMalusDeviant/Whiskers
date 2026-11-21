@@ -12,7 +12,7 @@ namespace Whiskers.Tests;
 /// Trivy cache. Four hypotheses were tested and refuted before the storage driver turned out to be the only
 /// difference between the two hosts.</para>
 ///
-/// <para>The cost of not noticing: two running containers on infomaniak with no vulnerability data at all,
+/// <para>The cost of not noticing: two running containers on host-f with no vulnerability data at all,
 /// invisible rather than visibly broken, on a host that therefore looked clean.</para>
 /// </summary>
 public class TrivyImageSourceTests
@@ -20,7 +20,7 @@ public class TrivyImageSourceTests
     [Fact]
     public void The_containerd_export_failure_is_retried_from_the_registry()
     {
-        // The real message, verbatim from infomaniak.
+        // The real message, verbatim from host-f.
         const string output =
             "2026-08-28T13:41:02Z FATAL Fatal error image scan error: scan error: unable to initialize a " +
             "scan service: unable to initialize an image scan service: unable to find the specified image " +

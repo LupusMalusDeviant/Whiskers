@@ -27,7 +27,9 @@ public class LogTools
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "search_logs");
         if (denied != null) return denied;
 
-        var results = await searchService.SearchAsync(pattern, isRegex, containerId, serverId, tailLines, ct: cancellationToken);
+        List<LogSearchResult> results;
+        try { results = await searchService.SearchAsync(pattern, isRegex, containerId, serverId, tailLines, ct: cancellationToken); }
+        catch (InvalidSearchPatternException ex) { return ex.Message; }   // an invalid regex is said, not answered with "no matches"
         if (!results.Any()) return $"No matches found for '{pattern}'.";
 
         // Name the server: container names repeat across hosts, so the bare name is ambiguous.

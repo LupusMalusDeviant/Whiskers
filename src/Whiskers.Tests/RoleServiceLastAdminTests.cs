@@ -26,7 +26,7 @@ public sealed class RoleServiceLastAdminTests : IDisposable
     public async Task Removing_the_last_admin_is_refused()
     {
         var roles = await WithAdminAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.RemoveRoleAsync("admin@x"));
+        await Assert.ThrowsAsync<LastAdminException>(() => roles.RemoveRoleAsync("admin@x"));
         Assert.Equal(AppRole.Admin, roles.GetRole("admin@x"));
     }
 
@@ -34,7 +34,7 @@ public sealed class RoleServiceLastAdminTests : IDisposable
     public async Task Demoting_the_last_admin_is_refused()
     {
         var roles = await WithAdminAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetRoleAsync("admin@x", AppRole.Operator));
+        await Assert.ThrowsAsync<LastAdminException>(() => roles.SetRoleAsync("admin@x", AppRole.Operator));
         Assert.Equal(AppRole.Admin, roles.GetRole("admin@x"));
     }
 
@@ -44,7 +44,7 @@ public sealed class RoleServiceLastAdminTests : IDisposable
         var roles = await WithAdminAsync();
         // The trick from the audit: make the DEFAULT role Admin and delete the explicit rows.
         var data = new UserRoleData { DefaultRole = AppRole.Admin, Roles = new() };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SaveRoleDataAsync(data));
+        await Assert.ThrowsAsync<LastAdminException>(() => roles.SaveRoleDataAsync(data));
         Assert.Equal(AppRole.Admin, roles.GetRole("admin@x"));
         Assert.Contains(roles.GetRoleData().Roles, r => r.Role == AppRole.Admin);
     }

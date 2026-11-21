@@ -66,7 +66,9 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     /// reading has no duration), clear after 5 minutes of passing ones. Value 1 = failed or refused, 0 = passed.</summary>
     public static BreachRules RulesFor(int intervalSeconds) =>
         new(OpenAfter, 0.5, ClearAfter, double.PositiveInfinity,
-            BreachRules.GapToleranceFor(TimeSpan.FromSeconds(intervalSeconds)), TimeSpan.Zero);
+            BreachRules.GapToleranceFor(TimeSpan.FromSeconds(intervalSeconds)), TimeSpan.Zero,
+            // One passing run between failing ones does not end a failure; it must pass for ClearAfter.
+            UnbrokenConfirmation: false);
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
@@ -235,6 +237,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         await SendAsync(new NotificationEvent
         {
             EventType = NotificationEventTypes.AutomationSuspended,
+            ThrottleSubject = NotificationThrottleSubjects.EndpointCheck(check.Id),
             ServerId = check.ServerId,
             ServerName = ServerName(check.ServerId),
             ContainerName = check.Name,

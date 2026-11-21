@@ -33,7 +33,7 @@ that is what the named tests are for.
 Locally, `WHISKERS_RELEASE_GATE=dry-run dotnet test --filter ReleaseGateTests` shows what a 1.0 release would refuse
 today.
 
-Highest invariant ID: INV-62
+Highest invariant ID: INV-66
 
 ## Open invariants
 

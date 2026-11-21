@@ -297,8 +297,8 @@ public sealed class DiskHealthReadingTests
         "missing" => Queries(smart: Empty, run: Empty, mtime: Empty, md: Empty, zfs: Empty, collectors: Empty),
         "collector-failed" => Queries(collectors: CollectorsMdadmFailed),
         "smart-unavailable" => Queries(smart: SmartHealthy.Replace(
-            "\"__name__\":\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
-            "\"__name__\":\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]")),
+            "\"__name__\":\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"__name__\":\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]")),
         _ => throw new ArgumentOutOfRangeException(nameof(name)),
     };
 
@@ -376,10 +376,10 @@ public sealed class DiskHealthReadingTests
     [Fact]
     public void The_six_queries_select_on_the_server_id_and_escape_it()
     {
-        var queries = DiskHealthQueries.For("bad\"wolf");
+        var queries = DiskHealthQueries.For("host\"a");
 
         Assert.Equal(6, queries.Count);
-        Assert.All(queries, q => Assert.Contains("server=\"bad\\\"wolf\"", q));
+        Assert.All(queries, q => Assert.Contains("server=\"host\\\"a\"", q));
         Assert.Contains(queries, q => q.StartsWith("smartmon_smartctl_run{", StringComparison.Ordinal));
         Assert.Contains(queries, q => q.StartsWith("node_textfile_mtime_seconds{", StringComparison.Ordinal) && q.Contains("smartmon\\\\.prom"));
         Assert.Contains(queries, q => q.Contains("node_scrape_collector_success") && q.Contains("mdadm|zfs"));
@@ -395,7 +395,7 @@ public sealed class DiskHealthReadingTests
     {
         var handler = new StubHttpHandler((_, _) => Task.FromResult(StubHttpHandler.Json(SmartHealthy)));
 
-        var result = await Client(handler).QueryAsync("http://100.64.0.1:8428/", "smartmon_device_smart_healthy{server=\"badwolf\"}", CancellationToken.None);
+        var result = await Client(handler).QueryAsync("http://100.64.0.1:8428/", "smartmon_device_smart_healthy{server=\"host-a\"}", CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.Equal(6, result.Samples.Count);
@@ -404,7 +404,7 @@ public sealed class DiskHealthReadingTests
             TimeSpan.Zero, TimeSpan.FromMilliseconds(1));
         var url = Assert.Single(handler.Requests);
         Assert.StartsWith("http://100.64.0.1:8428/api/v1/query?query=", url);
-        Assert.Contains(Uri.EscapeDataString("server=\"badwolf\""), url);
+        Assert.Contains(Uri.EscapeDataString("server=\"host-a\""), url);
     }
 
     [Theory]
@@ -467,13 +467,13 @@ public sealed class DiskHealthReadingTests
     private static string SdaFailedWith(string available, string? enabled)
     {
         var json = SmartFailed.Replace(
-            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
-            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + available + "\"]");
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + available + "\"]");
         if (enabled is null)
             return FixTrailingComma(string.Join("\n", json.Split('\n').Where(l => !(l.Contains("smart_enabled") && l.Contains("/dev/sda")))));
         return json.Replace(
-            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
-            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + enabled + "\"]");
+            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + enabled + "\"]");
     }
 
     [Theory]
@@ -608,8 +608,8 @@ public sealed class DiskHealthReadingTests
 
         // A failing copy keeps the line failing: a bad value is never hidden by a duplicate.
         var failingCopy = DiskHealthAlertTests.SmartFailingNvmeWithDuplicateSda.Replace(
-            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"1\"]",
-            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"0\"]");
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"0\"]");
         Assert.Equal(DiskHealthState.DegradedOrFailing, Item(Read(Queries(smart: failingCopy)), DiskHealthKinds.Smart, "/dev/sda").State);
 
         // Two md names that only become equal once shortened for display: one line, Unknown.

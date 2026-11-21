@@ -527,6 +527,8 @@ public sealed partial class SinkRedactionTests
     private static readonly HashSet<string> PayloadParameters = new(StringComparer.Ordinal)
     {
         "command", "composeContent", "composePath", "content", "envVars", "prompt", "query", "token", "volumes",
+        // Contract 0018 part E: a server id, but its name reads like a credential to the redactor, so only its length is kept.
+        "cloudCredentialFrom",
     };
 
     /// <summary>Every other text parameter: short identifiers and descriptions, redacted pattern by pattern. A new
@@ -538,6 +540,8 @@ public sealed partial class SinkRedactionTests
         "network", "networkId", "pattern", "period", "port", "ports", "priority", "projectName", "protocol", "provider",
         "reason", "repoUrl", "restartPolicy", "server", "serverId", "serverType", "serviceName", "severity", "siteName",
         "table", "tag", "targetId", "taskId", "taskType", "type", "value", "volumeName", "webhookId", "zone",
+        // Contract 0018 part E (add_server, onboard_server): identifiers, an IP literal and fixed choices; none is a secret.
+        "bootstrap", "cloudProvider", "confirmVmName", "group", "ip",
     };
 
     [Fact]

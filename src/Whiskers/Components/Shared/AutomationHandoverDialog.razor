@@ -1,0 +1,247 @@
+@inject IAutomationHandover Handover
+@inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+@* Contract 0020 (INV-66): hand the automation of an owner who can no longer act over to another usable person. Three
+   steps — items, new owner, summary — then one gateway decision (automation.handover). The click on "Hand over…" only
+   opened this dialog; the decision is the separate, non-default "Hand over" button on the summary (no auto-confirm). *@
+
+<MudDialog>
+    <TitleContent>@L["AutomationHandover_Title", FromName]</TitleContent>
+    <DialogContent>
+        @if (_loadError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@L["AutomationHandover_LoadError", _loadError]</MudAlert>
+        }
+        else if (_result is not null)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["AutomationHandover_Result_Title"]</MudText>
+            @foreach (var item in _result.Items)
+            {
+                <MudText Typo="Typo.body2" data-result="@item.Ref.Id">
+                    @KindName(item.Ref.Kind) · @item.Name — @L[$"AutomationHandover_Status_{item.Status}"]
+                    @if (item.Status == HandoverItemStatus.HandedOver)
+                    {
+                        <span> (@L[item.WasOn ? "AutomationHandover_WasOn" : "AutomationHandover_WasOff"])</span>
+                    }
+                </MudText>
+            }
+        }
+        else if (_step == 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["AutomationHandover_Step_Items"]</MudText>
+            @foreach (var group in _items.GroupBy(i => i.Ref.Kind))
+            {
+                <MudText Typo="Typo.overline">@KindName(group.Key)</MudText>
+                @foreach (var item in group)
+                {
+                    var selectable = Selectable(item);
+                    <div class="d-flex align-center" data-item="@item.Ref.Id">
+                        <MudCheckBox T="bool" Value="@_selected.Contains(item.Ref)" Disabled="@(!selectable)"
+                                     ValueChanged="@(v => Toggle(item.Ref, v))" Dense="true" />
+                        <MudText Typo="Typo.body2" Color="@(selectable ? Color.Default : Color.Secondary)">
+                            @item.Name · @L[item.On ? "AutomationHandover_On" : "AutomationHandover_Off"] · @WhyOf(item)
+                        </MudText>
+                    </div>
+                }
+            }
+        }
+        else if (_step == 1)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["AutomationHandover_Step_Owner"]</MudText>
+            @if (_candidates.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Warning">@L["AutomationHandover_NoCandidates"]</MudText>
+            }
+            <MudSelect T="string" Value="_to" ValueChanged="PickOwner" Label="@L["AutomationHandover_Label_NewOwner"]" Dense="true">
+                @foreach (var candidate in _candidates)
+                {
+                    <MudSelectItem T="string" Value="@candidate">@(PrincipalIds.EmailOf(candidate) ?? candidate)</MudSelectItem>
+                }
+            </MudSelect>
+            @if (_check?.OwnerRefused is { } ownerRefused)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error" Class="mt-2">@ownerRefused</MudText>
+            }
+            @foreach (var item in _items.Where(i => _ownerRefused.ContainsKey(i.Ref)))
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" data-refused="@item.Ref.Id">
+                    @KindName(item.Ref.Kind) · @item.Name — @_ownerRefused[item.Ref]
+                </MudText>
+            }
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" data-summary="true">
+                @L["AutomationHandover_Summary", _selected.Count, FromName, PrincipalIds.EmailOf(_to) ?? _to ?? ""]
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        @* Cancel is the default; nothing is bound to Enter. *@
+        <MudButton OnClick="Cancel" Variant="Variant.Filled" data-action="cancel">@L[_result is null ? "AutomationHandover_Button_Cancel" : "AutomationHandover_Button_Close"]</MudButton>
+        @if (_result is null && _loadError is null)
+        {
+            @if (_step > 0)
+            {
+                <MudButton OnClick="Back" Disabled="_busy" data-action="back">@L["AutomationHandover_Button_Back"]</MudButton>
+            }
+            @if (_step < 2)
+            {
+                <MudButton OnClick="Next" Disabled="@(_busy || !CanGoOn)" data-action="next">@L["AutomationHandover_Button_Next"]</MudButton>
+            }
+            else
+            {
+                <MudButton OnClick="HandOverAsync" Color="Color.Warning" Variant="Variant.Outlined" Disabled="@(_busy || _selected.Count == 0)"
+                           data-action="handover">@L["AutomationHandover_Button_HandOver"]</MudButton>
+            }
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The old owner's principal id.</summary>
+    [Parameter] public string FromOwnerId { get; set; } = "";
+
+    /// <summary>The old owner as the panel shows it.</summary>
+    [Parameter] public string FromName { get; set; } = "";
+
+    /// <summary>Persons who can act now (<see cref="OwnerState.Active"/>), as principal ids; the panel builds the list.</summary>
+    [Parameter] public IReadOnlyList<string> Candidates { get; set; } = [];
+
+    private List<OwnedAutomation> _items = [];
+    private readonly HashSet<AutomationItemRef> _selected = [];
+    private Dictionary<AutomationItemRef, string> _ownerRefused = new();
+    private List<string> _candidates = [];
+    private string? _to;
+    private HandoverCheck? _check;
+    private HandoverResult? _result;
+    private string? _loadError;
+    private int _step;
+    private bool _busy;
+
+    private bool CanGoOn => _step == 0 ? _selected.Count > 0 : !string.IsNullOrEmpty(_to) && _check is { OwnerRefused: null } && _selected.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Items that still run on their owner are not listed (D4); the others are, the ones it cannot judge greyed.
+            _items = (await Handover.OwnedByAsync(FromOwnerId))
+                .Where(i => i.Eligibility != HandoverEligibility.RunsOnOwner).ToList();
+            // Eligible items are preselected and may be deselected (D1).
+            foreach (var item in _items.Where(Selectable)) _selected.Add(item.Ref);
+            // Keys are never offered (D3), nor the old owner.
+            _candidates = Candidates.Where(c => PrincipalIds.EmailOf(c) is not null && c != FromOwnerId)
+                .Distinct(StringComparer.Ordinal).OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+    }
+
+    /// <summary>Selectable: the owner cannot run it, it can be judged, and no MCP key owns or created it (D12).</summary>
+    private static bool Selectable(OwnedAutomation item) =>
+        item.Eligibility == HandoverEligibility.CannotRunOnOwner && !item.KeyProvenance;
+
+    private string WhyOf(OwnedAutomation item) =>
+        item.KeyProvenance ? L["AutomationHandover_Why_Key"].Value
+        : item.Eligibility == HandoverEligibility.CannotJudge ? L["AutomationHandover_Why_CannotJudge", item.Why ?? ""].Value
+        : Enum.TryParse<OwnerState>(item.Why, out var state) ? L[$"AutomationOwners_State_{state}"].Value
+        : item.Why ?? "";
+
+    private string KindName(AutomationKind kind) => L[$"AutomationHandover_Kind_{kind}"].Value;
+
+    private void Toggle(AutomationItemRef item, bool on)
+    {
+        if (on) _selected.Add(item); else _selected.Remove(item);
+    }
+
+    private async Task PickOwner(string? owner)
+    {
+        _to = owner;
+        _check = null;
+        _ownerRefused = new();
+        if (string.IsNullOrEmpty(owner)) return;
+        _busy = true;
+        try
+        {
+            // Items the person cannot hold are deselected and greyed with the reason.
+            var eligible = _items.Where(Selectable).Select(i => i.Ref).ToList();
+            _check = await Handover.CheckAsync(FromOwnerId, owner, eligible);
+            _ownerRefused = new Dictionary<AutomationItemRef, string>(_check.Refused);
+            foreach (var refused in _ownerRefused.Keys) _selected.Remove(refused);
+        }
+        catch (Exception ex)
+        {
+            _check = new HandoverCheck(new Dictionary<AutomationItemRef, string>(), ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Next()
+    {
+        if (CanGoOn) _step++;
+    }
+
+    private void Back()
+    {
+        if (_step > 0) _step--;
+    }
+
+    private void Cancel() => MudDialog?.Close(_result is null ? DialogResult.Cancel() : DialogResult.Ok(_result));
+
+    private async Task HandOverAsync()
+    {
+        if (_busy || string.IsNullOrEmpty(_to) || _selected.Count == 0) return;
+        // Immutable locals: the arguments and the delegate read the same values in the same call.
+        var fromOwner = FromOwnerId;
+        var toOwner = _to;
+        IReadOnlyList<AutomationItemRef> items = _selected.ToList();
+        var args = new { fromOwner, toOwner, items = items.Select(i => new { kind = i.Kind.ToString(), id = i.Id }).ToArray() };
+        _busy = true;
+        try
+        {
+            // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+            if (await CurrentUser.GetRoleAsync() < CapabilityCatalog.RoleOf("automation.handover"))
+            {
+                await Mutations.RefuseAsync("automation.handover", args,
+                    $"Requires the {CapabilityCatalog.RoleOf("automation.handover")} role.");
+                Snackbar.Add(L["AutomationHandover_Snackbar_Refused"].Value, Severity.Warning);
+                return;
+            }
+            var check = await Handover.CheckAsync(fromOwner, toOwner, items);
+            if (!check.Ok)
+            {
+                // A failed check is the gateway's Denied event; nothing runs.
+                await Mutations.RefuseAsync("automation.handover", args, check.Describe());
+                Snackbar.Add(L["AutomationHandover_Snackbar_CheckFailed", check.Describe()].Value, Severity.Warning);
+                return;
+            }
+            _result = await Mutations.RunAsync("automation.handover", args,
+                async (ResolvedRecord rt, CancellationToken ct) => await Handover.HandOverAsync(rt.Id, toOwner, items, ct));
+            Snackbar.Add(L["AutomationHandover_Snackbar_Done",
+                _result.Items.Count(i => i.Status == HandoverItemStatus.HandedOver)].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["AutomationHandover_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

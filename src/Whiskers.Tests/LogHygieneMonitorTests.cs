@@ -51,7 +51,7 @@ public class LogHygieneMonitorTests
         var sent = new FakeNotifications();
         var container = new ContainerInfo
         {
-            Id = "id-ghostunnel", Name = "ghostunnel", ServerId = "local", ServerName = "Badwolf"
+            Id = "id-ghostunnel", Name = "ghostunnel", ServerId = "local", ServerName = "Host-A"
         };
         container.Labels["com.docker.compose.project"] = "serverwatch";
         container.Labels["com.docker.compose.service"] = "ghostunnel";
@@ -61,7 +61,7 @@ public class LogHygieneMonitorTests
             new FakeDocker(container),
             new FakeServerConfig(new Models.ServerConfig
             {
-                Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true, Enabled = true
+                Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true, Enabled = true
             }),
             sent,
             TestBudget.Create(),

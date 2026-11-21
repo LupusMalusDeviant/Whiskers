@@ -90,6 +90,8 @@ public sealed class ComposeRunner : IComposeRunner
         public ComposePlan? UpPlan { get; set; }
         public List<string> Violations { get; } = [];
         public List<string> Output { get; } = [];
+        /// <summary>Contract 0021: what a person's run is told besides its exposures (networks unreadable at step 4).</summary>
+        public List<string> ChangeNotes { get; } = [];
     }
 
     public async Task<ComposeRunResult> RunAsync(ComposePlan plan, ComposeHostCommand mutate, ComposeRunOptions options,
@@ -202,6 +204,11 @@ public sealed class ComposeRunner : IComposeRunner
             {
                 restoreFiles = true;
                 return Refused(run, thirdPartyRefusal);
+            }
+            if (await CheckNetworksAsync(run, ct) is { } networkRefusal)
+            {
+                restoreFiles = true;
+                return Refused(run, networkRefusal);
             }
 
             // Contract 0013, D10–D11: every image up starts is pinned to what step 4 inspected, verified, and written to
@@ -324,6 +331,54 @@ public sealed class ComposeRunner : IComposeRunner
         return null;
     }
 
+    /// <summary>
+    /// Contract 0021 (§ 1.5, D5) at step 4: the host's networks are read again and the plan's networks looked up — an
+    /// external or pre-existing network recreated with a LAN driver since planning gives a <see cref="ExposureKind.LanNetwork"/>.
+    /// One that was not decided is handled like an image label: refused under the agent rule set (class <c>host</c>),
+    /// otherwise decided, audited and announced. An external network that is gone or not unique refuses. Networks that
+    /// cannot be read refuse under the agent rule set; for persons the run goes on, audited and announced.
+    /// </summary>
+    private async Task<string?> CheckNetworksAsync(Run run, CancellationToken ct)
+    {
+        var plan = run.Plan;
+        if (plan.Networks.Count == 0) return null;
+        IReadOnlyList<NetworkInfo> live;
+        try
+        {
+            live = await ComposePlanner.LiveNetworksAsync(_docker, plan.ServerId, ct);
+        }
+        catch (ComposePlanException ex)
+        {
+            // A cancelled run is not an unreadable network list: the cancellation goes on as it is.
+            ct.ThrowIfCancellationRequested();
+            if (run.Agent && run.Confirm.Contains(ExposureClasses.Host))
+                return ex.Message + " Nothing was started.";
+            run.ChangeNotes.Add("the networks could not be read before up, so a LAN network cannot be ruled out");
+            MutationScope.Note("exposure check: the networks could not be read before up (a LAN network cannot be ruled out)", success: false);
+            return null;
+        }
+        IReadOnlyList<ComposeExposure> found;
+        try
+        {
+            found = ComposeLiveNetworks.Decide(plan.Networks, live, plan.ServerId);
+        }
+        catch (ComposePlanException ex)
+        {
+            return ex.Message + " Nothing was started.";
+        }
+        foreach (var exposure in found)
+        {
+            if (run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity))) continue;
+            var named = exposure.KeyWithheld ? "a LAN network (withheld)" : $"the LAN network {exposure.Key} ({exposure.Value})";
+            if (run.Agent && run.Confirm.Contains(ExposureClasses.Host))
+                return $"'{exposure.Service}' would join {named} (class 'host'), which was not decided; nothing was started.";
+            run.Decided.Add(ComposeExposures.ComparisonKey(exposure.Identity));
+            run.FromImages.Add(exposure);
+            MutationScope.Note($"exposure found before up for {exposure.Service}: {named} (class 'host')");
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------------------------------- pins (contract 0013)
 
     /// <summary>
@@ -374,7 +429,8 @@ public sealed class ComposeRunner : IComposeRunner
     /// The re-check after <c>up</c> (Amendments 2–10): the containers this run created or recreated (ids that were not in
     /// the plan's impact, of the plan's project and services) join the scope's stop set; each is inspected and its
     /// exposures compared on (service, kind, key, value) with what was decided; a namespace it shares must be a decided
-    /// container or one this run created. A run that cannot be checked counts as an undecided exposure of class
+    /// container or one this run created; a bind of the Docker socket in its <c>Mounts</c> the plan did not decide is an
+    /// undecided exposure of class <c>host</c> (contract 0017, A1). A run that cannot be checked counts as an undecided exposure of class
     /// <c>public</c>. Under the agent rule set a container with an undecided exposure of a class that needs a confirmation
     /// is stopped (no restart, then stop, retried once); otherwise it keeps running and the run is reported as failed.
     /// </summary>
@@ -431,6 +487,24 @@ public sealed class ComposeRunner : IComposeRunner
             _logger?.LogWarning(ex, "Re-check of project {Project}: the created containers could not be inspected", plan.ProjectName);
         }
 
+        // Contract 0021: the host's networks, read fresh once for the re-check; null when they cannot be read.
+        IReadOnlyList<NetworkInfo>? hostNetworksRead = null;
+        var hostNetworksTried = false;
+        async Task<IReadOnlyList<NetworkInfo>?> NetworksAsync()
+        {
+            if (hostNetworksTried) return hostNetworksRead;
+            hostNetworksTried = true;
+            try
+            {
+                hostNetworksRead = await ComposePlanner.LiveNetworksAsync(_docker, plan.ServerId, CancellationToken.None);
+            }
+            catch (ComposePlanException)
+            {
+                _logger?.LogWarning("Re-check of project {Project}: the networks could not be read", plan.ProjectName);
+            }
+            return hostNetworksRead;
+        }
+
         foreach (var container in created)
         {
             var document = documents?.FirstOrDefault(d => ComposeExposures.IdentityOf(d).Id == container.Id);
@@ -485,6 +559,23 @@ public sealed class ComposeRunner : IComposeRunner
                 }
                 Undecided(container, cls, $"undecided {Named(run, exposure)} (class '{cls}'){note}");
             }
+            // Contract 0017, A1: a bind of the Docker socket the plan did not decide for this service; Mounts that
+            // cannot be read count as one.
+            if (ComposeExposures.SocketMounts(service, doc) is not { } sockets)
+                Undecided(container, ExposureClasses.Host, "the mounts could not be read (counts as an undecided socket mount, class 'host')");
+            else
+                foreach (var socket in sockets)
+                    if (!ComposeExposures.SocketDecided(plan.Services.FirstOrDefault(s => s.Name == service), socket.Value))
+                        Undecided(container, ExposureClasses.Host, "undecided socket mount of the Docker socket (class 'host')");
+            // Contract 0021: each attached network by its id in a fresh list of the host's networks; a LAN driver the
+            // plan did not decide is undecided of class host, and networks that cannot be checked count as one.
+            var hostNetworks = await NetworksAsync();
+            if ((hostNetworks is null ? null : ComposeExposures.LanNetworksOf(service, doc, hostNetworks)) is not { } lan)
+                Undecided(container, ExposureClasses.Host, "its networks could not be checked (counts as an undecided LAN network, class 'host')");
+            else
+                foreach (var exposure in lan)
+                    if (!run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity)))
+                        Undecided(container, ExposureClasses.Host, $"undecided {Named(run, exposure)} (class 'host')");
             // Amendment 9: a namespace shared at run time must be a decided container or one this run created.
             foreach (var (field, id) in shared)
                 if (run.Scope is not { } scope
@@ -605,17 +696,20 @@ public sealed class ComposeRunner : IComposeRunner
         if (run.Agent || _notifications is null) return;
         var lines = run.Plan.Exposures().Concat(run.FromImages)
             .Where(e => ExposureClasses.Of(e.Kind, e.Key, run.Plan.ExposurePrefixes) is ExposureClasses.Public or ExposureClasses.Host)
-            .Select(Safe).Distinct(StringComparer.Ordinal).ToList();
+            .Select(Safe).Concat(run.ChangeNotes).Distinct(StringComparer.Ordinal).ToList();
         if (lines.Count == 0) return;
         await SendAsync(NotificationEventTypes.ExposureChange, run,
             $"Compose project '{run.Plan.ProjectNameForAudit}' was deployed with exposure changes: {string.Join("; ", lines)}.");
     }
 
+    // Contract 0017, amendment 4 (G2): the stack plus the rules it broke is the throttle subject — two projects, or a
+    // violation found after the first report (a restore that failed), are delivered; the same report again is not.
     private Task NotifyViolationAsync(Run run) =>
         SendAsync(NotificationEventTypes.ExposureViolation, run,
-            $"Compose project '{run.Plan.ProjectNameForAudit}': {string.Join("; ", run.Violations.Distinct(StringComparer.Ordinal))}.");
+            $"Compose project '{run.Plan.ProjectNameForAudit}': {string.Join("; ", run.Violations.Distinct(StringComparer.Ordinal))}.",
+            NotificationThrottleSubjects.Exposure(run.Plan.ProjectNameForAudit, run.Agent, run.Violations));
 
-    private async Task SendAsync(string eventType, Run run, string message)
+    private async Task SendAsync(string eventType, Run run, string message, string? throttleSubject = null)
     {
         if (_notifications is null) return;
         try
@@ -623,6 +717,7 @@ public sealed class ComposeRunner : IComposeRunner
             await _notifications.SendAsync(new NotificationEvent
             {
                 EventType = eventType,
+                ThrottleSubject = throttleSubject,
                 ContainerName = run.Plan.ProjectNameForAudit,
                 ServerId = run.Plan.ServerId,
                 ImageInfo = message,
@@ -637,7 +732,10 @@ public sealed class ComposeRunner : IComposeRunner
 
     /// <summary>The service, the kind and the key of an exposure — never its value; a key from a variable not even that.</summary>
     internal static string Safe(ComposeExposure exposure) =>
-        exposure.KeyWithheld
+        // Contract 0017, A1: a planned socket mount comes from use_api_socket, which may also hand over registry credentials.
+        exposure.Kind == ExposureKind.SocketMount
+            ? $"{exposure.Service}: Docker socket mounted (use_api_socket may also hand it the host client's registry credentials)"
+            : exposure.KeyWithheld
             ? $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} (withheld)"
             : $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} {exposure.Key}";
 

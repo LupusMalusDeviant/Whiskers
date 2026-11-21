@@ -34,7 +34,7 @@ public interface IGuardrailStore
     [Whiskers.Services.Mutations.MutatingOperation("guardrails.save")]
     Task SaveConfigAsync(GuardrailConfig config, AgentPrincipal editor, CancellationToken ct = default);
 
-    /// <summary>Contract 0017, amendment 1 (A4): saves with the trusted-script additions the gateway decided on
+    /// <summary>Contract 0022, amendment 1 (A4): saves with the trusted-script additions the gateway decided on
     /// (<see cref="TrustedScripts.Additions"/>). The store compares them under its lock and writes nothing when they
     /// differ. The default is for test doubles; the store enforces it.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("guardrails.save")]

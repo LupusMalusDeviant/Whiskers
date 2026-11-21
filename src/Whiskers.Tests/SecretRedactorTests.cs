@@ -53,6 +53,211 @@ public sealed class SecretRedactorTests
         Assert.DoesNotContain(Canary, SinkRedaction.Text($"https://{Canary}@github.com/org/repo"));
     }
 
+    // ---- Contract 0017 C2: the whole Authorization value, whatever the scheme --------------------------------------
+
+    [Fact]
+    public void A_basic_authorization_header_is_redacted()
+    {
+        var credential = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("deploy:example-value-1"));
+        var redacted = SecretRedactor.Redact($"curl -H 'Authorization: Basic {credential}' https://registry.example/v2/");
+        Assert.False(redacted.Contains(credential.TrimEnd('='), StringComparison.Ordinal), "the credential survives redaction: " + redacted);
+    }
+
+    [Theory]
+    [InlineData("curl -H 'Authorization: Basic ZGVwbG95OmNhbmFyeS12YWx1ZS1yMTI0' https://r.example/v2/",
+        "curl -H 'Authorization: Basic ***' https://r.example/v2/")]
+    [InlineData("curl -H \"Authorization: Bearer canary-value-r124\" https://r.example/",
+        "curl -H \"Authorization: Bearer ***\" https://r.example/")]
+    [InlineData("Authorization: Digest username=\"u\", response=\"canary-value-r124\"", "Authorization: Digest ***")]
+    [InlineData("Authorization: Negotiate canary-value-r124", "Authorization: Negotiate ***")]
+    [InlineData("Authorization=Basic canary-value-r124", "Authorization=Basic ***")]
+    [InlineData("Authorization: NTLM TlRMTVNTUAABAAAAB4IIog==", "Authorization: NTLM ***")]
+    // A scheme outside the list is no scheme: the whole value goes.
+    [InlineData("HTTP_AUTHORIZATION=Token canary-value-r124", "HTTP_AUTHORIZATION=***")]
+    [InlineData("Proxy-Authorization: Basic canary-value-r124\nnext line", "Proxy-Authorization: Basic ***\nnext line")]
+    [InlineData("Proxy-Authorization: canary-value-r124", "Proxy-Authorization: ***")]
+    // A one-word value is removed whole, also when it is a scheme word with nothing after it.
+    [InlineData("authorization: canary-value-r124", "authorization: ***")]
+    [InlineData("Authorization: ghp_canaryvaluer124canaryvaluer124", "Authorization: ***")]
+    [InlineData("curl -H 'Authorization: ghp_canaryvaluer124' https://api.example/", "curl -H 'Authorization: ***' https://api.example/")]
+    [InlineData("Authorization: Basic", "Authorization: ***")]
+    // A backslash does not end the value (review of 37f88726, M1).
+    [InlineData(@"Authorization: DOMAIN\user:hunter2secret", "Authorization: ***")]
+    [InlineData(@"Authorization: \hunter2secret", "Authorization: ***")]
+    [InlineData(@"HTTP_AUTHORIZATION=tok\en-hunter2secret", "HTTP_AUTHORIZATION=***")]
+    [InlineData(@"-H Authorization:\ Bearer\ hunter2secret", "-H Authorization:***")]
+    [InlineData(@"curl -H ""Authorization: Digest username=\""u\"", response=\""hunter2secret\"""" https://x",
+        @"curl -H ""Authorization: Digest ***"" https://x")]
+    // A header inside an escaped JSON string ends at the escaped quote; the document stays intact.
+    [InlineData(@"{""cmd"":""curl -H \""Authorization: Basic hunter2secret\"" https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H \""Authorization: Basic ***\"" https://x"",""n"":""kept""}")]
+    // The same with the quotes written as backslash-u0022 (the default JSON encoder), built from pieces.
+    [InlineData(@"{""cmd"":""curl -H \" + "u0022Authorization: Basic hunter2secret" + @"\" + @"u0022 https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H \" + "u0022Authorization: Basic ***" + @"\" + @"u0022 https://x"",""n"":""kept""}")]
+    // "***" counts as already redacted only when the value ends there (m2).
+    [InlineData("Authorization: ***hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: Bearer ***hunter2secret", "Authorization: Bearer ***")]
+    // A prefixed header inside a quoted argument keeps what follows the argument (m3).
+    [InlineData("curl -H 'Proxy-Authorization: Basic hunter2secret' -H 'X: y' https://x",
+        "curl -H 'Proxy-Authorization: Basic ***' -H 'X: y' https://x")]
+    // Outside a quoted argument an escaped quote does not end the value (delta review, M1').
+    [InlineData(@"Authorization: \""hunter2secret\""", "Authorization: ***")]
+    [InlineData(@"Authorization: \" + @"u0022hunter2secret\" + "u0022", "Authorization: ***")]
+    [InlineData(@"Authorization: tok\""hunter2secret", "Authorization: ***")]
+    [InlineData(@"Authorization: ***\" + "u0022hunter2secret", "Authorization: ***")]
+    [InlineData(@"{""msg"":""env AUTHORIZATION=\""hunter2secret\""""}" + "\n" + @"{""msg"":""next""}",
+        @"{""msg"":""env AUTHORIZATION=***" + "\n" + @"{""msg"":""next""}")]
+    [InlineData(@"level=debug msg=""headers: Authorization: Token token=\""hunter2secret\"", Accept: */*""",
+        @"level=debug msg=""headers: Authorization: ***")]
+    [InlineData(@"{""log"":""> Authorization: Digest username=\""u\"", response=\""hunter2secret\""\r\n"",""stream"":""stderr""}",
+        @"{""log"":""> Authorization: Digest ***")]
+    // A deeper-escaped quote inside an escaped header belongs to the value.
+    [InlineData(@"bash -c ""curl -H \""Authorization: Digest username=\\\""u\\\"", response=\\\""hunter2secret\\\""\"" https://x""",
+        @"bash -c ""curl -H \""Authorization: Digest ***\"" https://x""")]
+    [InlineData(@"{""cmd"":""curl -H <U>Authorization: Digest username=\\<U>u\\<U>, response=\\<U>hunter2secret\\<U><U> https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H <U>Authorization: Digest ***<U> https://x"",""n"":""kept""}")]
+    // A deeper-escaped quote inside an escaped quoted value belongs to the value (delta review 2, MINOR-1).
+    [InlineData(@"msg=""{\""Authorization\"": \""Token token=\\\""hunter2secret\\\""\""}""",
+        @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"msg=""{\""Authorization\"": \""Digest username=\\\""u\\\"", response=\\\""hunter2secret\\\""\""}""",
+        @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"{<U>Authorization<U>: <U>Token token=\\<U>hunter2secret\\<U><U>}",
+        @"{<U>Authorization<U>: <U>***<U>}")]
+    [InlineData(@"{\\\""Authorization\\\"": \\\""Token token=\\\\\\\""hunter2secret\\\\\\\""\\\""}",
+        @"{\\\""Authorization\\\"": \\\""***\\\""}")]
+    // A value that ends in a literal backslash still ends at its closing quote (delta review 3).
+    [InlineData(@"""Authorization"" => ""hunter2secret\\""", @"""Authorization"" => ""***""")]
+    [InlineData(@"'Authorization' => 'hunter2secret\\'", "'Authorization' => '***'")]
+    [InlineData(@"""Authorization"" = ""Basic hunter2\\""", @"""Authorization"" = ""***""")]
+    [InlineData(@"headers = {'Authorization': 'Token C:\\keys\\'}", "headers = {'Authorization': '***'}")]
+    [InlineData(@"msg=""{\""Authorization\"": \""hunter2secret\\\\\""}""", @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"'Authorization': 'hunter2secret\\', 'n': 'kept'", "'Authorization': '***', 'n': 'kept'")]
+    [InlineData(@"msg=""{\""Authorization\"": \""hunter2secret\\\\\"", \""n\"": \""kept\""}""",
+        @"msg=""{\""Authorization\"": \""***\"", \""n\"": \""kept\""}""")]
+    // Only what this rule or 1.0.0 could have written counts as redacted (NIT-1).
+    [InlineData("Authorization: ***-hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***.hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***/hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***=hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***:hunter2secret", "Authorization: ***")]
+    // A closing quote glued to more text is no boundary.
+    [InlineData(@"""Authorization: Basic abc""hunter2secret"" tail", @"""Authorization: Basic ***")]
+    [InlineData(@"""Authorization: ***""hunter2secret"" tail", @"""Authorization: ***")]
+    // A backslash-newline continuation inside a quoted header belongs to the value (m-c).
+    [InlineData("\"Authorization: Basic x\\\nhunter2secret\" kept", "\"Authorization: Basic ***\" kept")]
+    // Quoted keys with escaped quotes (m-a), and a Basic credential without a key (m-b).
+    [InlineData(@"level=debug headers=""{\""Authorization\"": \""Basic hunter2secret\""}""",
+        @"level=debug headers=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"""Authorization"" => ""Basic hunter2secret""", @"""Authorization"" => ""***""")]
+    [InlineData(@"proxy_set_header Authorization ""Basic aHVudGVyMnNlY3JldA=="";", @"proxy_set_header Authorization ""Basic ***"";")]
+    [InlineData(@"headers.Add(""Authorization"", ""Basic hunter2secret"");", @"headers.Add(""Authorization"", ""Basic ***"");")]
+    [InlineData("authorization=Basic%20hunter2secret&x=1", "authorization=Basic ***")]
+    [InlineData("Authorization%3A%20Basic%20hunter2secret", "Authorization%3A%20Basic ***")]
+    [InlineData("Authorization -> hunter2secret", "Authorization -> ***")]
+    [InlineData("'Authorization: tok'\"'\"'hunter2secret' tail", "'Authorization: ***")]
+    [InlineData("https://x/?a=1&b=Basic+aHVudGVyMnNlY3JldA%3D%3D", "https://x/?a=1&b=Basic+***%3D%3D")]
+    [InlineData("Basic authentication failed for the registry", "Basic authentication failed for the registry")]
+    // 1.0.0 rows stay as they are.
+    [InlineData(@"{""cmd"":""x authorization=***"",""n"":""kept""}", @"{""cmd"":""x authorization=***"",""n"":""kept""}")]
+    [InlineData(@"{""cmd"":""curl -H 'Authorization=***""}", @"{""cmd"":""curl -H 'Authorization=***""}")]
+    [InlineData("level=info authorization=*** user=bob", "level=info authorization=*** user=bob")]
+    [InlineData("authorization=***;next", "authorization=***;next")]
+    // The credential on the next line after the scheme, and a single-quoted key.
+    [InlineData("Authorization: Basic \nhunter2secret", "Authorization: Basic ***")]
+    [InlineData("{'Authorization': 'Basic hunter2secret'}", "{'Authorization': '***'}")]
+    public void An_authorization_value_is_redacted_down_to_its_scheme(string input, string expected)
+    {
+        // <U> stands for a JSON unicode-escaped quote (backslash, u0022).
+        const string unicodeQuote = "\\" + "u0022";
+        input = input.Replace("<U>", unicodeQuote, StringComparison.Ordinal);
+        expected = expected.Replace("<U>", unicodeQuote, StringComparison.Ordinal);
+        var redacted = SecretRedactor.Redact(input);
+        Assert.Equal(expected, redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));   // idempotent
+    }
+
+    [Fact]
+    public void A_logged_authorization_header_in_a_json_document_keeps_the_fields_after_it()
+    {
+        const string json = """{"log":"> Authorization: Basic hunter2secret","next":"kept"}""";
+
+        var redacted = SecretRedactor.RedactJson(json);
+
+        Assert.Equal("""{"log":"> Authorization: Basic ***","next":"kept"}""", redacted);
+        Assert.Equal(redacted, SecretRedactor.RedactJson(redacted));
+    }
+
+    [Fact]
+    public void A_json_key_beyond_the_bound_that_names_a_secret_is_masked()
+    {
+        var longSecretKey = new string('x', 140) + "_password";
+        var longPlainKey = new string('y', 140) + "_name";
+        var json = $"{{\"{longSecretKey}\":\"hunter2secret\",\"{longPlainKey}\":\"kept-value\"}}";
+
+        var redacted = SecretRedactor.Redact(json);
+
+        Assert.DoesNotContain("hunter2secret", redacted);
+        Assert.Contains($"\"{longSecretKey}\":\"***\"", redacted);
+        Assert.Contains("kept-value", redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
+    }
+
+    /// <summary>The Authorization rule stays linear on pathological input (the 1 s budget would withhold the text).</summary>
+    [Theory]
+    [InlineData("repeat")]
+    [InlineData("quote-spaces")]
+    [InlineData("newlines")]
+    [InlineData("backslashes")]
+    [InlineData("escaped-quotes")]
+    [InlineData("quote-word")]
+    [InlineData("quote-repeated-keys")]
+    [InlineData("escaped-keys")]
+    [InlineData("basic-words")]
+    [InlineData("deep-escapes")]
+    public void The_authorization_rule_has_no_catastrophic_backtracking(string shape)
+    {
+        var input = shape switch
+        {
+            "repeat" => string.Concat(Enumerable.Repeat("authorization: ", 20000)),
+            "quote-spaces" => string.Concat(Enumerable.Repeat("\"authorization" + new string(' ', 50), 5000)),
+            "newlines" => string.Concat(Enumerable.Repeat("authorization:" + new string('\n', 300), 1000)) + "***",
+            "backslashes" => "\"authorization: " + new string('\\', 300000),
+            "quote-word" => "\"" + new string('a', 1000000),
+            "quote-repeated-keys" => "\"" + string.Concat(Enumerable.Repeat("authorization_", 60000)),
+            "escaped-keys" => string.Concat(Enumerable.Repeat("\\\\\\\"authorization\\\\\\\": ", 20000)) + new string('\\', 100000),
+            "basic-words" => string.Concat(Enumerable.Repeat("Basic " + new string('a', 60) + " ", 5000)),
+            "deep-escapes" => "\\\"authorization: Basic " + string.Concat(Enumerable.Repeat("\\\\\\\"x", 100000)),
+            _ => string.Concat(Enumerable.Repeat("\\\"authorization: Basic \\x", 20000)),
+        };
+
+        var watch = Stopwatch.StartNew();
+        var redacted = SecretRedactor.Redact(input);
+        watch.Stop();
+
+        Assert.NotEqual("***", redacted);   // not withheld by a timeout
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"{shape}: {watch.ElapsedMilliseconds} ms");
+    }
+
+    [Fact]
+    public void An_authorization_header_in_json_keeps_the_document_valid()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            command = $"curl -H \"Authorization: Basic {Canary}\" https://r.example/",
+            next = "kept",
+        });
+
+        var redacted = SecretRedactor.RedactJson(json);
+
+        Assert.DoesNotContain(Canary, redacted);
+        using var document = System.Text.Json.JsonDocument.Parse(redacted);
+        Assert.Equal("kept", document.RootElement.GetProperty("next").GetString());
+        Assert.Equal(redacted, SecretRedactor.RedactJson(redacted));
+        // A raw pass over the escaped document (no decoding) keeps it valid as well.
+        using var raw = System.Text.Json.JsonDocument.Parse(SecretRedactor.Redact(json));
+        Assert.Equal("kept", raw.RootElement.GetProperty("next").GetString());
+    }
+
     [Fact]
     public void Multiline_material_is_redacted_on_every_line()
     {
@@ -134,6 +339,104 @@ public sealed class SecretRedactorTests
         // SQL pattern's gap and its mask-to-the-end branch.
         var input = "ALTER ROLE app PASSWORD " + string.Concat(Enumerable.Repeat("/* x */ -- y\n", 20_000))
                     + "'it''s " + Canary + string.Concat(Enumerable.Repeat("''", 20_000));
+
+        var watch = Stopwatch.StartNew();
+        var redacted = SecretRedactor.Redact(input);
+
+        Assert.DoesNotContain(Canary, redacted);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    /// <summary>INV-51: what the plain JSON rule left readable in free text — a non-string value, a key with '.' or ' ',
+    /// an escaped JSON object, a single-quoted key, an unclosed value, '=>' — loses its value; redacting twice changes
+    /// nothing.</summary>
+    [Theory]
+    [InlineData("{\"password\": 82741936}", "82741936")]
+    [InlineData("{\"api_key\": [\"canary-value-r124\", \"b\"]}", Canary)]
+    [InlineData("{\"secret\": {\"user\": \"a\", \"value\": \"canary-value-r124\"}}", Canary)]
+    [InlineData("{\"db.password\": \"canary-value-r124\"}", Canary)]
+    [InlineData("{\"admin password\": \"canary-value-r124\"}", Canary)]
+    [InlineData("{\\\"password\\\": \\\"canary-value-r124\\\", \\\"user\\\": \\\"app\\\"}", Canary)]
+    [InlineData("{'password': 'canary-value-r124', 'user': 'app'}", Canary)]
+    [InlineData("{\"token\": \"canary-value-r124", Canary)]
+    [InlineData("$config = ['db_password' => 'canary-value-r124'];", Canary)]
+    [InlineData("{\"token\": true, \"password\": null, \"pwd\": canary-value-r124}", Canary)]
+    [InlineData("\"password\": \"canary-value-r124\\", Canary)]
+    [InlineData("\"password\": \"canary-value-r124\\\nnext line", Canary)]
+    [InlineData("'private_key': 'MIIEvQIBcanary-value-r124\\", Canary)]
+    [InlineData("\"password\": \\x41canary-value-r124", Canary)]
+    [InlineData("\"api_key\"=abc\"canary-value-r124\"", Canary)]
+    public void A_secret_named_key_in_free_text_loses_its_value_in_every_quoting(string text, string secret)
+    {
+        var redacted = SecretRedactor.Redact(text);
+
+        Assert.DoesNotContain(secret, redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
+    }
+
+    /// <summary>A numeric count under a key with a count suffix stays readable; any other token key is masked, whatever
+    /// its value.</summary>
+    [Theory]
+    [InlineData("{\"input_tokens\": 1234}", "1234", true)]
+    [InlineData("{\"output_tokens\": 99, \"total_tokens\": 1333}", "1333", true)]
+    [InlineData("{\"token_count\": 56}", "56", true)]
+    [InlineData("{\"token\": 82741936}", "82741936", false)]
+    [InlineData("{\"access_token\": 82741936}", "82741936", false)]
+    [InlineData("{\"api_token\": 82741936}", "82741936", false)]
+    [InlineData("{\"tokens\": 82741936}", "82741936", false)]
+    [InlineData("{\"input_tokens\": abc82741936}", "abc82741936", false)]
+    public void A_token_count_stays_readable_and_a_token_does_not(string text, string value, bool readable)
+    {
+        var redacted = SecretRedactor.Redact(text);
+
+        Assert.Equal(readable, redacted.Contains(value, StringComparison.Ordinal));
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
+    }
+
+    [Fact]
+    public void A_bare_value_with_a_quote_inside_is_masked_to_the_next_space()
+    {
+        var redacted = SecretRedactor.Redact("\"api_key\"=abc\"def\" next=1");
+
+        Assert.DoesNotContain("def", redacted);
+        Assert.DoesNotContain("abc", redacted);
+        Assert.EndsWith(" next=1", redacted);
+    }
+
+    [Fact]
+    public void A_redacted_json_document_stays_json_and_keeps_its_other_fields()
+    {
+        var redacted = SecretRedactor.RedactJson("{\"password\": 82741936, \"tokens\": [\"x1\", \"x2\"], \"user\": \"app\", \"port\": 5432}");
+
+        using var doc = System.Text.Json.JsonDocument.Parse(redacted);
+        Assert.Equal("***", doc.RootElement.GetProperty("password").GetString());
+        Assert.Equal("***", doc.RootElement.GetProperty("tokens").GetString());
+        Assert.Equal("app", doc.RootElement.GetProperty("user").GetString());
+        Assert.Equal(5432, doc.RootElement.GetProperty("port").GetInt32());
+    }
+
+    /// <summary>INV-51: <c>private_key</c> and <c>credentials</c> name secrets like <c>password</c> does.</summary>
+    [Theory]
+    [InlineData("PRIVATE_KEY=canary-value-r124")]
+    [InlineData("private-key: canary-value-r124")]
+    [InlineData("privatekey=canary-value-r124")]
+    [InlineData("credentials=canary-value-r124")]
+    [InlineData("AWS credential: canary-value-r124")]
+    [InlineData("{\"private_key\": \"canary-value-r124\"}")]
+    [InlineData("{\"credentials\": \"canary-value-r124\"}")]
+    public void Private_keys_and_credentials_are_secret_names(string text) =>
+        Assert.DoesNotContain(Canary, SecretRedactor.Redact(text));
+
+    [Fact]
+    public void The_quoted_key_rule_ends_in_bounded_time_on_hostile_input()
+    {
+        // Long runs of key characters between quotes, escaped quotes and an unclosed value: the worst cases for the key
+        // look-ahead, the escape levels and the mask-to-the-end branch.
+        var input = string.Concat(Enumerable.Repeat("'" + new string('a', 120) + " password", 2_000))
+                    + string.Concat(Enumerable.Repeat("\\\\\\\"token\\\\\\\": [", 5_000))
+                    + string.Concat(Enumerable.Repeat("'token': 'a\\\\\\", 10_000))
+                    + string.Concat(Enumerable.Repeat("\"pwd\": x\"\\", 10_000))
+                    + "\"password\": \"" + Canary + string.Concat(Enumerable.Repeat("\\x", 50_000));
 
         var watch = Stopwatch.StartNew();
         var redacted = SecretRedactor.Redact(input);

@@ -112,7 +112,7 @@ public class UiMutationRunnerTests
     private static readonly string[] ControlPlane =
     [
         "certificate.issue_mtls", "certificate.renew_mtls", "mtls.client_migrate", "mtls.client_renew",
-        "mtls.shared_client_retire", "selfbackup.restore",
+        "mtls.shared_client_retire", "selfbackup.restore", "server.hostkey_replace",
     ];
 
     public static IEnumerable<object[]> CapabilitiesAndRoles() =>

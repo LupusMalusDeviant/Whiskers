@@ -19,9 +19,12 @@ public interface IApprovalPersistence
     /// for a human decision (approved, rejected) — when it expired before <paramref name="at"/> (INV-32).
     /// <paramref name="stillDecidable"/> is asked for a human decision once the row is held (after any lock wait) and
     /// before the change is committed; <c>false</c> commits nothing — so a decision whose write waited past the
-    /// expiry never becomes durable, not even for a moment.</summary>
+    /// expiry never becomes durable, not even for a moment.
+    /// <paramref name="decidedVia"/> (contract 0019, D6) records where a human decided it (<c>page</c>, <c>dialog</c>,
+    /// <c>chat</c>); <c>null</c> for the system.</summary>
     Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by, DateTime? grantExpiresAt,
-        bool selfApproved = false, Func<bool>? stillDecidable = null, CancellationToken ct = default);
+        bool selfApproved = false, Func<bool>? stillDecidable = null, CancellationToken ct = default,
+        string? decidedVia = null);
 
     /// <summary>Uses the approval once. <c>false</c> unless it is approved, unused and its grant has not lapsed at
     /// <paramref name="now"/>. <paramref name="stillUsable"/> is asked once the row is held (after any lock wait) and
@@ -55,7 +58,7 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
 
     public async Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
         DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? decidedVia = null)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -76,7 +79,8 @@ public sealed class DbApprovalPersistence : IApprovalPersistence
                     .SetProperty(a => a.ResolvedAt, at)
                     .SetProperty(a => a.ResolvedBy, by)
                     .SetProperty(a => a.GrantExpiresAt, grantExpiresAt)
-                    .SetProperty(a => a.SelfApproved, selfApproved), ct);
+                    .SetProperty(a => a.SelfApproved, selfApproved)
+                    .SetProperty(a => a.DecidedVia, decidedVia), ct);
             return updated == 1 && (!decision || stillDecidable is null || stillDecidable());
         }, () => db.Approvals.AsNoTracking().AnyAsync(a => a.Id == approvalId && a.Status == target
             && a.ResolvedAt == at && a.ResolvedBy == by, ct), ct);
@@ -165,7 +169,7 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
 
     public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
         DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? decidedVia = null)
     {
         lock (_lock)
         {
@@ -179,6 +183,7 @@ public sealed class InMemoryApprovalPersistence : IApprovalPersistence
             row.ResolvedBy = by;
             row.GrantExpiresAt = grantExpiresAt;
             row.SelfApproved = selfApproved;
+            row.DecidedVia = decidedVia;
             return Task.FromResult(true);
         }
     }
@@ -257,6 +262,7 @@ internal static class ApprovalRecords
         Interactive = a.Interactive,
         RequesterIds = JoinRequesters(a.Requesters),
         SelfApproved = a.SelfApproved,
+        DecidedVia = a.DecidedVia,
         Status = a.Status.ToString(),
         CreatedAt = a.CreatedAt,
         ExpiresAt = a.ExpiresAt,
@@ -291,6 +297,7 @@ internal static class ApprovalRecords
         Interactive = e.Interactive,
         Requesters = SplitRequesters(e.RequesterIds),
         SelfApproved = e.SelfApproved,
+        DecidedVia = e.DecidedVia,
         // An unreadable status is never a usable one.
         Status = Enum.TryParse<ApprovalStatus>(e.Status, out var status) ? status : ApprovalStatus.Cancelled,
         CreatedAt = DateTime.SpecifyKind(e.CreatedAt, DateTimeKind.Utc),

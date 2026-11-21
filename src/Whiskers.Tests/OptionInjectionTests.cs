@@ -53,9 +53,9 @@ public class OptionInjectionTests
     [Theory]
     [InlineData("example.com")]
     [InlineData("web-01.internal.example.com")]
-    [InlineData("badwolf")]
+    [InlineData("host-a")]
     [InlineData("10.0.0.1")]
-    [InlineData("100.89.113.6")]
+    [InlineData("100.64.0.6")]
     [InlineData("fd00::1")]
     [InlineData("2001:db8::42")]
     public void A_host_name_or_ip_is_accepted(string host) => Assert.True(CommandOperands.IsSafeHost(host));

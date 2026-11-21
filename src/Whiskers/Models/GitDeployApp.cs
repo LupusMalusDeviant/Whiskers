@@ -30,6 +30,10 @@ public class GitDeployApp
     /// edit in between bumps it and the deployment is refused instead of running with other inputs.</summary>
     public int Revision { get; set; }
 
+    /// <summary>Contract 0020 (D6): set by a handover or a hold — the app's webhook-fired deployments are refused until an
+    /// Admin resumes it (<c>gitdeploy.save</c>, the owner kept). Null otherwise; absent in older files.</summary>
+    public string? HeldReason { get; set; }
+
     /// <summary>An independent copy: the service never hands out the instance it stores.</summary>
     public GitDeployApp Clone() => (GitDeployApp)MemberwiseClone();
 }

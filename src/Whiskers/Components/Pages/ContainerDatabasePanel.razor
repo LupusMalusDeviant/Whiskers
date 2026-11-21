@@ -207,7 +207,7 @@ else
         <MudStack Row="true" Spacing="2">
             <MudButton Variant="Variant.Filled" Color="@(State.QbAction is "DELETE" or "UPDATE" ? Color.Error : Color.Primary)"
                        StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ExecuteBuilderQuery"
-                       Disabled="@(string.IsNullOrEmpty(State.QbTable) || State.DbExecuting || ((State.QbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(State.QbWhere)))">
+                       Disabled="@(_role < CapabilityCatalog.RoleOf("db.query") || string.IsNullOrEmpty(State.QbTable) || State.DbExecuting || ((State.QbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(State.QbWhere)))">
                 @if (State.DbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
                 @L["ContainerDetail_Db_Execute"]
             </MudButton>
@@ -234,13 +234,13 @@ else
             <MudStack Row="true" Spacing="2" Class="mb-3">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
-                           Disabled="@(State.DbMigrating || _role < AppRole.Admin)">
+                           Disabled="@(State.DbMigrating || _role < CapabilityCatalog.RoleOf("container.exec"))">
                     @if (State.DbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
                     @L["ContainerDetail_Db_RunMigration"]
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
-                           Disabled="@(State.DbMigrating || _role < AppRole.Admin)">Rollback</MudButton>
+                           Disabled="@(State.DbMigrating || _role < CapabilityCatalog.RoleOf("container.exec"))">Rollback</MudButton>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.List" OnClick="CheckMigrationStatus">Status</MudButton>
             </MudStack>
@@ -254,7 +254,7 @@ else
                 @if (State.MigrationFileName != null)
                 {
                     <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
-                               OnClick="ExecuteMigrationFile" Disabled="@(State.DbMigrating || _role < AppRole.Admin)"
+                               OnClick="ExecuteMigrationFile" Disabled="@(State.DbMigrating || _role < CapabilityCatalog.RoleOf("db.query"))"
                                StartIcon="@Icons.Material.Filled.PlayArrow">@L["ContainerDetail_Db_ExecuteFile"]</MudButton>
                 }
             </MudStack>
@@ -355,17 +355,17 @@ else
                 </MudText>
                 <MudSpacer />
                 <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
-                           StartIcon="@Icons.Material.Filled.Visibility"
+                           StartIcon="@Icons.Material.Filled.Visibility" Disabled="@(_role < CapabilityCatalog.RoleOf("db.query"))"
                            OnClick="@(() => QuickQuery($"SELECT * FROM {State.DbSelectedTable} LIMIT 50"))">
                     @L["ContainerDetail_Db_Preview50"]
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Tag"
+                           StartIcon="@Icons.Material.Filled.Tag" Disabled="@(_role < CapabilityCatalog.RoleOf("db.query"))"
                            OnClick="@(() => QuickQuery($"SELECT COUNT(*) AS total FROM {State.DbSelectedTable}"))">
                     COUNT
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Download"
+                           StartIcon="@Icons.Material.Filled.Download" Disabled="@(_role < CapabilityCatalog.RoleOf("db.query"))"
                            OnClick="@(() => QuickQuery($"SELECT * FROM {State.DbSelectedTable}"))">
                     @L["ContainerDetail_Db_AllCsv"]
                 </MudButton>
@@ -424,7 +424,7 @@ else
             <MudStack Row="true" Spacing="2">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
                            StartIcon="@Icons.Material.Filled.PlayArrow"
-                           Disabled="@(string.IsNullOrWhiteSpace(State.DbQuery) || State.DbExecuting || _role < AppRole.Admin)">
+                           Disabled="@(string.IsNullOrWhiteSpace(State.DbQuery) || State.DbExecuting || _role < CapabilityCatalog.RoleOf("db.query"))">
                     @if (State.DbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                     @L["ContainerDetail_Db_Execute"]
                 </MudButton>
@@ -888,6 +888,15 @@ else
         if (!await RequireAsync("db.query",
                 new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database })) return;
         if (State.MigrationFileData == null || _container == null || State.DbCreds == null) return;
+        // Review 1.0.0 (T3): only PostgreSQL and MySQL take SQL files here. Any other type is said so before anything
+        // runs — an "echo 'Not supported'" with exit code 0 was shown as a successful run.
+        if (_container.DatabaseType is not (DatabaseType.PostgreSQL or DatabaseType.MySQL))
+        {
+            State.MigrationOutput = L["ContainerDetail_Db_SqlFileUnsupported", _container.DatabaseType].Value;
+            State.MigrationSuccess = false;
+            State.NotifyChanged();
+            return;
+        }
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ExecuteSqlFileTitle"].Value,
             L["ContainerDetail_Dialog_ExecuteSqlFileMessage", State.MigrationFileName ?? ""].Value,
@@ -903,13 +912,10 @@ else
             var cmd = _container.DatabaseType switch
             {
                 DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
-                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
-                _ => "echo 'Not supported'"
+                _ => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
             };
-            var supported = _container.DatabaseType is DatabaseType.PostgreSQL or DatabaseType.MySQL;
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
                 query: System.Text.Encoding.UTF8.GetString(State.MigrationFileData), database: db,
-                failedWhen: _ => supported ? null : "This database type does not take SQL files here.",
                 secrets: DbPasswordSecret());
             State.MigrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             State.MigrationSuccess = result.ExitCode == 0;
@@ -932,6 +938,17 @@ else
         if (!await RequireAsync("db.query",
                 new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database })) return;
         if (State.SeedFileData == null || _container == null || State.DbCreds == null) return;
+        // Review 1.0.0 (T3): only these combinations import. Any other file is refused before anything runs — the hint
+        // it used to echo ended with exit code 0 and was shown as a successful import.
+        var ext = System.IO.Path.GetExtension(State.SeedFileName)?.ToLowerInvariant();
+        if ((_container.DatabaseType, ext) is not ((DatabaseType.PostgreSQL, ".sql") or (DatabaseType.MySQL, ".sql")
+            or (DatabaseType.MongoDB, ".json")))
+        {
+            State.SeedOutput = L["ContainerDetail_Db_ImportUnsupported", ext ?? "", _container.DatabaseType].Value;
+            State.SeedSuccess = false;
+            State.NotifyChanged();
+            return;
+        }
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ImportDataTitle"].Value,
             L["ContainerDetail_Dialog_ImportDataMessage", State.SeedFileName ?? ""].Value,
@@ -944,21 +961,15 @@ else
             var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
             // INV-19: the database is an operand of psql / mysql / mongoimport here too.
             if (!string.IsNullOrEmpty(db)) Whiskers.Services.Database.DatabaseService.CheckDatabaseName(db, _container.DatabaseType);
-            var ext = System.IO.Path.GetExtension(State.SeedFileName)?.ToLower();
-            var cmd = (_container.DatabaseType, ext) switch
+            // Only the three combinations checked above reach this point.
+            var cmd = _container.DatabaseType switch
             {
-                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
-                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
-                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
-                (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
-                _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
+                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
+                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
+                _ => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
             };
-            // Only these combinations import; the others (and a CSV without a table) answer with a hint and exit code 0.
-            var imports = (_container.DatabaseType, ext) is (DatabaseType.PostgreSQL, ".sql") or (DatabaseType.MySQL, ".sql")
-                or (DatabaseType.MongoDB, ".json");
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
                 query: System.Text.Encoding.UTF8.GetString(State.SeedFileData), database: db,
-                failedWhen: _ => imports ? null : $"Files of type {ext} are not imported for {_container.DatabaseType}.",
                 secrets: DbPasswordSecret());
             State.SeedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             State.SeedSuccess = result.ExitCode == 0;

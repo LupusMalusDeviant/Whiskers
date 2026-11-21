@@ -22,7 +22,7 @@ public class UpdateRiskReportRenderTests
         // THE trap this guards. An operator reading "Update risk: ..." with nothing listed would conclude
         // there is nothing to worry about, when in fact nothing was checked.
         var text = UpdateRiskTools.Render(new UpdateRiskReport(
-            "local", "authentik", "img:1", false, null, null, null, "host unreachable"));
+            "local", "idp", "img:1", false, null, null, null, "host unreachable"));
 
         Assert.Contains("ASSESSMENT FAILED", text);
         Assert.Contains("This is not a verdict", text);

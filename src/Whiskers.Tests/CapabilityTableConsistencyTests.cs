@@ -16,8 +16,9 @@ public class CapabilityTableConsistencyTests
     public void Every_mutating_capability_has_one_level_on_every_surface(string id)
     {
         var capability = Catalog.Find(id)!;
-        // R1-49: the own password change is the one read-level capability (own account only, UI only).
-        if (id == "account.password_change")
+        // R1-49: the own password change is a read-level capability (own account only, UI only); contract 0020: so is
+        // acknowledging one's own handover notice (own notices only, UI only).
+        if (id is "account.password_change" or "automation.handover_acknowledge")
         {
             Assert.Equal(McpPermissionLevels.Read, capability.RequiredLevel);
             Assert.Null(capability.McpTool);
@@ -71,8 +72,40 @@ public class CapabilityTableConsistencyTests
     /// and only the rest to <c>DirectMcpCallGuard</c>, so a non-read tool without a capability would skip the table.</summary>
     [Fact]
     public void Every_non_read_mcp_tool_has_a_capability() =>
-        Assert.All(McpPermissionLevels.DefaultToolLevels.Where(kv => kv.Value != McpPermissionLevels.Read),
+        Assert.All(McpPermissionLevels.DefaultToolLevels.Where(kv => kv.Value != McpPermissionLevels.Read
+                                                                     && !AdminLevelReads.Contains(kv.Key)),
             kv => Assert.NotNull(Catalog.FindByMcpTool(kv.Key)));
+
+    /// <summary>Contract 0018 part E (D5): the one named exception to the rule above — reads that need an Admin key
+    /// because what they show is sensitive (the onboarding status carries the Tailscale login link and host details).
+    /// They change nothing, so they have no capability; <c>DirectMcpCallGuard</c> judges them at the admin level (fail
+    /// closed, the contract's open point). Adding a name here is a reviewed change of this test.</summary>
+    internal static readonly IReadOnlySet<string> AdminLevelReads = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "get_onboarding_status",
+    };
+
+    [Fact]
+    public void Admin_level_reads_have_no_capability_and_declare_admin()
+    {
+        var methods = typeof(Whiskers.Mcp.McpToolLevelCatalog).Assembly.GetTypes()
+            .Where(t => t.GetCustomAttributes(typeof(ModelContextProtocol.Server.McpServerToolTypeAttribute), false).Length > 0)
+            .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static
+                                          | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly))
+            .Where(m => m.GetCustomAttributes(typeof(ModelContextProtocol.Server.McpServerToolAttribute), false).Length > 0)
+            .ToDictionary(Whiskers.Mcp.McpToolLevelCatalog.ResolveToolName, StringComparer.Ordinal);
+        Assert.NotEmpty(AdminLevelReads);
+        Assert.All(AdminLevelReads, tool =>
+        {
+            Assert.Null(Catalog.FindByMcpTool(tool));
+            Assert.False(CapabilityCatalog.McpToolLevels.ContainsKey(tool), tool);
+            Assert.Equal(McpPermissionLevels.Admin, McpPermissionLevels.DefaultToolLevels[tool]);
+            Assert.True(methods.TryGetValue(tool, out var method), tool);
+            var level = (Whiskers.Mcp.McpToolLevelAttribute?)Attribute.GetCustomAttribute(method!, typeof(Whiskers.Mcp.McpToolLevelAttribute));
+            Assert.NotNull(level);
+            Assert.Equal(McpPermissionLevels.Admin, level.Level);
+        });
+    }
 
     /// <summary>A UI role holds exactly the catalog level it maps to, so pages that ask the catalog agree with MCP.</summary>
     [Theory]

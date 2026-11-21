@@ -134,7 +134,7 @@ else
         // Auth bypass / already-configured: the wizard has no purpose — go to the app.
         if (Config.GetValue<bool>("Auth:Disabled") || SetupState.IsSetupComplete)
         {
-            Nav.NavigateTo("/", forceLoad: false);
+            Nav.NavigateTo("", forceLoad: false);
             return;
         }
 

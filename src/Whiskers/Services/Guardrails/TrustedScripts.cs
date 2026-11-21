@@ -6,7 +6,7 @@ using Whiskers.Services.Server;
 namespace Whiskers.Services.Guardrails;
 
 /// <summary>
-/// Contract 0017: scripts an Admin vouched for, per server, pinned to their content's SHA-256. A <em>trusted call</em>
+/// Contract 0022: scripts an Admin vouched for, per server, pinned to their content's SHA-256. A <em>trusted call</em>
 /// is a command that is exactly a listed path followed by literal arguments; only its command word is spared the
 /// "runs code this text does not show" verdict of INV-24 — every other check of the command stays. The gateway's
 /// resolver reads the script's hash on the server before the decision and again right before the run.
@@ -17,7 +17,7 @@ public static class TrustedScripts
     public const string ResolvedKey = "__resolvedTrustedScript";
 
     /// <summary>The longest <see cref="AdditionsArgument"/> one save may carry, so that the approval card (capped at
-    /// 4000 characters for all arguments) shows every line (contract 0017, fifth review).</summary>
+    /// 4000 characters for all arguments) shows every line (contract 0022, fifth review).</summary>
     public const int MaxAdditionsChars = 3000;
 
     /// <summary>The length of <paramref name="additions"/> as the approval card stores it: JSON-escaped (sixth review).

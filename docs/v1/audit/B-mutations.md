@@ -1,3 +1,5 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # B — Mutation-Surface Inventory (Whiskers, read-only audit)
 
 Scope: every code path that can change infrastructure (containers, K8s workloads, hosts, firewall, nginx, systemd, certs, cloud, DNS, DBs, volumes, networks, backups, deploys, scheduled/automatic actions, AI agent, terminals).

@@ -1,5 +1,4 @@
 @implements IAsyncDisposable
-@using Markdig
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.Extensions.Options
@@ -45,7 +44,7 @@
                        Variant="Variant.Text" OnClick="ClearChat">@L["AgentView_Button_ClearChat"]</MudButton>
         }
     </div>
-    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
         @L["AgentView_Header_Subtitle"]
     </MudText>
 
@@ -62,7 +61,7 @@
                 <div @ref="_chatScroll" style="flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
                     @if (_lines.Count == 0)
                     {
-                        <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: rgba(255,255,255,0.3);">
+                        <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-8" Style="color: var(--sw-text-muted);">
                             @L["AgentView_Chat_EmptyState"]
                         </MudText>
                     }
@@ -115,7 +114,7 @@
                     }
                     @if (_running && _pendingConfirm is null)
                     {
-                        <div style="display:flex; align-items:center; gap:8px; color: rgba(255,255,255,0.4);">
+                        <div style="display:flex; align-items:center; gap:8px; color: var(--sw-text-muted);">
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" />
                             <span>@L["AgentView_Chat_Working"]</span>
                         </div>
@@ -182,7 +181,7 @@
                         @if (_modelTesting)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">@L["AgentView_Provider_Testing"]</MudText>
+                            <MudText Typo="Typo.caption" Style="color: var(--sw-text-secondary);">@L["AgentView_Provider_Testing"]</MudText>
                         }
                         else if (_modelStatus == "ok")
                         {
@@ -217,7 +216,7 @@
                                 </div>
                             </TitleContent>
                             <ChildContent>
-                                <MudText Typo="Typo.caption" Class="mb-2" Style="color: rgba(255,255,255,0.5);">
+                                <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--sw-text-secondary);">
                                     @L["AgentView_SystemPrompt_Hint"]
                                 </MudText>
                                 <MudTextField @bind-Value="_systemPrompt" Lines="12" Variant="Variant.Outlined"
@@ -231,7 +230,7 @@
                     <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveLlm" Class="mt-3" FullWidth="true">
                         @L["AgentView_Provider_SaveButton"]
                     </MudButton>
-                    <MudText Typo="Typo.caption" Class="mt-1" Style="color: rgba(255,255,255,0.4);">
+                    <MudText Typo="Typo.caption" Class="mt-1" Style="color: var(--sw-text-muted);">
                         @L["AgentView_Provider_ReloadHint"]
                     </MudText>
 
@@ -266,10 +265,8 @@
         if (_fileUpload is not null) await _fileUpload.OpenFilePickerAsync();
     }
 
-    private static readonly MarkdownPipeline MdPipeline =
-        new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
-    private static string RenderMarkdown(string? text)
-        => Whiskers.Utils.MarkdownSanitizer.NeutralizeUnsafeHrefs(Markdown.ToHtml(text ?? "", MdPipeline));
+    // Contract 0017 F1: model output goes through the pipeline without generic attributes and the full sanitizer.
+    private static string RenderMarkdown(string? text) => Whiskers.Utils.MarkdownSanitizer.RenderModelOutput(text);
     private static string FormatSize(int chars) => chars < 1024 ? $"{chars} B" : $"{chars / 1024} KB";
 
     private IAgentSession? _session;
@@ -508,7 +505,7 @@
         var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
         var result = resolver is null
             ? ApprovalDecisionResult.InsufficientLevel
-            : await ApprovalStore.DecideAsync(approvalId, approved, resolver);
+            : await ApprovalStore.DecideAsync(approvalId, approved, resolver, ApprovalChannel.Chat);
         // Only this decision's own card ends: while it was being recorded the chat may have moved on to a newer one.
         if (ApprovalDecisionMessages.EndsTheCard(result) && _pendingApprovalId == approvalId)
         {
@@ -726,7 +723,7 @@
     private static string LineStyle(string kind) => kind switch
     {
         "user" => "align-self:flex-end; max-width:85%; padding:8px 12px; border-radius:12px 12px 4px 12px; background:rgba(96,165,250,0.15); font-size:0.85rem;" + Wrap,
-        "tool" => "align-self:flex-start; max-width:90%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.8rem; color:rgba(255,255,255,0.7);" + Wrap,
+        "tool" => "align-self:flex-start; max-width:90%; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.03); font-size:0.8rem; color:var(--sw-text-secondary);" + Wrap,
         "error" => "align-self:flex-start; max-width:90%; padding:8px 12px; border-radius:8px; background:rgba(239,68,68,0.12); font-size:0.82rem; color:#fca5a5;" + Wrap,
         _ => "align-self:flex-start; max-width:90%; padding:10px 14px; border-radius:12px 12px 12px 4px; background:rgba(255,255,255,0.05); font-size:0.85rem; line-height:1.5;" + Wrap,
     };

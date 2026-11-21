@@ -7,7 +7,7 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
 
 ## Before you start
 
-- **Test first.** Rotate a test instance before production. Do not start with Badwolf.
+- **Test first.** Rotate a test instance before production. Do not start with the production instance.
 - **Keep the old key.** Store it in the password manager. Keep it there until a self-backup taken **after** the
   rotation has been restored once. Older self-backups stay sealed with the old key (see below).
 - **One process.** Run one Whiskers process on the data directory, as always (INV-45). The rotation runs at start,
@@ -20,8 +20,15 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
 
 1. Write the new key to a new secret file, for example `/opt/whiskers/secrets/vault_key_new` (mode 0600, owned by
    the user that runs Whiskers). Use a long random value, e.g. `openssl rand -base64 48`.
-2. Leave `VAULT_KEY_FILE` as it is (the current key) and set `VAULT_KEY_NEW_FILE` to the new file, e.g. in the compose
-   file or `.env`: `VAULT_KEY_NEW_FILE=/run/secrets/vault_key_new` (and mount the secret).
+2. Leave `VAULT_KEY_FILE` as it is (the current key) and set `VAULT_KEY_NEW_FILE` to the new file's path **inside the
+   container**, e.g. `VAULT_KEY_NEW_FILE=/run/secrets/vault_key_new`, and mount the file there:
+   - with `docker-compose.yml` / `docker-compose.hardened.yml`: set it in `.env` (both files pass it on);
+   - with the installer's compose file: add `- VAULT_KEY_NEW_FILE=/run/secrets/whiskers_vault_key_new` under
+     `environment:`, and the secret beside `whiskers_vault_key` (`secrets:` of the service and the top-level
+     `secrets:` entry with `file: ./secrets/vault_key_new`);
+   - with the Helm chart: put the new key into a Secret with key `vaultKey` and set `vault.newKeySecret` to its name
+     (the chart hands it over as `VAULT_KEY_NEW`). In step 5 put the new key into the current key's Secret and clear
+     `vault.newKeySecret`.
 3. Restart Whiskers. The start log shows `[vault-rotation]` lines:
    - a `pre-rotation` self-backup sealed with the **current** key,
    - the files re-sealed beside their originals (`*.rotating`) and read back,
@@ -32,7 +39,7 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
    - the Audit page verifies the trail (it is re-signed under the new key) and shows one `vault.key_rotated` row
      (`system:vault-rotation`, counts only);
    - the servers answer (mTLS hosts are green, an SSH host's terminal opens);
-   - the readiness check shows **"VAULT_KEY-Rotation abschließen"**: the next step is still open.
+   - the readiness check shows **"Finish the VAULT_KEY rotation"**: the next step is still open.
 5. Replace the content of the `VAULT_KEY_FILE` file with the new key (or point `VAULT_KEY_FILE` at the new file).
    Then remove `VAULT_KEY_NEW_FILE` and restart once more. The readiness line goes away.
 6. Restore the `post-rotation` self-backup once on a test instance. After that the old key may leave the password

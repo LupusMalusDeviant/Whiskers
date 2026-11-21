@@ -376,7 +376,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                         // the case where the load is not on this host at all but on the link to it.
                         if (_selfMetrics.ApiLatencies().TryGetValue(serverId, out var latencies))
                         {
-                            var slow = _apiLatency.Evaluate(now, serverId, info.ServerName, latencies);
+                            var slow = _apiLatency.Evaluate(now, serverId, info.ServerName, latencies.Samples);
                             if (slow is not null) findings.Add(slow);
                         }
 
@@ -864,6 +864,17 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger?.LogError(ex, "AUDIT RETENTION FAILED — nothing removed; the next run is in a day");
+        }
+        // Contract 0020 (D14): handover ledger entries that were not resumed age out after 30 days (the handover stays in
+        // the audit trail). Context only: a failure is logged and waits for the next day.
+        try
+        {
+            services.GetService<Whiskers.Services.Mutations.IHandoverLedger>()
+                ?.Prune(Whiskers.Services.Mutations.HandoverNotes.MaxAge, now);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogError(ex, "Handover ledger pruning failed; the next run is in a day");
         }
         return now;
     }

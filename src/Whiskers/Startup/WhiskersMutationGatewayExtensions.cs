@@ -96,6 +96,8 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();
+        // Contract 0019: the in-dialog approval prompt is a UI service (it needs MudBlazor's dialog service) and is
+        // registered with the UI (AddInlineApprovalPrompt in AddWhiskersUi). Without it the runner refuses as before.
         // Unattended runs on their owner's authority (PC-D6).
         services.AddOptions<AutomationOptions>().BindConfiguration(AutomationOptions.Section);
         services.AddSingleton<IOwnerAccounts, OwnerAccounts>();
@@ -113,6 +115,19 @@ public static class WhiskersMutationGatewayExtensions
     /// the same lifetime, so the container still disposes what it created. A concrete type that is also registered
     /// on its own (<c>AddSingletonWithInterface</c>) is resolved through that registration — no second singleton.
     /// </summary>
+    /// <summary>Contract 0019 (INV-65): the in-dialog approval prompt, scoped per Blazor circuit, with its circuit marker.
+    /// It shows nothing outside a live circuit; no singleton, hosted service, MCP handler or automation takes it. Needs
+    /// MudBlazor's <c>IDialogService</c> (<c>AddMudServices</c>).</summary>
+    public static IServiceCollection AddInlineApprovalPrompt(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddScoped<Whiskers.Components.Shared.InlineApprovalCircuit>();
+        services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler>(sp =>
+            sp.GetRequiredService<Whiskers.Components.Shared.InlineApprovalCircuit>());
+        services.AddScoped<IInlineApprovalPrompt, Whiskers.Components.Shared.MudInlineApprovalPrompt>();
+        return services;
+    }
+
     public static IServiceCollection AddMutationScopeGuard(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);

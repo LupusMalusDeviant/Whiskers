@@ -117,10 +117,23 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// never used on another after the record was edited. Null for every other capability.</summary>
     public string? Connection { get; init; }
 
-    /// <summary>Contract 0017: for <c>host.exec</c>, the trusted script the command calls, as the resolver verified it on
+    /// <summary>Contract 0022: for <c>host.exec</c>, the trusted script the command calls, as the resolver verified it on
     /// the resolved server (its hash read there equals the approved one). The policy adapter hands it to the rules
     /// (<see cref="Whiskers.Services.Guardrails.TrustedScripts.ResolvedKey"/>). Null for every other call.</summary>
     public Whiskers.Configuration.TrustedScript? TrustedScript { get; init; }
+
+    /// <summary>Contract 0018 (INV-30, INV-64): for <c>server.onboard</c> with a bootstrap, the bound cloud VM as the
+    /// resolver read it from the provider — <c>"{CloudServerId}|{vmName}|{publicIp}"</c>. Set by the gateway, never by a
+    /// caller; part of the approval binding, so a VM renamed, re-addressed or replaced after an approval makes the grant
+    /// unusable. Null for every other call.</summary>
+    public string? CloudVm { get; init; }
+
+    /// <summary>Contract 0018: the bound VM's facts a person compares on the approval card (created, labels), next to
+    /// <see cref="CloudVm"/>. Shown, not bound.</summary>
+    public string? CloudVmCreated { get; init; }
+
+    /// <inheritdoc cref="CloudVmCreated"/>
+    public string? CloudVmLabels { get; init; }
 }
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>
@@ -262,10 +275,15 @@ public static class MutationReasonCodes
     /// <summary>The operation could not be registered before it ran: nothing ran.</summary>
     public const string OperationNotRegistered = "OperationNotRegistered";
 
+    /// <summary>Contract 0020 (D6): the automation was handed over or held and waits for an Admin to resume it; nothing
+    /// ran.</summary>
+    public const string AutomationHeld = "AutomationHeld";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved, TargetChanged,
             DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval,
-            OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered];
+            OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered,
+            AutomationHeld];
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

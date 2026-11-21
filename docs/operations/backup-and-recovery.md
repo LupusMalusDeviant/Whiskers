@@ -57,7 +57,11 @@ them elsewhere) fails instead of writing an archive without the database.
 
 - **Recovery point (RPO):** the newest archive you still have. With a daily *Self-backup* task you can lose up to a
   day of changes: metrics, audit events and settings. The restored database does not contain audit events written
-  after the archive was taken; the pre-restore safety backup still holds them.
+  after the archive was taken; the pre-restore safety backup still holds them. From the moment a restore is staged
+  until the restart, every change is refused (MCP calls, webhook deliveries with 503 and `Retry-After`, scheduled
+  tasks, UI actions, AutoUpdate and AutoPatch), and the restore waits up to 30 s for operations already running before
+  it takes the safety backup; if they do not finish, the restore is refused and nothing changes. So no audit event
+  falls between the safety backup and the swap.
 - **Recovery time (RTO):** start a Whiskers container, upload the archive and wait for one restart. On PostgreSQL,
   the database is restored during that restart, in one transaction, before Whiskers answers its health check. That
   takes about as long as the dry run did. On Kubernetes the Helm chart's startup probe allows five minutes
@@ -102,7 +106,10 @@ An encrypted archive is safe to keep on another machine, because it is useless w
    - On PostgreSQL, the `public` schema is dropped and recreated from the dump in **one transaction**. If any step
      fails, the whole transaction is rolled back and the start stops. The restore stays pending and runs again at
      the next start.
-   - Then the files are swapped.
+   - Then the files are swapped. On SQLite the archive's database replaces the file Whiskers opens: with
+     `WHISKERS_DB_CONNECTION` (or `Database:ConnectionString`) set, the file it names, otherwise `metrics.db` in the
+     data directory. The start refuses the restore before replacing anything when the archive's `app-settings.json`
+     names another database file; configure the database through the environment instead.
 5. To give up a pending restore, remove `/app/data/.restore-pending`. The pre-restore safety backup holds the state
    from before the restore. On PostgreSQL, if the start's log already says "The PostgreSQL database was restored from
    the archive", the database is the archive's while the files are not yet: after giving up, restore the pre-restore

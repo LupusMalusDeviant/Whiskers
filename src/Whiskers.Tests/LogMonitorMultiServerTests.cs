@@ -79,8 +79,8 @@ public sealed class LogMonitorMultiServerTests : IDisposable
             new NoOutcomes());
 
     private static FakeServerConfig TwoServers() => new(
-        new Whiskers.Models.ServerConfig { Id = "local", Name = "Badwolf (local)", ConnectionType = ConnectionType.Local, IsDefault = true },
-        new Whiskers.Models.ServerConfig { Id = "infomaniak", Name = "LupusMalus", ConnectionType = ConnectionType.TCP });
+        new Whiskers.Models.ServerConfig { Id = "local", Name = "Host-A (local)", ConnectionType = ConnectionType.Local, IsDefault = true },
+        new Whiskers.Models.ServerConfig { Id = "host-f", Name = "Host-F", ConnectionType = ConnectionType.TCP });
 
     // --- the fleet-wide scan ---------------------------------------------------------------------------
 
@@ -89,17 +89,17 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     {
         var rule = SeedRule();
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
-        docker.Logs["infomaniak/c-remote"] = "some noise\nFATAL: Kontrolltest\n";
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "web", "host-f", "Host-F"));
+        docker.Logs["host-f/c-remote"] = "some noise\nFATAL: Kontrolltest\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
         var evt = Assert.Single(notifications.Events);
-        Assert.Equal("burg-web", evt.ContainerName);
+        Assert.Equal("web", evt.ContainerName);
         Assert.Equal("log_alert:error", evt.EventType);
-        Assert.Contains("LupusMalus", evt.ImageInfo); // the host is named — container names repeat
+        Assert.Contains("Host-F", evt.ImageInfo); // the host is named — container names repeat
         Assert.Equal(1, ReloadRule(rule.RuleId).TriggerCount);
     }
 
@@ -107,8 +107,8 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     public async Task A_matched_line_is_redacted_before_it_is_cut_and_sent()
     {
         SeedRule();
-        var docker = new FakeDocker(Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
-        docker.Logs["infomaniak/c-remote"] =
+        var docker = new FakeDocker(Container("c-remote", "web", "host-f", "Host-F"));
+        docker.Logs["host-f/c-remote"] =
             $"FATAL: login failed password=canary-value-r125 {string.Join(" ", Enumerable.Repeat("noise", 60))}" + Environment.NewLine;
         var notifications = new FakeNotifications();
 
@@ -124,14 +124,14 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     {
         SeedRule();
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "web", "host-f", "Host-F"));
 
         await Monitor(docker, new FakeNotifications(), TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
         // Without the server id the call would land on the default host — the bug that hid five servers.
         Assert.Equal(
-            new[] { ("c-local", "local"), ("c-remote", "infomaniak") },
+            new[] { ("c-local", "local"), ("c-remote", "host-f") },
             docker.LogCalls.Select(c => (c.ContainerId, c.ServerId)).OrderBy(c => c.ContainerId).ToArray());
     }
 
@@ -139,13 +139,13 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     public async Task Keeps_the_local_behaviour_unchanged()
     {
         var rule = SeedRule();
-        var docker = new FakeDocker(Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"));
+        var docker = new FakeDocker(Container("c-local", "idp-worker-1", "local", "Host-A (local)"));
         docker.Logs["local/c-local"] = "FATAL: Kontrolltest\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
-        Assert.Equal("authentik-worker-1", Assert.Single(notifications.Events).ContainerName);
+        Assert.Equal("idp-worker-1", Assert.Single(notifications.Events).ContainerName);
         Assert.Equal(1, ReloadRule(rule.RuleId).TriggerCount);
     }
 
@@ -154,15 +154,15 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     {
         SeedRule();
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "web", "host-f", "Host-F"));
         docker.FailingServerIds.Add("local");
-        docker.Logs["infomaniak/c-remote"] = "FATAL: Kontrolltest\n";
+        docker.Logs["host-f/c-remote"] = "FATAL: Kontrolltest\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
-        Assert.Equal("burg-web", Assert.Single(notifications.Events).ContainerName);
+        Assert.Equal("web", Assert.Single(notifications.Events).ContainerName);
     }
 
     // --- per-server keys -------------------------------------------------------------------------------
@@ -173,24 +173,24 @@ public sealed class LogMonitorMultiServerTests : IDisposable
         // Container ids are unique per host only: a shared cooldown key would swallow the second host.
         SeedRule();
         var docker = new FakeDocker(
-            Container("deadbeef", "postgres", "local", "Badwolf (local)"),
-            Container("deadbeef", "postgres", "infomaniak", "LupusMalus"));
+            Container("deadbeef", "postgres", "local", "Host-A (local)"),
+            Container("deadbeef", "postgres", "host-f", "Host-F"));
         docker.Logs["local/deadbeef"] = "FATAL: boom\n";
-        docker.Logs["infomaniak/deadbeef"] = "FATAL: boom\n";
+        docker.Logs["host-f/deadbeef"] = "FATAL: boom\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
         Assert.Equal(
-            new[] { "Badwolf (local)", "LupusMalus" },
+            new[] { "Host-A (local)", "Host-F" },
             notifications.Events.Select(e => e.ServerName!).OrderBy(s => s).ToArray());
     }
 
     [Fact]
     public void Composite_key_separates_the_same_container_id_on_two_servers()
     {
-        var local = Container("deadbeef", "postgres", "local", "Badwolf (local)");
-        var remote = Container("deadbeef", "postgres", "infomaniak", "LupusMalus");
+        var local = Container("deadbeef", "postgres", "local", "Host-A (local)");
+        var remote = Container("deadbeef", "postgres", "host-f", "Host-F");
 
         // The watermark map (_lastLogCheck) is keyed by this: on container.Id alone the two hosts would
         // share one "last checked" timestamp and one of them would skip its window.
@@ -204,7 +204,7 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     public async Task Never_scans_our_own_container_on_the_local_host()
     {
         SeedRule();
-        var docker = new FakeDocker(Container("c-self", "serverwatch", "local", "Badwolf (local)"));
+        var docker = new FakeDocker(Container("c-self", "serverwatch", "local", "Host-A (local)"));
         docker.Logs["local/c-self"] = "FATAL: our own alert log line\n";
         var notifications = new FakeNotifications();
 
@@ -219,8 +219,8 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     {
         // The guard exists to break OUR OWN feedback loop; a remote namesake is a different process.
         SeedRule();
-        var docker = new FakeDocker(Container("c-remote", "serverwatch", "infomaniak", "LupusMalus"));
-        docker.Logs["infomaniak/c-remote"] = "FATAL: Kontrolltest\n";
+        var docker = new FakeDocker(Container("c-remote", "serverwatch", "host-f", "Host-F"));
+        docker.Logs["host-f/c-remote"] = "FATAL: Kontrolltest\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
@@ -241,10 +241,10 @@ public sealed class LogMonitorMultiServerTests : IDisposable
         // All-mTLS / Kubernetes fleets have no ConnectionType.Local entry — keep guarding the host the
         // single-server scan used to look at rather than guarding nothing.
         var servers = new FakeServerConfig(
-            new Whiskers.Models.ServerConfig { Id = "hetzner-apps", Name = "AppServer", ConnectionType = ConnectionType.TCP, IsDefault = true },
-            new Whiskers.Models.ServerConfig { Id = "rabenhof", Name = "Rabenhof", ConnectionType = ConnectionType.TCP });
+            new Whiskers.Models.ServerConfig { Id = "host-c", Name = "Host-C", ConnectionType = ConnectionType.TCP, IsDefault = true },
+            new Whiskers.Models.ServerConfig { Id = "host-d", Name = "Host-D", ConnectionType = ConnectionType.TCP });
 
-        Assert.Equal(new[] { "hetzner-apps" }, LogMonitorService.ResolveSelfServerIds(servers).ToArray());
+        Assert.Equal(new[] { "host-c" }, LogMonitorService.ResolveSelfServerIds(servers).ToArray());
     }
 
     [Fact]
@@ -254,8 +254,8 @@ public sealed class LogMonitorMultiServerTests : IDisposable
         // "now" on recovery — everything logged during the outage would never be looked at.
         SeedRule();
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "web", "host-f", "Host-F"));
         var notifications = new FakeNotifications();
         var monitor = Monitor(docker, notifications, TwoServers());
 
@@ -263,19 +263,19 @@ public sealed class LogMonitorMultiServerTests : IDisposable
         await Task.Delay(40);
 
         // The line is written while the host is silent, and only becomes readable once it is back.
-        docker.AddTimedLine("infomaniak", "c-remote", DateTime.UtcNow, "FATAL: happened during the outage");
-        docker.UnreachableServerIds.Add("infomaniak");
+        docker.AddTimedLine("host-f", "c-remote", DateTime.UtcNow, "FATAL: happened during the outage");
+        docker.UnreachableServerIds.Add("host-f");
         await Task.Delay(40);
 
         await monitor.RunScanCycleAsync(CancellationToken.None);   // outage cycle: no containers, no prune
         Assert.Empty(notifications.Events);
         await Task.Delay(40);
 
-        docker.UnreachableServerIds.Remove("infomaniak");
+        docker.UnreachableServerIds.Remove("host-f");
         await monitor.RunScanCycleAsync(CancellationToken.None);   // recovery: reads from the OLD watermark
 
         var evt = Assert.Single(notifications.Events);
-        Assert.Equal("burg-web", evt.ContainerName);
+        Assert.Equal("web", evt.ContainerName);
         Assert.Contains("happened during the outage", evt.ImageInfo);
     }
 
@@ -287,9 +287,9 @@ public sealed class LogMonitorMultiServerTests : IDisposable
         // The UI picker lists containers of all servers but stores only the name, and MCP-created rules
         // set the name alone — so a name rule means "this workload, wherever it runs".
         var rule = new LogAlertRuleEntity { ContainerName = "postgres" };
-        Assert.True(LogMonitorService.RuleApplies(rule, Container("a", "postgres", "local", "Badwolf")));
-        Assert.True(LogMonitorService.RuleApplies(rule, Container("b", "postgres", "rabenhof", "Rabenhof")));
-        Assert.False(LogMonitorService.RuleApplies(rule, Container("c", "redis", "rabenhof", "Rabenhof")));
+        Assert.True(LogMonitorService.RuleApplies(rule, Container("a", "postgres", "local", "Host-A")));
+        Assert.True(LogMonitorService.RuleApplies(rule, Container("b", "postgres", "host-d", "Host-D")));
+        Assert.False(LogMonitorService.RuleApplies(rule, Container("c", "redis", "host-d", "Host-D")));
     }
 
     [Fact]
@@ -297,17 +297,17 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     {
         // ContainerId stays null for UI- and MCP-created rules, so "no filter" must test BOTH fields —
         // otherwise a rule for one container fires on every container of every server.
-        SeedRule(name: "qr", pattern: "LUPUSLINK-NEU", containerName: "lupusmalus-web-app-1");
+        SeedRule(name: "qr", pattern: "MARKER-NEW", containerName: "site-web-app-1");
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "lupusmalus-web-app-1", "infomaniak", "LupusMalus"));
-        docker.Logs["local/c-local"] = "LUPUSLINK-NEU seen in the wrong container\n";
-        docker.Logs["infomaniak/c-remote"] = "LUPUSLINK-NEU\n";
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "site-web-app-1", "host-f", "Host-F"));
+        docker.Logs["local/c-local"] = "MARKER-NEW seen in the wrong container\n";
+        docker.Logs["host-f/c-remote"] = "MARKER-NEW\n";
         var notifications = new FakeNotifications();
 
         await Monitor(docker, notifications, TwoServers()).RunScanCycleAsync(CancellationToken.None);
 
-        Assert.Equal("lupusmalus-web-app-1", Assert.Single(notifications.Events).ContainerName);
+        Assert.Equal("site-web-app-1", Assert.Single(notifications.Events).ContainerName);
         Assert.DoesNotContain(docker.LogCalls, c => c.ContainerId == "c-local"); // not even fetched
     }
 
@@ -315,7 +315,7 @@ public sealed class LogMonitorMultiServerTests : IDisposable
     public void An_unfiltered_rule_matches_everything()
     {
         var rule = new LogAlertRuleEntity();
-        Assert.True(LogMonitorService.RuleApplies(rule, Container("a", "anything", "rabenhof", "Rabenhof")));
+        Assert.True(LogMonitorService.RuleApplies(rule, Container("a", "anything", "host-d", "Host-D")));
     }
 
 }

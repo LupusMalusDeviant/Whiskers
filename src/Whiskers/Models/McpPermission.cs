@@ -198,6 +198,14 @@ public static class McpPermissionLevels
         // Admin tools
         ["execute_command"] = Admin,
 
+        // Contract 0018 part E (D5): adding and onboarding a server are Admin (their level comes from the catalog,
+        // server.create / server.onboard). get_onboarding_status is the first Admin-level read without a capability: the
+        // status log carries the Tailscale login link and host details. It is judged by DirectMcpCallGuard at this level
+        // (fail closed, see the contract's open point); CapabilityTableConsistencyTests.AdminLevelReads names it.
+        ["add_server"] = Admin,
+        ["onboard_server"] = Admin,
+        ["get_onboarding_status"] = Admin,
+
         // Agent: an MCP caller (e.g. external Claude Code) instructs the in-process agent.
         // Read level, because the agent only inherits the caller's rights anyway. NOT agent-callable
         // (see AgentToolRegistry.NonAgentTools) — otherwise the agent would call itself recursively.
@@ -287,6 +295,9 @@ public static class McpPermissionLevels
         ["get_server_logs"] = "Monitoring",
         ["list_servers"] = "Server",
         ["get_server_info"] = "Server",
+        ["add_server"] = "Server",
+        ["onboard_server"] = "Server",
+        ["get_onboarding_status"] = "Server",
         ["list_firewall_rules"] = "Firewall",
         ["add_firewall_rule"] = "Firewall",
         ["remove_firewall_rule"] = "Firewall",

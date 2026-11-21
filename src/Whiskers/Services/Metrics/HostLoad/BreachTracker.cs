@@ -14,13 +14,18 @@ namespace Whiskers.Services.Metrics.HostLoad;
 /// resets the breach instead (a breach is never confirmed across readings that were not taken); null bridges any gap.</param>
 /// <param name="MinimumGap">The least time between the end of a reported breach and the raise of the next one of the same
 /// series. A breach that becomes reportable sooner is raised once that time has passed, if it is still open then.</param>
+/// <param name="UnbrokenConfirmation">Review 1.0.0: true (the threshold alerts) — a breach not yet raised must stay at
+/// or above the threshold; one reading below the clear bound ends its confirmation. False keeps the confirmation through
+/// readings below the clear bound until they lasted <see cref="ClearedFor"/> (the endpoint checks: one passing run between
+/// failing ones does not end a failure).</param>
 public sealed record BreachRules(
     TimeSpan SustainedFor,
     double ClearMargin,
     TimeSpan ClearedFor,
     double EscalationStep,
     TimeSpan? GapTolerance = null,
-    TimeSpan MinimumGap = default)
+    TimeSpan MinimumGap = default,
+    bool UnbrokenConfirmation = true)
 {
     /// <summary>The documented clear margin of a percentage threshold alert (container CPU and memory, host disk).</summary>
     public const double PercentClearMargin = 5;
@@ -197,6 +202,15 @@ public sealed class BreachTracker
         if (value > threshold - rules.ClearMargin)
         {
             breach.BelowSince = null;
+            return null;
+        }
+
+        // Review 1.0.0: a breach not yet raised has to STAY at or above the threshold for the sustained duration. A
+        // reading clearly below the line ends its confirmation at once — otherwise two single spikes minutes apart, with
+        // the value far below the threshold between them, added up to a "sustained" breach.
+        if (breach.Reported is null && rules.UnbrokenConfirmation)
+        {
+            Reset(breach);
             return null;
         }
 

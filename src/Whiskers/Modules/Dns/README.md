@@ -15,4 +15,4 @@ off the MCP surface and the agent, and the Settings panel is hidden (`ModuleRegi
 **Clean module (no no-ops).** Nothing in Core consumes the DNS services; the Settings panel injects only
 `IOptionsMonitor<DnsSettings>` + `IAppSettingsStore`, both Core.
 
-See [`docs/modules/dns.md`](../../../../docs/modules/dns.md) and [`../../Services/Dns/`](../../Services/Dns/).
+See [`docs/guide/modules/dns.md`](../../../../docs/guide/modules/dns.md) and [`../../Services/Dns/`](../../Services/Dns/).

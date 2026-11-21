@@ -202,11 +202,26 @@ public sealed class HelpContentService : IHelpContentService
                     Danach ist der Server **SSH-frei**: und die Bootstrap-Zugangsdaten werden **automatisch
                     entfernt**: das Passwort aus dem Speicher, der SSH-Key von der Platte. Es bleibt kein stehender
                     Zugang übrig.
+
+                    **Ein frischer Hetzner-Server** braucht nur **Name und IP**: Whiskers findet den gespeicherten
+                    Hetzner-API-Key über die exakte IP des Servers, startet das Rescue-System, spielt einen
+                    einmaligen Schlüssel ein, liest den echten Host-Key von der Platte und pinnt ihn, dann geht
+                    das Onboarding wie oben weiter. Der Server **startet dabei zweimal neu**, deshalb läuft das nur
+                    für einen Server ohne gepinnten Host-Key und ohne mTLS-Stand; der Dialog nennt die Neustarts,
+                    bevor du bestätigst.
+
+                    **Host-Key**: Bei jedem Onboarding wird der SSH-Host-Key des Servers vor dem ersten Befehl
+                    gepinnt, im Audit-Log festgehalten und angezeigt. Ein geänderter Key wird abgelehnt; nur ein
+                    angemeldeter Admin kann den Pin ersetzen. Über MCP gibt es dasselbe als `add_server` und
+                    `onboard_server` (nur Admin; ein Rescue-Bootstrap braucht immer eine Freigabe).
                     """),
                 new("Cloud, Netzwerke, Backups", """
                     - **Cloud**: Power on/off, Reboot, Snapshots und Metriken direkt beim Provider, selbst wenn
                       SSH/Docker mal nicht erreichbar ist. Funktioniert sobald pro Server Provider + API-Key gesetzt sind.
-                    - **Netzwerke**: Docker-Netzwerke anlegen, Container verbinden/trennen.
+                    - **Netzwerke**: Docker-Netzwerke anlegen, Container verbinden/trennen. Ein **macvlan**- oder
+                      **ipvlan**-Netz stellt einen Container ohne veröffentlichten Port direkt in dein LAN und zählt
+                      deshalb als Exposure-Änderung: Agent und API-Keys brauchen eine Bestätigung, die Aktion
+                      einer Person löst eine Benachrichtigung aus.
                     - **Backups**: Volume-Backups als komprimierte Archive; vor riskanten Aktionen empfohlen.
                     """),
             }),
@@ -410,13 +425,25 @@ public sealed class HelpContentService : IHelpContentService
                     Wenn der Agent eine Aktion auslöst, die laut Guardrail eine **Bestätigung** braucht,
                     entsteht eine **Freigabe**: Was, von welchem Agenten/Akteur, welches Werkzeug, mit welchen
                     Parametern, plus optionalem Diff. Du bekommst eine Push-Benachrichtigung an die Glocke
-                    (und ggf. Mattermost/Matrix).
+                    (und an jeden eingerichteten Kanal, siehe **Benachrichtigungen**).
                     """,
                     Shot("Freigaben-Seite mit ausstehenden Anfragen")),
                 new("Genehmigen / Ablehnen", """
                     Auf der Seite **Freigaben** klickst du **Genehmigen** oder **Ablehnen**. Genehmigst du, läuft
                     die Aktion weiter; lehnst du ab, bricht der Agent sie sauber ab. Abgelaufene Anfragen verfallen
                     automatisch.
+                    """),
+                new("Im Dialog freigeben", """
+                    Braucht **deine eigene Aktion** in der Oberfläche eine Freigabe (etwa das erneute Onboarding
+                    eines Servers, Neustart oder Update eines geschützten Containers, ein mTLS-Schritt oder ein Deploy,
+                    der Whiskers selbst berührt), bekommt ein Admin einen eigenen Dialog: Zusammenfassung prüfen,
+                    dann **Freigeben und ausführen** klicken (nach 1,5 Sekunden aktiv). Die Aktion läuft als eine
+                    Operation mit einer Audit-Spur weiter; das Audit vermerkt, dass im Dialog freigegeben wurde.
+
+                    Schließt du den Dialog, bleibt die Freigabe auf der Seite **Freigaben** **offen**, aber ohne
+                    Dialog läuft nichts mehr: Wiederhole die Aktion. Ist **„Zweite Person muss freigeben“**
+                    eingeschaltet, wartet der Dialog auf einen anderen Admin. Container entfernen, ein
+                    Self-Backup zurückspielen und einen Host-Key ersetzen gibst du weiter auf der Seite Freigaben frei.
                     """),
             }),
 
@@ -469,7 +496,8 @@ public sealed class HelpContentService : IHelpContentService
                     """,
                     Shot("Geöffnete Benachrichtigungs-Liste")),
                 new("Kanäle & Deep-Links", """
-                    Neben der In-App-Glocke kann Whiskers zusätzlich an **Mattermost** oder **Matrix** senden.
+                    Neben der In-App-Glocke kann Whiskers zusätzlich an **Mattermost**, **Matrix**, **Telegram**, **ntfy**,
+                    **Discord**, **Slack**, **E-Mail** oder einen **allgemeinen Webhook** senden.
                     Viele Benachrichtigungen sind **klickbar** und springen direkt zur richtigen Stelle, 
                     z. B. ein Image-Update direkt zum betroffenen Container.
                     """),
@@ -485,6 +513,18 @@ public sealed class HelpContentService : IHelpContentService
                     Einstellungen sind nur für **Admins** schreibbar.
                     """,
                     Shot("Einstellungen-Seite mit Gruppen und Metrik-Schwellen")),
+                new("Ein Konto löschen und seine Automatisierungen", """
+                    Geplante Tasks, Webhooks, KI-Trigger, Endpoint-Checks, Git-Deploy-Apps und Funktionen wie
+                    AutoPatch **laufen als das Konto, dem sie gehören**. Wird dieses Konto gelöscht oder verliert
+                    es seine Rechte, **halten sie an**.
+
+                    Unter **Einstellungen > Besitzer der Automatisierung** übergibt ein Admin sie an eine andere
+                    Person, die die nötigen Rechte hat, oder an sich selbst. Übergebene Einträge bleiben **aus**
+                    (eine Git-Deploy-App bleibt angehalten), bis jemand sie wieder einschaltet; die Übergabe steht
+                    im Audit-Log, und der nächste Lauf nennt sie. Ein einzelnes **Übernehmen** macht dich zum
+                    Besitzer und schaltet eine Flotten-Funktion wie AutoPatch sofort wieder ein. Wer sich mit
+                    derselben Adresse wieder anmeldet, bekommt sie nie zurück.
+                    """),
             }),
 
         new("mcp", "MCP-Server (KI-Anbindung)", "Hub",

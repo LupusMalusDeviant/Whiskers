@@ -57,7 +57,7 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-17 | nginx.reload |
 | U-18 | systemd.manage |
 | U-19 | ssl.renew |
-| U-20 | server.save, server.remove |
+| U-20 | server.save, server.remove, server.create |
 | U-21 | server.onboard |
 | U-22 | checks.pause, checks.resume |
 | U-23 | cloud.power_on, cloud.shutdown, cloud.reboot, cloud.hard_reset, cloud.snapshot_create |
@@ -72,12 +72,14 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-32 | guardrails.save, guardrails.kill_switch_off |
 | U-33 | — an approval decides another operation; approving and rejecting are the approval store's own records, not catalog capabilities |
 | U-34 | config.save, config.whitelist, config.roles, config.mcp_permissions, config.agent, mcp.key_create, mcp.key_delete, vault.secret_set, vault.secret_delete, registry.save, registry.delete, automation.owner_set |
-| U-35 | account.password_change, account.create, account.password_reset, account.delete |
+| U-35 | account.password_change, account.create, account.password_reset, account.delete, automation.hold |
 | U-36 | identity.binding_confirm, identity.binding_remove |
 | U-37 | mtls.client_migrate, mtls.shared_client_retire |
 | U-38 | endpointcheck.save, endpointcheck.delete, endpointcheck.run |
 | U-39 | notifications.mark_read, notifications.clear |
 | U-40 | cve.scan |
+| U-41 | server.hostkey_replace |
+| U-42 | automation.handover, automation.handover_acknowledge |
 
 ## Capabilities without a path
 

@@ -1,0 +1,59 @@
+@inject IHandoverNotices Notices
+@inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+@* Contract 0020 (D13): the new owner's personal notice of a handover, on every page, until they acknowledge it. Only the
+   addressee sees it; acknowledging is their own read-level bookkeeping (automation.handover_acknowledge). *@
+@foreach (var notice in _notices)
+{
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" data-notice="@notice.Id">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <span>@L["HandoverNotice_Text", Name(notice.HandedOverBy), notice.Count, Name(notice.FromOwnerId), notice.AtUtc.ToLocalTime().ToString("d")]</span>
+            <MudStack Row="true" Spacing="1">
+                <MudButton Href="settings#owners-who-can-no-longer-act" Size="Size.Small" Variant="Variant.Text">@L["HandoverNotice_Button_Show"]</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="@(() => AcknowledgeAsync(notice))"
+                           data-action="acknowledge">@L["HandoverNotice_Button_Acknowledge"]</MudButton>
+            </MudStack>
+        </MudStack>
+    </MudAlert>
+}
+
+@code {
+    private IReadOnlyList<HandoverNotice> _notices = [];
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var email = await CurrentUser.GetEmailAsync();
+        _notices = string.IsNullOrWhiteSpace(email) ? [] : Notices.For(PrincipalIds.User(email));
+    }
+
+    private static string Name(string principalId) => PrincipalIds.EmailOf(principalId) ?? principalId;
+
+    private async Task AcknowledgeAsync(HandoverNotice notice)
+    {
+        var noticeId = notice.Id;
+        _busy = true;
+        try
+        {
+            // Read level: every signed-in person, own notices only — the service refuses anyone else's.
+            await Mutations.RunAsync("automation.handover_acknowledge", new { notice = noticeId },
+                (ResolvedRecord rt, CancellationToken ct) => Notices.AcknowledgeAsync(rt.Id, ct));
+            _notices = _notices.Where(n => n.Id != noticeId).ToList();
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["HandoverNotice_Snackbar_Error", ex.Message].Value, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

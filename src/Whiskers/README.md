@@ -1,6 +1,6 @@
 # Whiskers (application project)
 
-The ASP.NET Core / Blazor Server application. For project overview, setup and deployment see the **[repository README](../../README.md)**; for the SSH-key-free design see **[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)**; for a map of the whole code base (areas, sizes, entry points, how a call flows) see **[docs/CODEBASE_MAP.md](../../docs/CODEBASE_MAP.md)**.
+The ASP.NET Core / Blazor Server application. For project overview, setup and deployment see the **[repository README](../../README.md)**; for the SSH-key-free design see **[docs/architecture/ARCHITECTURE.md](../../docs/architecture/ARCHITECTURE.md)**; for a map of the whole code base (areas, sizes, entry points, how a call flows) see **[docs/architecture/CODEBASE_MAP.md](../../docs/architecture/CODEBASE_MAP.md)**.
 
 ## Layout
 

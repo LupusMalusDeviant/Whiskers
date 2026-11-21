@@ -212,6 +212,10 @@ basename, or a `sh -c` / `bash -c` string contains T's binary as a word:
 | `tailscale.serve` | a serve config with `TCP`, `Web` or `Services` entries and no Funnel, or `tailscale serve` in a command | published |
 | `tailscale.state` | a Tailscale service with persistent state (`TS_STATE_DIR` or a mount at `/var/lib/tailscale`) and no `TS_SERVE_CONFIG`: its serve state lives in tailscaled and cannot be read (Q7) | public |
 
+The detection table (contract 0006 with this contract) gains rows in contract 0017 part A (1.0.1): `SocketMount`
+(`use_api_socket`, and every socket bind the re-check reads; class `host`) and a privileged `post_start` / `pre_stop`
+hook (`Privileged`, key `hook:<kind>:<index>`, planning only).
+
 The exposure is attached to the tool's service; the reason names the services sharing its network namespace
 (`network_mode: service:<tool>`). `ExposureChangeRule` gets reasons such as "web becomes public through a Cloudflare
 tunnel (cloudflared)" and "traefik routes every container on the server (exposedByDefault)". No value (token, key, URL)
@@ -300,7 +304,7 @@ with it. The message names the container and the ways out: remove it on the cont
   "Tailscale sidecar / cloudflared" go; new lines: images that run a proxy or tunnel behind an unrecognisable
   entrypoint; Tailscale serve state is read from configuration, never from tailscaled at run time. Upgrade note: real
   compose projects, legacy clash, pinned images and updates, `traefik.` default, policy hash.
-- `docs/features.md`, `Services/Deployment/README.md`, `Modules/Deployment/README.md`, `docs/modules/deployment.md`,
+- `docs/guide/features.md`, `Services/Deployment/README.md`, `Modules/Deployment/README.md`, `docs/guide/modules/deployment.md`,
   `Services/Mutations/README.md`, `Services/Guardrails/README.md`, CHANGELOG (behaviour changes: real projects,
   `deploy_app` output and refusals, `bridge`, pinning, AutoPatch/update on pinned containers).
 

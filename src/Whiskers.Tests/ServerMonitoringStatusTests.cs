@@ -16,14 +16,14 @@ namespace Whiskers.Tests;
 /// </summary>
 public class ServerMonitoringStatusTests
 {
-    private static readonly ServerConfig Badwolf = new()
+    private static readonly ServerConfig HostA = new()
     {
-        Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
+        Id = "host-a", Name = "Host-A", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
     };
 
     private static (ILoopSuspensionService Suspension, IServerCircuitBreaker Circuit) Build()
     {
-        var servers = new FakeServerConfig(Badwolf);
+        var servers = new FakeServerConfig(HostA);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(
             new ServerBudgetSettings { CircuitFailureThreshold = 2, CircuitCooldownSeconds = 600 });
 
@@ -39,7 +39,7 @@ public class ServerMonitoringStatusTests
     {
         var (suspension, circuit) = Build();
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
 
         Assert.Equal(ServerMonitoringState.Monitored, status.State);
         Assert.Contains("nothing to find", status.Meaning);
@@ -51,9 +51,9 @@ public class ServerMonitoringStatusTests
         // The assertion the whole package rests on. A pause produces exactly the same emptiness as a healthy
         // server, and reading one as the other is what let six days pass.
         var (suspension, circuit) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "looking at something");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "looking at something");
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
 
         Assert.Equal(ServerMonitoringState.Paused, status.State);
         Assert.NotEqual(ServerMonitoringState.Monitored, status.State);
@@ -66,10 +66,10 @@ public class ServerMonitoringStatusTests
         // Both mean "not being checked" and they need different responses: one has an operator behind it who
         // knows why, the other happened on its own and nobody has looked yet.
         var (suspension, circuit) = Build();
-        circuit.RecordFailure("badwolf", new TimeoutException("no answer"));
-        circuit.RecordFailure("badwolf", new TimeoutException("no answer"));
+        circuit.RecordFailure("host-a", new TimeoutException("no answer"));
+        circuit.RecordFailure("host-a", new TimeoutException("no answer"));
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
 
         Assert.Equal(ServerMonitoringState.Throttled, status.State);
         Assert.Contains("nobody chose that", status.Meaning);
@@ -82,7 +82,7 @@ public class ServerMonitoringStatusTests
         // send somebody to debug a host that is perfectly fine.
         var (suspension, circuit) = Build();
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: false, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: false, DateTime.UtcNow);
 
         Assert.Equal(ServerMonitoringState.Unreachable, status.State);
         Assert.Contains("really is about the server", status.Meaning);
@@ -94,11 +94,11 @@ public class ServerMonitoringStatusTests
         // A paused server stops answering the checks, so it would also look unreachable and its circuit would
         // eventually open. Reporting those as faults would have an operator debugging their own switch.
         var (suspension, circuit) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddHours(1), "maintenance");
-        circuit.RecordFailure("badwolf", new TimeoutException("no answer"));
-        circuit.RecordFailure("badwolf", new TimeoutException("no answer"));
+        suspension.Suspend("host-a", DateTime.UtcNow.AddHours(1), "maintenance");
+        circuit.RecordFailure("host-a", new TimeoutException("no answer"));
+        circuit.RecordFailure("host-a", new TimeoutException("no answer"));
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: false, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: false, DateTime.UtcNow);
 
         Assert.Equal(ServerMonitoringState.Paused, status.State);
     }
@@ -108,9 +108,9 @@ public class ServerMonitoringStatusTests
     {
         // If an automatic pause looks like the operator's own, they stop looking for a cause.
         var (suspension, circuit) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "5 failures in a row", automatic: true);
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "5 failures in a row", automatic: true);
 
-        var status = ServerMonitoring.Describe("badwolf", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
+        var status = ServerMonitoring.Describe("host-a", suspension, circuit, answeredLastCycle: true, DateTime.UtcNow);
 
         Assert.Contains("Whiskers paused itself", status.Detail);
     }

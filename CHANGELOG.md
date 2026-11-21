@@ -6,7 +6,12 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-11-14
+## [1.0.0] — 2026-11-20
+
+v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with this
+release. Anyone who installed the withdrawn v1.0.0 or v1.0.1 updates to this 1.0.0:
+from v1.0.0, the last seven items of "Upgrading from 0.15.0" apply (OAuth whitelist to Metric retention); from
+v1.0.1, the last one (Metric retention).
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
 `docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
@@ -14,6 +19,13 @@ holds per host once that host is migrated (#184) and ships at ⚠️ under the a
 whether from the UI, MCP, the agent, a webhook or a scheduled task, runs through one Mutation Gateway. The gateway
 resolves the target, decides on a structured principal, asks for approval where the policy says so, and writes one audit
 event per attempt. From 1.0.0 on, every pull request runs the gate in Line mode.
+
+A full review of the withdrawn 1.0.0 reproduced 98 findings, most with a failing test. All of them are fixed in this
+release, most with a regression test (the security fixes by contract 0017, listed under Security and Fixed), except
+three documentation findings that were corrected on `main` after the tag. Two of the findings were settled by a
+decision instead of the reproduced behaviour: the owner of a deleted local account (contract 0020) and the cooperative
+deadline (INV-40). What stays for 1.1.0 are the known limits named in INV-51, INV-58 (exception RG-1) and INV-59, and
+the missing version check of the whitelist editor (`docs/operations/local-accounts.md`).
 
 ### Upgrading from 0.15.0
 
@@ -34,7 +46,8 @@ Check these before or right after the update. Details are in the entries below.
     `Oidc__TrustEmailVerified=true` is set.
   - Without that setting, the first federated sign-in of an account waits for confirmation. Confirm it under
     Settings → Sign-in identities, or on the host:
-    `docker compose exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email>`.
+    `docker exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email>` (installer; with the repository's
+    compose file `docker compose exec serverwatch …`).
   - Use the second way when the only Admin signs in through OIDC.
 - **Reverse proxy.** Forwarded headers are trusted from loopback only. Behind a proxy on another address, name it with
   `ForwardedHeaders__TrustedNetworks__0`.
@@ -60,6 +73,22 @@ Check these before or right after the update. Details are in the entries below.
 - **mTLS proxy certificates.** Renewal now works only for a certificate the fleet CA issued for the address Whiskers
   connects to; renew any other by hand.
 - **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
+- **OAuth whitelist on existing installs.** If your install runs with the whitelist enabled, add
+  `WHISKERS_ADMIN_EMAIL` to it by hand. Whiskers seeds that address only on a fresh install.
+- **Basic credentials.** The whole `Authorization` value is redacted from now on. Rows that an earlier version already
+  stored as `Authorization=*** <credential>` are not redacted again, so rotate the Basic credentials that appear in
+  them or in older logs.
+- **Masked environment values.** In the UI, `PWD`-like variables are now masked, as `get_container_env` masks them
+  (the exact names `PWD` and `OLDPWD` stay readable).
+- **Fleet hosts (borg-fleet).** Install `jq` on the Whiskers host and `sqlite3` on each fleet host, then run
+  `borg-enroll` again. The scripts no longer use Python. See `deploy/borg-fleet/README.md`.
+- **tailnet-guard.** Install `jq` wherever tailnet-guard runs (`netcat-openbsd` is optional).
+- **Content Security Policy.** Inline scripts are gone, and the CSP now sets `script-src 'self'`. A reverse proxy that
+  injects its own inline scripts into the pages will be blocked.
+- **Metric retention (`.env`).** The compose files no longer default `Metrics__RetentionDays` to 7: an unset
+  `METRICS_RETENTIONDAYS` leaves the raw retention editable under Settings → Metric retention. A `.env` copied from
+  the old `.env.example` still holds `METRICS_RETENTIONDAYS=7`, which keeps the value fixed and read-only. Remove that
+  line (or leave it empty) to edit the retention in the UI.
 
 ### All changes since 0.15.0
 
@@ -130,7 +159,7 @@ Fixes from the full review of `main` before the tag (#190, #191, #192, #193):
   - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
     what it had and saying that the deadline cut it short.
 
-Earlier changes in 1.0.0:
+Earlier changes:
 
 - **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
   writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
@@ -168,7 +197,7 @@ Earlier changes in 1.0.0:
   entry is still one self-contained file (WAL folded in, rollback journal); it is no longer compacted, which gzip
   absorbs.
 
-- **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
+- **CodeQL triage before 1.0 (`docs/reference/history/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
   one line (no value can forge a log line), and an account's address never reaches the application log: the
   redacting logger writes it as a per-process pseudonym `[account:1a2b3c4d]` (contract 0003). The audit rows in the
   database are unchanged and keep the address. A database password detected from a container's environment no
@@ -270,7 +299,7 @@ Earlier changes in 1.0.0:
   `Automation`; expired or cancelled approvals name `system:approval-expiry` instead of `system`.
 - **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
   in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
-  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/architecture/security-architecture.md` and
   `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
   fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
   architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
@@ -397,9 +426,11 @@ Earlier changes in 1.0.0:
   `checks.pause`. "Scan started" is shown only for a scan that started; with the CVE module off a manual scan is
   recorded as not run.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
-  settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
-  `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
-  `security-architecture.md`, `screenshots.md`, `roadmap.md` and `project-structure.md` (indexed in `docs/README.md`).
+  settings and a summary of the accepted limits stay in it; it points onward for the rest. The docs are sorted by
+  reader: `docs/guide/` (features, governance, MCP, agent, modules), `docs/operations/` (installation with `docker run`
+  and image verification, configuration, the production checklist with the accepted limits and the compose remaining
+  risks), `docs/architecture/` (architecture, security architecture, ADRs) and `docs/reference/history/`, indexed in
+  `docs/README.md`. Links to the old `docs/*.md` paths no longer resolve.
 - **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
   publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
   weakens a security option, shares a namespace with another container or carries a route label (Tailscale
@@ -2200,6 +2231,49 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   Guardrails and Approvals pages stay in the menu.
 
 ### Security
+Contract 0017 (`docs/contracts/0017-release-1-0-1-security-fixes.md`, parts A–J) defines these fixes; it was
+accepted before the work started (#209). They come from the full review of the withdrawn 1.0.0.
+
+- **Approval notifications are never throttled.** A second approval request inside the throttle window used to reach
+  no external channel. An event that carries an approval id now always goes out, and pruning uses the live window
+  after an operator changes it (part G, #210).
+- **A second webhook, task or loop inside the throttle window is no longer swallowed.** `webhook_disabled`,
+  `automation_refused`/`automation_suspended`, `exposure_violation` and `monitoring_stalled` carry no container, so
+  every channel throttled all of them of one server on one key: a second disabled webhook, refused task or stalled
+  loop within 5 minutes never arrived. Each now names its subject (the webhook, task or automation id, the compose
+  stack and the rules it broke, the loop), which is part of the throttle key. The same subject is still throttled;
+  approvals and state transitions stay exempt (contract 0017, amendment 4).
+- **mTLS CSRs are re-encoded.** The host's answer to the key-and-CSR step no longer reaches the CA host as text:
+  Whiskers checks it, re-encodes it from DER and writes the PEM itself. The SAN count of the CSR and the issued
+  certificate must match exactly, so extra URI or e-mail SANs are refused (part E, #212).
+- **Agent chat rendering and CSP.** The Markdown pipeline uses an explicit list of extensions, and the sanitizer drops
+  `on*`, `style` and off-site images and escapes raw HTML it cannot read. The CSP is now
+  `frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'`, with no inline scripts and no
+  `eval` interop. A tool call cut off by the token limit no longer breaks the next provider request (part F, #213).
+- **Compose: `use_api_socket` and privileged hooks.** `use_api_socket: true` now counts as a Docker-socket mount, so
+  an API key is refused as for any other socket mount. A privileged `post_start`/`pre_stop` hook is an exposure that
+  needs approval (part A, #215).
+- **SSH host-key pinning at onboarding (contract 0018 part C, INV-63, ADR-0002 amendment).** Every onboarding run of
+  an SSH server pins the host key before its first command and records type, fingerprint, source and time on the
+  server (`hostkey.pin` in the audit). A different key stops the run and shows both fingerprints. Only an interactive
+  Admin with an Admin approval can replace a pin (`server.hostkey_replace`, audited with both fingerprints).
+- **Cloud bootstrap leaves no standing access (contract 0018 part D, INV-64).** The Hetzner rescue bootstrap acts only
+  on the VM bound to the record by its exact public IP, needs a human Admin's approval for every non-interactive
+  principal, never keeps the rescue password, and removes the project key, the injected `authorized_keys` line and
+  the generated key. A run that fails after the injection reports the standing key until it is removed. The
+  onboarding service itself now refuses a run without a bootstrap on a record that carries an injected bootstrap key
+  and no host-key pin (before, only the Servers page did); it points to the rescue resume or to the abandon.
+- **Whitelist and local accounts.** With the OAuth whitelist enabled, the seeded local admin and local accounts an
+  Admin creates can sign in: the first seed adds `WHISKERS_ADMIN_EMAIL`, creating an account adds its address, and
+  deleting it removes only what was added for it (parts H1–H3, #216).
+- **Redaction and env masking.** Every string column the sinks write is redacted or has a stated exemption, bulk
+  updates redact explicitly, and an `Authorization` value is redacted whole, down to its scheme. A Basic credential
+  is caught without a header key. Container env and the UI share one masking rule (parts C and D, #218).
+- **Guardrails read mount sources as the shell does.** `execute_command` with an API key now decides every form of
+  mount source (`-v` clusters, `--mount`, `source=`/`src=`/`device=`, relative and `~` paths), quoting and escaping,
+  brace expansion and globs before it allows a command near the control plane. Accepted overreach and the gaps left
+  for 1.1.0 are listed in INV-59 (part B, #220).
+
 - **Agent-created tasks ran with a person's authority, and a deleted local account kept its tasks running**
   (known items 6/7, PC-D6). See the upgrade note.
 
@@ -2252,7 +2326,62 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 - **The Trivy image is pinned by digest in the code default too** (TA-14). An operator-configured image without
   a digest now logs a warning.
 
+- **LAN networks are an exposure change (contract 0021, INV-62).** A container on a `macvlan` or `ipvlan` network
+  gets its own address on the host's LAN, past the host's firewall. An agent's or API key's deployment that puts a
+  container on such a network (declared in the files, the implicit `default` network included, an external network,
+  or a network of any driver other than `bridge`, `overlay`, `host`, `none` and `null`), and MCP `create_network` /
+  `connect_container_to_network` with such a network, now wait for confirmation even under an Admin-autonomous
+  policy; a key-owned webhook or Git deploy doing so is refused. A person in the UI is not asked: the decision is
+  audited and an `exposure_change` notification names the network and the driver; the Networks page shows a warning
+  when macvlan is chosen. **Behaviour change:** a compose plan whose external network does not exist, whose network
+  name is not unique on the host, or whose host networks cannot be read is refused; the networks are read again
+  before `up` and in the re-check after it. `connect_container_to_network` now connects by the network id the
+  gateway resolved, so a network re-created under the same name after the decision is not used.
+
 ### Added
+- **One-step server onboarding (contract 0018, PR 2).** *Servers → Add* registers a server from name and IP and binds
+  the cloud VM that holds exactly this IP in one stored credential (`server.create`). The onboarding dialog shows the
+  bound VM (name, id, created, labels, IP) and can bootstrap a fresh Hetzner VM through rescue mode with a generated
+  key. *Settings → Onboarding* stores a Tailscale auth key in the vault (`Onboarding:Tailscale:AuthKeyRef`). New
+  optional `servers.json` fields: `CloudServerId`, the `SshHostKey*` pin fields and the bootstrap-key fields.
+- **Onboarding over MCP (contract 0018, PR 3).** Three Admin tools: `add_server` (`server.create`: name, IP, group,
+  provider and optionally the server whose stored cloud credential to reuse; never a key), `onboard_server`
+  (`server.onboard`: `bootstrap` `none` or `hetzner_rescue`, `confirmVmName`, `abandon`) and `get_onboarding_status`
+  (an Admin-level read of the latest run, kept in memory). `onboard_server` blocks until the run ends, sends a progress
+  notification per step and is bound to the 30-minute gateway deadline, not to the request. A rescue bootstrap over
+  MCP always waits for a human Admin's approval. A host that already holds mTLS state is re-onboarded or abandoned
+  only in the UI; the MCP refusal says so. Only `add_server` is offered to the in-app agent.
+- **Approval in the dialog (contract 0019, INV-65).** When an Admin's own UI action on Whiskers' control plane waits for
+  an INV-59 approval, the action's window now opens *Approval needed* instead of only pointing to the Approvals page.
+  It shows the recorded approval (target, reason, level and rule, arguments with payloads withheld, time left) and,
+  for the requester only, their own input such as the SQL of `db.query`, which is never stored. *Approve and run* is
+  never the default button, ignores Enter and is armed after 1.5 s; it decides under the Approvals page's rules, so
+  *Require a second approver* still makes a second Admin approve (then *Run now*). The action then continues as the
+  same operation, uses the approval once and reports in the same window. *Close* leaves the approval pending, and
+  nothing runs after the window is gone. Covered now: re-onboarding, container start/stop/restart/update/rollback,
+  the mTLS actions on *Servers* (migrate, renew, issue), volume backup and restore, `db.query`, compose, app and Git
+  deployments. Remove, self-backup restore, shared-credential retirement, backup deletion and host-key replacement
+  are still approved on the Approvals page. The approval records where it was decided (`page`, `dialog`, `chat`; new
+  nullable column `Approvals.DecidedVia`), the audit of the run names it next to the self-approval mark, and the
+  Approvals history marks "in the dialog". MCP keys, the agent over MCP, AI triggers, the scheduler and webhooks are
+  unchanged (§7.1–§7.4 of the product contract, A-01 included).
+- **Owner handover (contract 0020, INV-66).** *Settings → Automation owners* lists the owners who can no longer act
+  (account deleted, sign-in not allowed or not verified, key gone, level lost) with their scheduled tasks, webhooks,
+  Git deploy apps, AI triggers, endpoint checks and fleet features. An Admin hands them over to another person who can
+  act now (`automation.handover`, root-equivalent, UI only): a three-step dialog (items, new owner, summary) with
+  *Cancel* as the default. Items owned or created by an MCP key, items that cannot be judged and items the new owner
+  cannot hold are not handed over. Every handed-over item is off (a Git deploy app held, its webhook deployments
+  refused as `AutomationHeld`) until someone switches it on again; a resume never changes the owner, and the item's
+  first run names the handover and who resumed it. The new owner sees a notice until they acknowledge it
+  (`automation.handover_acknowledge`, read level); the Admins get one notification with counts only. Creating a local
+  account for an address that still owns automation holds those items first (`automation.hold`), so nothing runs
+  again without an Admin switching it on. A held item stays held on every path: *Run now* (page or MCP
+  `run_scheduled_task`) of a handed-over or held task that is still off is refused as `AutomationHeld`, and an MCP save
+  or token change of a held Git deploy app leaves it held (only the *Git deploy* page's save or *Resume* releases it).
+  *Resume* on an endpoint check applies only to a check a handover or hold switched off. An address that signs in again
+  never gets its items back. New files in the
+  data directory: `automation-handovers.json` (entries age out after 30 days, a scheduled task's only once it is switched on and runs) and `automation-handover-notices.json`;
+  both are in the self-backup. New optional field `HeldReason` on Git deploy apps.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from
@@ -2279,6 +2408,29 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   already be published. A test keeps the version, image tag and label in step with the app version.
 
 ### Fixed
+- **Telemetry binds and security docs.** The telemetry compose files refuse to render without `TS_IP`, so
+  node-exporter and VictoriaMetrics no longer bind to every interface. `SECURITY.md`, the local-login switch and
+  INV-40's deadline wording now say what the code does (part J, #211).
+- **Failed container updates and rollbacks.** When the new container fails, it is removed and the previous one is
+  renamed back and started; every message reports the real outcome (#214).
+- **No Python.** Onboarding, `borg-enroll`, `borg-fleet-client`, `borg-fleet-prune` and `tailnet-guard.sh` no longer
+  call Python; a guard test catches new uses. The onboarding tailnet address is accepted only as plain IPv4 (part I,
+  #217).
+- **Deadline tests under CI load.** Three timing tests that failed under load now run on a controlled clock or with
+  wider waits where the wait proves nothing. Test code only (#219).
+- **Tailscale with an empty `VPN_HOSTNAME`.** An empty or blank name now falls back to the container hostname, then
+  `serverwatch`, instead of stopping Tailscale with `InvalidSetting` (#221).
+- **Database tool.** PostgreSQL table lists show row count and size in the right columns, MySQL/MariaDB lists and
+  schemas work, databases whose name starts with "databases" are listed again, query results keep rows starting
+  with `(` or `--`, and Redis commands accept quoted arguments. A Redis command that starts with `-` is refused, so
+  it cannot pass options to `redis-cli` (#222).
+- **Backups.** A restore replaces the SQLite file the app actually opens, also with a custom connection string. A
+  failed volume backup removes its partial archive, a failed delete keeps the record and reports the error, and
+  archive names are unique (#223).
+- **UI crashes.** Invalid input, unreachable servers or a failing query no longer end the Blazor connection: the
+  dialogs stay open, the dashboard shows "no history", and errors in the new catch-alls are shown and logged
+  redacted. An SSH key file over 100 KB is refused before it is read (#224).
+
 - Tests: no test empties the SQLite connection pools of other tests any more (`ClearAllPools`); each clears only
   its own database files. This removes the random "cannot start a transaction within a transaction" failures.
 
@@ -2346,7 +2498,7 @@ Direct MCP tool calls now pass the same guardrails as the agent. The server ship
   protects `whiskers*` as well as `serverwatch*`. Names that existing installs depend on — the compose
   service/volume `serverwatch`, Prometheus `serverwatch_*` metrics, the Data Protection application name,
   the mTLS client CN, the Trivy cache volume and the host-shell label — stay unchanged on purpose.
-- **Architecture rules moved to `docs/ARCHITECTURE.md`.** Application shape, security-critical areas,
+- **Architecture rules moved to `docs/architecture/ARCHITECTURE.md`.** Application shape, security-critical areas,
   protected layers and engineering rules now live there. `CLAUDE.md` is no longer tracked.
 
 ### Fixed
@@ -2595,7 +2747,7 @@ success without checking, filters that did not filter and pages that crashed on 
   connectors read the tool list once, at session start.
 - **Every MCP tool now declares its permission level in its own source**, via `[McpToolLevel]` next to
   `[McpServerTool]`, and the served surface is pinned in a generated
-  [tool catalog](docs/mcp-tool-catalog.md). Levels were carried over unchanged — this adds enforcement, not
+  [tool catalog](docs/guide/mcp-tool-catalog.md). Levels were carried over unchanged — this adds enforcement, not
   policy.
 - **A server that stops answering now raises an alert.** A host dropping off the fleet was silent: the
   dashboard marked it unreachable, but nothing was sent — and every container alert and log-alert rule
@@ -2620,7 +2772,7 @@ success without checking, filters that did not filter and pages that crashed on 
   reaches the Docker calls *and* the multiplexed read loop, so an expired deadline ends the request on the
   server too. Two more places bounded a per-server call the same abandoning way — the fleet-wide container
   listing and the system-info probe, both of which run for every server on every cycle — and were converted
-  as well. Full analysis in [the incident report](docs/reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md);
+  as well. Full analysis in [the incident report](docs/reference/history/2026-08-26-logmonitor-dockerd-cpu-incident.md);
   the invariants that would have caught it now run in the test suite.
 - **Nothing limited how much Whiskers asked of one server.** Five background loops each policed only
   themselves with their own timeout; the server sees the sum. There is now a per-server load budget at the
@@ -2815,4 +2967,4 @@ scanned by the release pipeline from this version on.
 Pre-publication development (dashboard, MCP server + acting agent with guardrails and
 approvals, CVE scanning with dedup/age tracking, zero-SSH mesh+mTLS onboarding, cloud
 control for Hetzner/Hostinger, terminal, deployments, notifications, audit log, …).
-History: `git log v0.12.0` and `docs/reviews/`.
+History: `git log v0.12.0` and `docs/reference/history/`.

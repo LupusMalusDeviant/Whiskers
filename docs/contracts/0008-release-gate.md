@@ -68,7 +68,7 @@ never a pass.
   allowed nesting. `MutationGatewayCoverageTests.Inventory` (`src/Whiskers.Tests/MutationGatewayCoverageTests.cs:69`)
   lists `(surface, capability, boundary)` for the guarded writes; `Every_capability_has_an_execution_boundary_the_guard_checks`
   and `The_inventory_names_real_boundaries_for_every_surface` keep it honest against the code, but not against §7.
-- **Generated-document precedent.** `McpToolCatalogSnapshotTests` renders `docs/mcp-tool-catalog.md` from the code,
+- **Generated-document precedent.** `McpToolCatalogSnapshotTests` renders `docs/guide/mcp-tool-catalog.md` from the code,
   fails on any difference and writes `<file>.actual` beside it for review — it never repairs the file itself.
 - **Required tests in CI (R1-47).** `.github/required-tests/in-process.txt` and `docker.txt` name tests that must be in
   the TRX file and pass; `check-test-results.sh --require` enforces them (`ci.yml:80`, `:91`), and
@@ -185,7 +185,7 @@ cannot be checked themselves.
 
 One row per capability, sorted by id: `id`, level, target kind, risk, MCP tool (or —), verification kind
 (read back / `NotVerifiable` + reason), surfaces from `MutationGatewayCoverageTests.Inventory`, allowed compositions,
-and the §7 rows that name it (from D6). A header says "generated — do not edit", as in `docs/mcp-tool-catalog.md`.
+and the §7 rows that name it (from D6). A header says "generated — do not edit", as in `docs/guide/mcp-tool-catalog.md`.
 
 ### `docs/v1/PATH_CAPABILITIES.md` (new, hand-maintained — only with D6 option b)
 
@@ -742,3 +742,27 @@ This amendment takes precedence over the text above, Amendment 1 included. It wa
     comparison reads base IDs from indented rows as well.
 - **Patch releases come from `main`.** The tag-on-main check (D16) refuses a tag cut on a `release/*` branch. Land the
   fix on `main` and tag it there.
+
+## Amendment 3 — the withdrawn 1.0.x and the one version reset (16 November 2026)
+
+This amendment takes precedence over the text above, Amendments 1 and 2 included. It was accepted on 16 November
+2026.
+
+- **What happened.** v1.0.0 (14 November 2026) and v1.0.1 (16 November 2026) were published and then withdrawn by the
+  maintainer on 16 November 2026. Their GitHub releases, tags, ghcr images and chart versions were deleted. The next
+  release is 1.0.0 again, so `<Version>` on `main` goes from 1.0.1 back to 1.0.0 once.
+- **One admitted reset (D2).** The version check against the base admits exactly one decrease, and only when **all** of
+  these hold:
+  - the base's `<Version>` is exactly 1.0.1 and the current `<Version>` is exactly 1.0.0;
+  - the base commit is one of the two `main` commits that carry 1.0.1: `c6e6629a8d15ace2a120c9d1636dd65bbff5aec5`
+    (merge of the 1.0.1 release PR) or `58c2615be6259049a9426edef0e5bd61cc2bffef` (the next merge on `main`).
+  Any other decrease stays a D2 finding, including 1.0.1 → 1.0.0 against any other base (for example a 1.0.1 that is
+  published again later). The admitted reset is listed by commit in the gate's code, not configurable from outside.
+- **The mode does not drop.** Both versions are 1.0.0 or above, so every run stays at least in Line mode; the reset
+  never reaches Development mode. This is why D2's purpose ("the gate's mode never goes down") holds.
+- **Previous release in release runs (R18).** The withdrawn releases are no longer published GitHub releases, so a
+  release run of the new 1.0.0 compares with v0.15.0, the highest published release below it. Nothing changes in R18.
+- **RG-1** (PRODUCT_CONTRACT §6.1) stays as written; it covers "1.0.0 and its patch releases", which is the new 1.0.0.
+- **Tests.** `BaseComparison` gets two cases: the admitted reset against each of the two commits passes; the same
+  reset against any other commit, and every other decrease (for example 1.0.1 → 0.15.0, 1.0.2 → 1.0.1), stays a
+  finding.

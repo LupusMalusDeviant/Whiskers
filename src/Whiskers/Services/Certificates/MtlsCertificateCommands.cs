@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Whiskers.Services.Certificates;
@@ -37,14 +38,19 @@ public static class MtlsCertificateCommands
         rm -f server.csr.new
         """);
 
-    /// <summary>On Badwolf: has step-ca sign the CSR (leaf + intermediate, one year) and prints the bundle base64.
-    /// The CSR is checked by Whiskers before this runs; step's leaf template copies subject and SANs from it.</summary>
-    public static string SignCsr(string csrB64, string commonName)
+    /// <summary>On the Whiskers host: has step-ca sign the CSR (leaf + intermediate, one year) and prints the bundle base64.
+    /// The CSR is checked by Whiskers before this runs; step's leaf template copies subject and SANs from it.
+    /// <paramref name="csrDer"/> is the DER of the request (contract 0017 E1): Whiskers writes the PEM file step reads
+    /// from it and base64-encodes that itself, so no byte of host output reaches this script.</summary>
+    public static string SignCsr(byte[] csrDer, string commonName)
     {
+        ArgumentNullException.ThrowIfNull(csrDer);
+        if (csrDer.Length == 0) throw new ArgumentException("The CSR is empty.", nameof(csrDer));
+        var pemB64 = Convert.ToBase64String(Encoding.ASCII.GetBytes(PemEncoding.WriteString("CERTIFICATE REQUEST", csrDer) + "\n"));
         var file = $"whiskers-{commonName}.csr";
         return AsRootScript($$"""
             set -e
-            echo {{csrB64}} | base64 -d > /opt/step-ca/certs/{{file}}
+            echo {{pemB64}} | base64 -d > /opt/step-ca/certs/{{file}}
             chmod 644 /opt/step-ca/certs/{{file}}
             out=$(docker exec {{StepCaContainer}} step certificate sign /home/step/certs/{{file}} /home/step/certs/intermediate_ca.crt /home/step/secrets/intermediate_ca_key --password-file /home/step/secrets/password --not-after 8760h --bundle) || { rm -f /opt/step-ca/certs/{{file}}; exit 1; }
             rm -f /opt/step-ca/certs/{{file}}
@@ -52,7 +58,7 @@ public static class MtlsCertificateCommands
             """);
     }
 
-    /// <summary>On Badwolf: root + intermediate, the chain ghostunnel must present to the leaf-only .NET client.</summary>
+    /// <summary>On the Whiskers host: root + intermediate, the chain ghostunnel must present to the leaf-only .NET client.</summary>
     public static string ReadCaBundle() =>
         "cat /opt/step-ca/certs/root_ca.crt /opt/step-ca/certs/intermediate_ca.crt | base64 -w0";
 

@@ -1,9 +1,11 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit E — Command execution, injection surfaces, remote-access transports
 
 Scope: `HostCommandExecutor` + callers, `ShellUtils`, `Services/Docker/**`, `Onboarding/**`,
 `Certificates/**`, `Deployment` + `GitDeploy`, `Workloads/Kubernetes`, `Database`, `Terminal` + Hubs,
 firewall/nginx/systemd/SSL, `Dns`, `Registries`/`ImageSearch`, `Notifications`/`Webhooks`, `Cve/TrivyScanner`,
-`Vpn`, `docs/ssh-haertung.md`, `docs/adr/0002`.
+`Vpn`, `docs/reference/history/ssh-hardening-2026-10.md`, `docs/architecture/adr/0002`.
 
 READ-ONLY review. No repository files were modified.
 
@@ -197,12 +199,12 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   (`SshHostKeyPolicy.Options`, SshHostKeyPolicy.cs) applied at all three ssh spawn sites (tunnel, executor,
   terminal): `StrictHostKeyChecking=accept-new` (TOFU, not disabled) with a persistent `UserKnownHostsFile`
   under the data dir. `BatchMode=yes`, `ExitOnForwardFailure`, keepalives on the tunnel (SshTunnelManager.cs:118-131).
-  TOFU (not full pre-seeded verification) is an accepted, documented trade-off in `docs/adr/0002` — this matches.
+  TOFU (not full pre-seeded verification) is an accepted, documented trade-off in `docs/architecture/adr/0002` — this matches.
 - **Name/argument validators that DO prevent option injection** — systemd service (SystemdService.cs:22,124),
   SSL cert (SslCertService.cs:28,154), firewall port/proto/action/CIDR allow-lists (FirewallService.cs:389-407),
   compose project name incl. explicit `..` rejection (McpInputValidation.cs:14-18).
 - **Base64 transport for file content** — nginx config, `.env`, compose files, onboarding files, mTLS scripts,
-  git credentials and the scrape-config python all travel base64-encoded so arbitrary content never meets shell
+  git credentials and the scrape config (read and written base64, edited in C# since 1.0.1) all travel base64-encoded so arbitrary content never meets shell
   quoting (NginxService.cs:97-101, ContainerTools.cs:460-462/518-523, OnboardingCommands.cs:25-57,
   MtlsCertificateCommands.cs:9-10/21-25, GitDeployCommands.cs:16-32). Secrets (DB passwords, tokens, VPN keys)
   are passed via env vars, not argv, so they stay out of the process list (DatabaseService.cs:176-245,

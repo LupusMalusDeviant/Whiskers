@@ -16,8 +16,8 @@ public class ActionTimelineTests
     private static readonly DateTime Noon = new(2026, 8, 27, 12, 0, 0, DateTimeKind.Utc);
 
     private static AuditLogEntity Audit(
-        DateTime at, string action = "container.restart", string? serverId = "badwolf",
-        string target = "burg-web", bool success = true, long id = 1) => new()
+        DateTime at, string action = "container.restart", string? serverId = "host-a",
+        string target = "app-web", bool success = true, long id = 1) => new()
     {
         Id = id,
         Timestamp = at,
@@ -25,7 +25,7 @@ public class ActionTimelineTests
         TargetName = target,
         TargetType = "container",
         ServerId = serverId,
-        Actor = "kr4nk1",
+        Actor = "operator",
         ActorType = "web",
         Success = success
     };
@@ -45,7 +45,7 @@ public class ActionTimelineTests
 
         Assert.Equal(at, entry.AtUtc);
         Assert.Equal(DateTimeKind.Utc, entry.AtUtc.Kind);
-        Assert.Contains("burg-web", entry.Summary);
+        Assert.Contains("app-web", entry.Summary);
         Assert.Equal(1, entry.AuditId);
     }
 
@@ -98,7 +98,7 @@ public class ActionTimelineTests
         // timeline, that change has no visible cause at all — the hardest kind of mystery to close.
         var entries = ActionTimeline.Build(
             new[] { Audit(Noon.AddMinutes(-10)) },
-            new[] { Event(Noon.AddMinutes(-5), "loops_paused", "Background checks paused for Badwolf") },
+            new[] { Event(Noon.AddMinutes(-5), "loops_paused", "Background checks paused for Host-A") },
             serverId: null, sinceUtc: Noon.AddHours(-1));
 
         Assert.Equal(2, entries.Count);
@@ -139,12 +139,12 @@ public class ActionTimelineTests
         // attribute a pause on one host to a spike on another — precisely the false relationship this view
         // must never suggest.
         var entries = ActionTimeline.Build(
-            new[] { Audit(Noon.AddMinutes(-10), serverId: "badwolf"), Audit(Noon.AddMinutes(-9), serverId: "other", id: 2) },
+            new[] { Audit(Noon.AddMinutes(-10), serverId: "host-a"), Audit(Noon.AddMinutes(-9), serverId: "other", id: 2) },
             new[] { Event(Noon.AddMinutes(-5), "loops_paused", "Background checks paused") },
-            serverId: "badwolf", sinceUtc: Noon.AddHours(-1));
+            serverId: "host-a", sinceUtc: Noon.AddHours(-1));
 
         var entry = Assert.Single(entries);
-        Assert.Equal("badwolf", entry.ServerId);
+        Assert.Equal("host-a", entry.ServerId);
     }
 
     [Fact]

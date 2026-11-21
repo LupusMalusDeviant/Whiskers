@@ -42,7 +42,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     private readonly ConcurrentDictionary<string, int> _backoffStep = new();
 
     // Container names, kept for the status view: a suspended container is no longer scanned, so its name
-    // cannot reliably be looked up in the live list afterwards — and "badwolf:abc123f" is a riddle, not a report.
+    // cannot reliably be looked up in the live list afterwards — and "web-01:abc123f" is a riddle, not a report.
     private readonly ConcurrentDictionary<string, string> _suspendedNames = new();
 
     /// <summary>Timeouts in a row before a container is taken out of the scan (Plan-0002 WP3).</summary>
@@ -439,7 +439,11 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     {
         var timeouts = _consecutiveTimeouts.AddOrUpdate(key, 1, (_, n) => n + 1);
         if (timeouts < TimeoutsBeforeSuspension) return;
-        if (_suspendedUntil.ContainsKey(key)) return;   // already suspended; the notice was sent once
+        // Still suspended: the notice was sent once. A suspension that has RUN OUT is no reason to stay quiet (review
+        // 1.0.0): the key stayed in the map after the pause, so a container still unreadable afterwards was never
+        // suspended again — scanned every cycle, timing out every cycle, and gone from the status view. It is suspended
+        // again now, one backoff step longer, and announced again.
+        if (_suspendedUntil.TryGetValue(key, out var until) && DateTime.UtcNow < until) return;
 
         var step = _backoffStep.AddOrUpdate(key, 0, (_, n) => Math.Min(n + 1, SuspensionBackoff.Length - 1));
         var pause = SuspensionBackoff[step];

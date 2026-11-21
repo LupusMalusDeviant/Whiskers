@@ -23,7 +23,7 @@ public static class KillSwitchExemptions
     public const string RuleId = "read-only-mode";
 }
 
-/// <summary>Contract 0017: one script an Admin vouched for on one server, pinned to the SHA-256 of its content.</summary>
+/// <summary>Contract 0022: one script an Admin vouched for on one server, pinned to the SHA-256 of its content.</summary>
 public sealed class TrustedScript
 {
     public string ServerId { get; set; } = "";
@@ -90,7 +90,7 @@ public class GuardrailPolicy
 
     private List<TrustedScript>? _trustedScripts;
 
-    /// <summary>Contract 0017: scripts an Admin vouched for, per server, pinned to their content's SHA-256. A command
+    /// <summary>Contract 0022: scripts an Admin vouched for, per server, pinned to their content's SHA-256. A command
     /// that is exactly such a script with literal arguments is analysable; the listed paths are protected from
     /// changes. Optional in <c>guardrails.json</c>, and left out of the stored and hashed policy while empty (an empty
     /// list reads as <c>null</c>), so existing policies keep their version. An invalid entry makes the configuration

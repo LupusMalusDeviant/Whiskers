@@ -132,9 +132,13 @@ internal sealed class FakeDocker : IDockerService
         list.Add((at, text));
     }
 
+    /// <summary>Containers that are not running: a listing with <c>all: false</c> leaves them out, as Docker does.</summary>
+    public HashSet<string> StoppedContainerIds { get; } = new(StringComparer.Ordinal);
+
     public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
     {
-        var reachable = _containers.Where(c => !UnreachableServerIds.Contains(c.ServerId)).ToList();
+        var reachable = _containers.Where(c => !UnreachableServerIds.Contains(c.ServerId))
+            .Where(c => all || !StoppedContainerIds.Contains(c.Id)).ToList();
         var serverNames = _containers.GroupBy(c => c.ServerId)
             .ToDictionary(g => g.Key, g => g.First().ServerName, StringComparer.OrdinalIgnoreCase);
 
@@ -203,7 +207,7 @@ internal sealed class FakeDocker : IDockerService
         if (ListContainersException is { } thrown) throw thrown;
         // Like the real service, an id in another case names the same server.
         return _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
-            StringComparison.OrdinalIgnoreCase)).ToList();
+            StringComparison.OrdinalIgnoreCase) && (all || !StoppedContainerIds.Contains(c.Id))).ToList();
     }
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value
@@ -305,13 +309,19 @@ internal sealed class FakeDocker : IDockerService
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();
-    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
+    /// <summary>What a pull does (by image reference); unset, a pull throws.</summary>
+    public Func<string, Task>? Pull { get; set; }
+    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default)
+        => Pull?.Invoke(imageName) ?? throw new NotSupportedException();
     public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null) =>
         AllowMutations ? Task.FromResult(("running", 0, false)) : throw new NotSupportedException();
     public Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync() => throw new NotSupportedException();
     public Task<Whiskers.Services.ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
-        => Task.FromResult<Whiskers.Services.ImageUpdate.ImageContract?>(null);
+        => Task.FromResult(Contract?.Invoke(imageRef));
+
+    /// <summary>What an image inspect answers (by image reference); unset, null.</summary>
+    public Func<string, Whiskers.Services.ImageUpdate.ImageContract?>? Contract { get; set; }
 
     /// <summary>What <see cref="GetImageDigestAsync"/> answers (R1-41: a test can hold it to model a slow read).</summary>
     public Func<string, Task<string?>>? Digest { get; set; }
@@ -324,7 +334,10 @@ internal sealed class FakeDocker : IDockerService
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
         => DigestWithToken?.Invoke(imageRef, ct) ?? GetImageDigestAsync(imageRef, serverId);
-    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>The image a container was created from (by container id); unset, reading it throws.</summary>
+    public Func<string, string?>? ConfiguredImage { get; set; }
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+        => ConfiguredImage is { } read ? Task.FromResult(read(containerId)) : throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null, CancellationToken ct = default) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));
     /// <summary>The environment every container answers with; unset, reading it throws.</summary>
@@ -337,7 +350,12 @@ internal sealed class FakeDocker : IDockerService
     public List<NetworkInfo> Networks { get; } = new();
 
     public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null) =>
-        Task.FromResult<IList<NetworkInfo>>(Networks.Where(n => n.ServerId == (serverId ?? DefaultServerId)).ToList());
+        NetworksFail
+            ? throw new InvalidOperationException("the network list cannot be read")
+            : Task.FromResult<IList<NetworkInfo>>(Networks.Where(n => n.ServerId == (serverId ?? DefaultServerId)).ToList());
+
+    /// <summary>Contract 0021: the network list cannot be read.</summary>
+    public bool NetworksFail { get; set; }
 
     /// <summary>When true, restart / recreate succeed and are recorded in <see cref="Actions"/>; otherwise they
     /// throw, so a test that must never reach them fails loudly.</summary>
@@ -352,9 +370,25 @@ internal sealed class FakeDocker : IDockerService
         Actions.Add((op, containerId, serverId));
         return result;
     }
-    public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null) => throw new NotSupportedException();
+    /// <summary>Contract 0021: every network create / connect, as called (only with <see cref="AllowMutations"/>).</summary>
+    public List<(string Op, string Network, string Arg, string? ServerId)> NetworkCalls { get; } = new();
+
+    public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null)
+    {
+        if (!AllowMutations) throw new NotSupportedException();
+        NetworkCalls.Add(("create", name, driver, serverId));
+        return Task.FromResult("net-created-" + name);
+    }
     public Task RemoveNetworkAsync(string networkId, string? serverId = null) => throw new NotSupportedException();
-    public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>Connects only to a network id that is listed (as Docker: a removed network's id is gone).</summary>
+    public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null)
+    {
+        if (!AllowMutations) throw new NotSupportedException();
+        NetworkCalls.Add(("connect", networkId, containerId, serverId));
+        return Networks.Any(n => n.Id == networkId)
+            ? Task.CompletedTask
+            : throw new InvalidOperationException($"network {networkId} not found");
+    }
     public Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
     /// <summary>What <see cref="RunHostShellAsync"/> does; unset, it is not supported.</summary>
     public Func<string, string?, TimeSpan?, CancellationToken, Task<(string Output, string Error, int ExitCode)>>? HostShell { get; set; }

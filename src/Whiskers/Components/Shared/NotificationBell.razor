@@ -40,11 +40,11 @@
                symptom of that bug; rendering them all was a second one underneath. *@
             @if (!_open)
             {
-                <div style="padding:24px; text-align:center; color:rgba(255,255,255,0.4);">…</div>
+                <div style="padding:24px; text-align:center; color:var(--sw-text-muted);">…</div>
             }
             else if (visible.Count == 0)
             {
-                <div style="padding:24px; text-align:center; color:rgba(255,255,255,0.4);">@L["NotificationBell_Empty"]</div>
+                <div style="padding:24px; text-align:center; color:var(--sw-text-muted);">@L["NotificationBell_Empty"]</div>
             }
             else
             {
@@ -56,12 +56,12 @@
                                 <MudIcon Icon="@SevIcon(n.Severity)" Color="@SevColor(n.Severity)" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto;" />
                                 <div style="min-width:0; flex:1;">
                                     <MudText Typo="Typo.body2" Style="font-weight:600;">@n.Title</MudText>
-                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.6); white-space:pre-wrap; display:block;">@Truncate(n.Detail)</MudText>
-                                    <MudText Typo="Typo.caption" Style="color:rgba(255,255,255,0.3);">@n.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:var(--sw-text-secondary); white-space:pre-wrap; display:block;">@Truncate(n.Detail)</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:var(--sw-text-muted);">@n.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</MudText>
                                 </div>
                                 @if (n.Link is not null)
                                 {
-                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto; color:rgba(255,255,255,0.3);" />
+                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="margin-top:2px; flex:0 0 auto; color:var(--sw-text-muted);" />
                                 }
                             </div>
                         </MudMenuItem>

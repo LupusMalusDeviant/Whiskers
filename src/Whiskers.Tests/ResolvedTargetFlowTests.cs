@@ -64,6 +64,10 @@ public sealed class ResolvedTargetFlowTests
         "ConfigSectionsTests pins the sections the pages pass.";
     private const string SectionEntry =
         "Names an entry inside the decided config section (an e-mail, a tool, a container's preferences), not the section.";
+    private const string HandoverItem =
+        "Contract 0020: names one item of the decided old owner (automation-owner); the store changes it only while that owner is still recorded (compare-and-set).";
+    private const string HoldItem =
+        "Contract 0020 (D11 c): nested in account.create, whose decided target is the new account; the item is held only while the address still owns it.";
     private const string OwnAccount = "Acts on the signed-in account itself; the call names no account.";
     private const string ProviderTransport =
         "Provider transport below ICloudControlService, which marks the decided cloud server; it takes the provider's " +
@@ -72,12 +76,27 @@ public sealed class ResolvedTargetFlowTests
         "Hetzner-only operation on the provider's numeric server or image id; the decided target is the Whiskers server.";
     private const string Entity =
         "Takes the stored entity (or the open request), not an id: the delegate passes the object read for the decision.";
+    private const string HetznerProjectKey =
+        "Contract 0018: a project-level Hetzner SSH key (no server id); composed only by server.onboard, whose decided target is the Whiskers server.";
     private const string RollbackRecord = "Takes the numeric rollback record; the decided target is the container.";
     private const string DerivedSecret =
         "Composed by server, registry and Git-app removal for a key derived from the decided record, not a decided name.";
 
     private static readonly IReadOnlyDictionary<string, string> WithoutTargetParameter = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["Whiskers.Services.Agent.Triggers.IAiTriggerStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Agent.Triggers.IAiTriggerStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.EndpointChecks.IEndpointCheckStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.EndpointChecks.IEndpointCheckStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.GitDeploy.IGitDeployService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.GitDeploy.IGitDeployService.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Mutations.IAutomationHold.HoldAllAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Mutations.IAutomationOwnerStore.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Mutations.IAutomationOwnerStore.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Scheduler.ISchedulerService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Scheduler.ISchedulerService.HoldAsync (automation.hold)"] = HoldItem,
+        ["Whiskers.Services.Webhooks.IWebhookService.HandOverAsync (automation.handover)"] = HandoverItem,
+        ["Whiskers.Services.Webhooks.IWebhookService.HoldAsync (automation.hold)"] = HoldItem,
         ["Whiskers.Services.Agent.IAgentSettingsStore.SaveAsync (config.agent)"] = WholeSection,
         ["Whiskers.Services.Auth.ILocalAccountService.ChangeOwnPasswordAsync (account.password_change)"] = OwnAccount,
         ["Whiskers.Services.Auth.IRoleService.RemoveRoleAsync (config.roles)"] = SectionEntry,
@@ -107,6 +126,10 @@ public sealed class ResolvedTargetFlowTests
         ["Whiskers.Services.Hetzner.IHetznerService.DisableRescueAsync (hetzner.rescue_disable)"] = HetznerId,
         ["Whiskers.Services.Hetzner.IHetznerService.EnableBackupsAsync (hetzner.backups_enable)"] = HetznerId,
         ["Whiskers.Services.Hetzner.IHetznerService.EnableRescueAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.EnableRescueWithKeysAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.CreateSshKeyAsync (hetzner.ssh_key_create)"] = HetznerProjectKey,
+        ["Whiskers.Services.Hetzner.IHetznerService.DeleteSshKeyAsync (hetzner.ssh_key_delete)"] = HetznerProjectKey,
+        ["Whiskers.Services.Onboarding.IBootstrapCleanup.RemoveMarkerLinesAsync (server.remove)"] = Entity,
         ["Whiskers.Services.Hetzner.IHetznerService.PowerOnAsync (cloud.power_on)"] = ProviderTransport,
         ["Whiskers.Services.Hetzner.IHetznerService.RebootAsync (cloud.reboot)"] = ProviderTransport,
         ["Whiskers.Services.Hetzner.IHetznerService.ResetAsync (cloud.hard_reset)"] = ProviderTransport,

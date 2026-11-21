@@ -38,15 +38,25 @@ public sealed class LocalAccountService : ILocalAccountService
     private readonly TimeProvider _time;
     private readonly ILogger<LocalAccountService>? _logger;
     private readonly IIdentityBindingStore? _bindings;
+    // Contract 0017 H2/H3: the whitelist entries of the accounts an Admin creates and deletes.
+    private readonly IWhitelistService? _whitelist;
     private readonly Whiskers.Services.Guardrails.IGuardrailStore _guardrails;
+    // Contract 0020 (D11 c): the hold of automation still recorded on an address that gets an account again, judged with
+    // the resolver the runs use.
+    private readonly IAutomationHold? _hold;
+    private readonly IAutomationOwnerResolver? _ownerResolver;
 
     /// <param name="bindings">R1-27: an Admin with an active Google/OIDC binding can sign in (last-Admin rule).</param>
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
         ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
         IClientAddress client, IConfiguration configuration, Whiskers.Services.Guardrails.IGuardrailStore guardrails,
-        TimeProvider? time = null, ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null)
+        TimeProvider? time = null, ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null,
+        IWhitelistService? whitelist = null, IAutomationHold? hold = null, IAutomationOwnerResolver? ownerResolver = null)
     {
+        _hold = hold;
+        _ownerResolver = ownerResolver;
         _bindings = bindings;
+        _whitelist = whitelist;
         // Contract 0009 (E5): the kill switch may block recovery-code redemption. Required: without it the check could not fail closed.
         _guardrails = guardrails ?? throw new ArgumentNullException(nameof(guardrails));
         _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
@@ -149,6 +159,11 @@ public sealed class LocalAccountService : ILocalAccountService
             var explicitRole = _roles.HasExplicitRole(email);
             if (explicitRole && _roles.GetRole(email) != role) return LocalAccountResult.Refused(LocalAccountErrors.RoleConflict);
 
+            // Contract 0020 (D11 c): after the refusals, before the Identity row exists (StateOf reads it directly): an
+            // owner that cannot act now has its automation held, so nothing it still owns runs again without someone
+            // switching it on. A hold that fails creates no account (it throws out of the decision).
+            await HoldUnusableOwnerAsync(email, ct);
+
             var user = new AppUser { UserName = email, Email = email, EmailConfirmed = true };
             var created = await _users.CreateAsync(user);   // no password: the owner sets one with the code
             if (!created.Succeeded)
@@ -186,11 +201,52 @@ public sealed class LocalAccountService : ILocalAccountService
                 await DeleteQuietlyAsync(email);
                 throw;
             }
-            _owners.RememberLocalAccounts();
+            try
+            {
+                // Contract 0017 H2: an enabled whitelist would refuse the new account's every sign-in — its address is
+                // added, through the access-control gate (AdminGate is held: AdminGate, then AccessControlWriteGate),
+                // inside this decided account.create. A disabled whitelist is not touched.
+                if (_whitelist is not null) await _whitelist.AddLocalAccountEntryAsync(email, user.Id, ct);
+                _owners.RememberLocalAccounts();
+            }
+            catch
+            {
+                // As for a failed role write: nothing of the account stays — not the whitelist entry it got here (a
+                // write that persisted before the failure; no-op without this account's record), not the role, not the
+                // account.
+                await RemoveEntryQuietlyAsync(email, user.Id);
+                if (!explicitRole) await RemoveRoleQuietlyAsync(email);
+                await DeleteQuietlyAsync(email);
+                throw;
+            }
             _logger?.LogInformation("Local account {Email} was created with role {Role}", Whiskers.Utils.LogSafe.Account(email), role);
             return new LocalAccountResult(true) { RecoveryCode = code, RecoveryExpiresUtc = expires };
         }
         finally { AdminGate.Release(); }
+    }
+
+    /// <summary>Contract 0020 (D11 c): holds every item recorded on <paramref name="email"/> unless its owner state,
+    /// read now with the runs' resolver, is <see cref="OwnerState.Active"/>. A state that cannot be read is not Active
+    /// (fail closed): the items are held.</summary>
+    private async Task HoldUnusableOwnerAsync(string email, CancellationToken ct)
+    {
+        // Without the hold nothing could keep the address's automation off: no account is created (fail closed).
+        if (_hold is null)
+            throw new InvalidOperationException("The automation hold is not available; no account is created.");
+        var ownerId = PrincipalIds.User(email);
+        OwnerState state;
+        try
+        {
+            state = _ownerResolver?.Describe(ownerId).State ?? OwnerState.Unverified;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "The owner state of {Account} could not be read; its automation is held",
+                Whiskers.Utils.LogSafe.Account(email));
+            state = OwnerState.Unverified;
+        }
+        if (state == OwnerState.Active) return;
+        await _hold.HoldAllAsync(ownerId, ct);
     }
 
     public async Task<LocalAccountResult> ResetPasswordAsync(string email, CancellationToken ct = default)
@@ -252,15 +308,32 @@ public sealed class LocalAccountService : ILocalAccountService
                 removedRole = role;
             }
 
+            // Contract 0017 H3: the whitelist entry this account's creation added goes too (an address listed before, or
+            // changed by hand since, stays). A failed removal undoes the deletion, as a failed role removal would.
+            // A failure puts the entry back only when the removal demonstrably reached whitelist.json (the receipt is set
+            // under the gate): a removal cancelled or refused before it wrote leaves the whitelist as it is now — also
+            // when another Admin removed the entry by hand while this one waited.
+            var receipt = new WhitelistWriteReceipt();
+            var removedEntry = false;
+            try { removedEntry = _whitelist is not null && await _whitelist.RemoveLocalAccountEntryAsync(target, user.Id, ct, receipt); }
+            catch
+            {
+                await RestoreEntryAsync(target, user.Id, receipt.Persisted);
+                await RestoreRoleAsync(target, removedRole);
+                throw;
+            }
+
             IdentityResult deleted;
             try { deleted = await _users.DeleteAsync(user); }
             catch
             {
+                await RestoreEntryAsync(target, user.Id, removedEntry);
                 await RestoreRoleAsync(target, removedRole);
                 throw;
             }
             if (!deleted.Succeeded)
             {
+                await RestoreEntryAsync(target, user.Id, removedEntry);
                 await RestoreRoleAsync(target, removedRole);
                 return LocalAccountResult.Refused(LocalAccountErrors.Conflict);
             }
@@ -300,6 +373,42 @@ public sealed class LocalAccountService : ILocalAccountService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogError("The role of local account {Email} could not be restored after a failed deletion ({Error})",
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Puts back a whitelist entry removed for a deletion that then failed (contract 0017 H3).</summary>
+    private async Task RestoreEntryAsync(string email, string accountId, bool removed)
+    {
+        if (!removed || _whitelist is null) return;
+        try { await _whitelist.RestoreLocalAccountEntryAsync(email, accountId); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("The whitelist entry of local account {Email} could not be restored after a failed deletion ({Error})",
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Takes back the whitelist entry a creation that then failed had written (contract 0017 H2); nothing
+    /// without this account's record.</summary>
+    private async Task RemoveEntryQuietlyAsync(string email, string accountId)
+    {
+        if (_whitelist is null) return;
+        try { await _whitelist.RemoveLocalAccountEntryAsync(email, accountId); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("The whitelist entry of half-created local account {Email} could not be removed again ({Error})",
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Takes back the role a creation that then failed had just written (contract 0017 H2).</summary>
+    private async Task RemoveRoleQuietlyAsync(string email)
+    {
+        try { await _roles.RemoveRoleAsync(email); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("The role of half-created local account {Email} could not be removed again ({Error})",
                 Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
         }
     }

@@ -59,11 +59,11 @@ public sealed partial record MtlsIdentity
             [tcpHost]);
     }
 
-    /// <summary>openssl's <c>subjectAltName=</c> value, e.g. <c>DNS:rabenhof,IP:100.112.9.103</c>.</summary>
+    /// <summary>openssl's <c>subjectAltName=</c> value, e.g. <c>DNS:web-01,IP:100.64.0.42</c>.</summary>
     public string OpenSslSubjectAltName =>
         string.Join(",", DnsNames.Select(d => $"DNS:{d}").Concat(IpAddresses.Select(i => $"IP:{i}")));
 
     // Lowercase labels separated by dots: what Slug() produces and what the existing proxy certificates carry.
-    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")]
+    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\z")]
     private static partial Regex NameRegex();
 }

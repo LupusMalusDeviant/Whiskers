@@ -4,7 +4,7 @@ Vulnerability scanning. A background monitor periodically scans both **host OS p
 
 Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affected instances behind it), each instance is confirmed by the scanner against the actually-installed package version (a `Verified` flag separates real CVE matches from synthetic pending-update markers), carries its **OS context** (image OS from Trivy, host OS from `ServerSystemInfo`), and has an **age** ("open for N days") that survives restarts via a small persisted first-seen table.
 
-**Identity & failure handling (2026-07):** a finding's identity key is built from the container **name** (not its ID), so a container recreate (every image update changes the ID) keeps the persisted age and does not re-notify every CVE. A failed scan (Trivy timeout, transient apt error) returns an empty result with `Error` set; the monitor **keeps the previous good results** instead of overwriting them, avoiding a false "clean" state and a re-notification storm on the next successful scan, and backs off ~15 min (rather than a full interval) before retrying. An atomic scan gate stops a manual trigger and the background loop from running overlapping full scans. After each server's container scans, entries for containers that no longer exist are pruned (the OS entry is never pruned), and stale `CveFirstSeen` rows (gone **and** older than 30 days) are cleaned up so neither the store nor the age table grows unbounded across recreates. The apt scan commands force `LC_ALL=C.UTF-8` so non-English hosts report the same findings.
+**Identity & failure handling (2026-07):** a finding's identity key is built from the container **name** (not its ID), so a container recreate (every image update changes the ID) keeps the persisted age and does not re-notify every CVE. A failed scan (Trivy timeout, transient apt error) returns an empty result with `Error` set; the monitor **keeps the previous good results** instead of overwriting them, avoiding a false "clean" state and a re-notification storm on the next successful scan, and backs off ~15 min (rather than a full interval) before retrying. An atomic scan gate stops a manual trigger and the background loop from running overlapping full scans. After each server's container scans, entries for containers that no longer exist are pruned (the OS entry is never pruned), and stale `CveFirstSeen` rows (gone **and** older than 30 days) are cleaned up so neither the store nor the age table grows unbounded across recreates. The apt scan commands force `LC_ALL=C.UTF-8` so non-English hosts report the same findings. A host without apt is **not scannable**, never clean: the list command echoes a marker only when `apt` exists, and without it the result carries an `Error` (review 1.0.0). A `cve_finding` carries `ServerId`/`ServerName` and, for a container, the container's own name in `ContainerName` — so the per-container mute applies and the alert history files it under its server (review 1.0.0).
 
 ## Files
 
@@ -14,7 +14,7 @@ Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affect
 | `IOsCveScanner.cs` / `OsCveScanner.cs` | Scans a server's host OS packages for known CVEs. R1-48: its `apt-get update` (package index) is a designed exemption of the monitoring cycle (PRODUCT_CONTRACT S-06), pinned in `MutationGatewayCoverageTests`. |
 | `ITrivyScanner.cs` / `TrivyScanner.cs` | Scans a container image for known CVEs using [Trivy](https://github.com/aquasecurity/trivy); captures the image OS and the CVE published date. Requests a 16 MB output cap and refuses a truncated report outright — see **Large reports** below. R1-48: pulling the scanner image, the throw-away `--rm` container and the cache volume are a designed exemption (S-06); only the CVE monitor and the update-risk assessment (inside its `image.assess_update` decision) run it (pinned). |
 | `ICveFindingsStore.cs` / `CveFindingsStore.cs` | In-memory store of the latest CVE scan results per server/container, with summary helpers and `BuildGroups`, which **de-duplicates** every finding into one `CveGroup` per CVE-ID listing all real affected (server, container/OS, package) instances behind it. |
-| `ICveAgeStore.cs` / `CveAgeStore.cs` | Persists (SQLite, `CveFirstSeen` table) when each vulnerability instance was first detected, so the "open for N days" age survives restarts. Recorded after each scan cycle; read when grouping. |
+| `CveAgeStore.cs` (with `ICveAgeStore`) | Persists (SQLite, `CveFirstSeen` table) when each vulnerability instance was first detected, so the "open for N days" age survives restarts. Recorded after each scan cycle; read when grouping. |
 | `NoopCveServices.cs` | Core no-op defaults (`NoopCveFindingsStore` / `NoopCveMonitorService` / `NoopCveAgeStore`) for when the **Cve module** is off — the findings store + monitor are read by the Core Dashboard/ContainerDetail/Settings pages, which then show no CVE data. Real services win by last-registration when on (RoadToSAP Phase 1). |
 
 ## The `whiskers_cve_*` series (2026-08-27)
@@ -24,7 +24,7 @@ Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affect
 
 A failed scan deliberately keeps the previous results rather than reporting a false all-clear. That is the
 right trade, and it has a cost nobody had measured: a target whose scanner broke months ago looks exactly like
-one scanned this morning — same findings, still plausible, simply never changing. The Authentik image sat like
+one scanned this morning — same findings, still plausible, simply never changing. An identity-provider image sat like
 that from July to late August. The only thing separating the two was the age of the data, and nothing watched
 it.
 
@@ -41,57 +41,55 @@ database — a monitoring outage caused by monitoring. So the endpoint says *tha
 `get_cve_summary` (MCP) names *which* target, worst first, where one question is asked at a time and
 cardinality costs nothing. Both halves are needed: a count with no name leaves an operator nowhere to go.
 
-## Der containerd-Image-Store bricht Trivys Docker-Export (2026-08-28)
+## The containerd image store breaks Trivy's Docker export (2026-08-28)
 
-Trivy exportiert das Image standardmäßig aus dem Docker-Daemon und liest das entstehende Tar. Auf einem Host,
-dessen Docker den **containerd-Image-Store** benutzt (`io.containerd.snapshotter.v1` statt des klassischen
-`overlay2`), fehlen in diesem Export Schichten, und Trivy bricht ab mit
-`file blobs/sha256/… not found in tar`.
+By default Trivy exports the image from the Docker daemon and reads the resulting tar. On a host whose Docker uses
+the **containerd image store** (`io.containerd.snapshotter.v1` instead of the classic `overlay2`), layers are missing
+from that export, and Trivy stops with `file blobs/sha256/… not found in tar`.
 
-**Es ist nichts beschädigt** — und alles an diesem Fehler lädt zur falschen Diagnose ein. Vier Hypothesen
-wurden geprüft und widerlegt, bevor der Speichertreiber als einziger Unterschied übrig blieb:
+**Nothing is damaged**, and everything about this error invites the wrong diagnosis. Four hypotheses were tested and
+refuted before the storage driver remained as the only difference:
 
-| Vermutung | Widerlegt durch |
+| Hypothesis | Refuted by |
 |---|---|
-| `NetworkMode=host` | zwei Betroffene laufen im Bridge-Netz, `serverwatch` selbst host-networked und gesund |
-| beschädigte lokale Schichten | Image entfernt und frisch gezogen — Fehler unverändert |
-| Docker-Version | alle Server auf 29.5.x, identischer Image-Digest, einer scannt, einer nicht |
-| Trivy-Cache | mit komplett frischem Cache derselbe Fehler |
+| `NetworkMode=host` | two affected containers run on a bridge network, while `serverwatch` itself is host-networked and scans fine |
+| damaged local layers | image removed and pulled again: same error |
+| Docker version | all servers on 29.5.x, identical image digest, one scans and one does not |
+| Trivy cache | the same error with a completely fresh cache |
 
-`TrivyScanner` versucht deshalb bei **genau dieser** Fehlersignatur einen zweiten Lauf mit
-`--image-src remote`, liest das Image also aus der Registry statt aus dem Daemon. Der lokale Weg bleibt die
-Vorgabe: Er ist kostenlos und erfasst lokal gebaute Images, die in keiner Registry liegen. Die Wiederholung ist
-bewusst **eng** an die Signatur gebunden — ein Blanko-Retry würde einen nicht erreichbaren Host beantworten,
-indem er still aus dem Internet zieht, und nur der zweite Fehlschlag wäre je zu sehen.
+So on **exactly this** error signature `TrivyScanner` makes a second run with `--image-src remote`, reading the image
+from the registry instead of the daemon. The local path stays the default: it is free and covers locally built images
+that are in no registry. The retry is deliberately bound **tightly** to the signature: a blanket retry would answer an
+unreachable host by silently pulling from the internet, and only the second failure would ever be visible.
 
-Bekannte Grenze: private Images ohne hinterlegte Zugangsdaten im Trivy-Container scheitern auch im zweiten
-Lauf — dann greift der Eintrag aus dem Abschnitt darüber und das Ziel ist wenigstens sichtbar fehlerhaft
-statt abwesend.
+Known limit: private images without credentials available to the Trivy container fail in the second run too; then
+the rule of the next section applies, and the target is at least visibly failing instead of absent.
 
-## Ein nie erfolgreich gescanntes Ziel ist unsichtbar, nicht leer (2026-08-28)
+## A target never scanned successfully is invisible, not empty (2026-08-28)
 
-Ein fehlgeschlagener Scan behält absichtlich die vorherigen Ergebnisse. Für ein Ziel, das **noch nie**
-erfolgreich gescannt wurde, gibt es aber nichts zu behalten — also wurde gar nichts gespeichert, und das Ziel
-fehlte in jeder Liste. Ein fehlendes Ziel liest sich überall wie eines ohne Befunde.
+A failed scan deliberately keeps the previous results. For a target that was **never** scanned successfully there is
+nothing to keep, so nothing was stored and the target was missing from every list. A missing target reads everywhere
+like one without findings.
 
-Im Feld gefunden: Auf infomaniak liefen zehn Container, im Bestand standen acht Ziele. `ghostunnel` und
-`fenrir-sentinel` fehlten, weil ihre lokalen Image-Schichten beschädigt sind — Trivy scheitert dort mit
-`file blobs/sha256/… not found in tar`, dasselbe Image scannt auf drei anderen Servern fehlerfrei. Keiner der
-beiden war dort je erfolgreich gescannt worden, also gab es keinen Vorgänger, also wurde nichts gespeichert.
-**Die Veraltungsmetrik kann das prinzipiell nicht sehen: Was nicht da ist, kann nicht altern.**
+Found in the field: one server ran ten containers, and the inventory had eight targets. Two were missing (one of
+them `ghostunnel`) because their local image layers were damaged: Trivy failed there with
+`file blobs/sha256/… not found in tar`, while the same image scanned cleanly on three other servers. Neither had ever
+been scanned successfully on that server, so there was no previous result and nothing was stored.
+**The staleness metric cannot see this in principle: what is not there cannot age.**
 
-`CveScanOutcome.Decide` trennt die zwei Hälften der Regel, und beide sind nötig:
+`CveScanOutcome.Decide` separates the two halves of the rule, and both are needed:
 
-| Lage | Entscheidung | Warum |
+| Situation | Decision | Why |
 |---|---|---|
-| Scan erfolgreich | `Store` | auch ein Ergebnis ohne Befunde — sonst ist ein sauberes Image von einem ungescannten nicht zu unterscheiden |
-| Fehlgeschlagen, Vorgänger vorhanden | `KeepPrevious` | echte Befunde durch ein leeres Ergebnis zu ersetzen meldet Entwarnung und beim nächsten Erfolg jede CVE neu |
-| Fehlgeschlagen, **kein** Vorgänger | `Store` | sonst ist das Ziel abwesend, und abwesend sieht aus wie sauber |
+| Scan succeeded | `Store` | also a result without findings; otherwise a clean image cannot be told from an unscanned one |
+| Failed, previous result **with findings** | `KeepPrevious` | replacing real findings with an empty result reports an all-clear, and every CVE as new at the next success |
+| Failed, **no** previous result | `Store` | otherwise the target is absent, and absent looks clean |
+| Failed, previous result **without** findings (clean, or failed itself) | `Store` | review 1.0.0: an old "clean" would otherwise stay, although the target can no longer be checked (host without apt) |
 
-Ein gespeicherter Fehlschlag wird **nie** als neuer Befund gemeldet (`ShouldNotify`) — das würde jemanden
-wegen eines Scannerproblems anpiepsen. Sichtbar wird er stattdessen über `whiskers_cve_scan_failures{server}`
-und namentlich über `get_cve_summary`, inklusive Grund und der Zahl der noch bekannten Befunde: Ein Fehlschlag
-über alten, echten Daten ist eine andere Lage als einer über gar nichts.
+A stored failure is **never** reported as a new finding (`ShouldNotify`); that would page someone over a scanner
+problem. It shows instead in `whiskers_cve_scan_failures{server}` and by name in `get_cve_summary`, with the reason
+and the number of findings still known: a failure over old, real data is a different situation from one over
+nothing.
 
 ## Results of a server that was removed (2026-08-27)
 
@@ -113,7 +111,7 @@ nothing about the host — a server that is gone has no host left to protect). T
 
 ## Large reports (2026-08-27)
 
-Trivy's JSON for a large image runs to several megabytes — the Authentik server image measures 3.4 MB. The host
+Trivy's JSON for a large image runs to several megabytes — an identity-provider server image measures 3.4 MB. The host
 executor capped command output at 1 MB, so the document arrived cut in half with a truncation marker appended,
 and the scan failed every cycle with `'0xE2' is an invalid start of a value` — the marker's first byte. The
 error named the parser, the cause was the limit, and that image silently kept its stale findings for months.

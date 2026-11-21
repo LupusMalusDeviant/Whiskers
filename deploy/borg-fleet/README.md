@@ -1,41 +1,58 @@
 # borg-fleet — nightly BorgBackup of every Whiskers-managed server
 
-Every server Whiskers manages backs up to its **own sub-account** on the Hetzner Storage Box
-`u699949` (BX31, 5 TB, FSN1). The servers can only **add** archives; deleting and pruning
-happens centrally from Badwolf with a separate key.
+Every server Whiskers manages backs up to its **own sub-account** on a Hetzner Storage Box
+(`uXXXXXX`). The servers can only **add** archives; deleting and pruning happens centrally from one
+control host (`<control-host>`, the host that runs Whiskers) with a separate key.
 
 ```
- server ──(own key, forced "borg-1.x serve --append-only")──▶ u699949-subN : ./borg
- Badwolf ─(admin key, unrestricted, weekly prune)───────────▶ every sub-account
- Badwolf ─(Hetzner API token)──▶ sub-accounts, passwords, snapshot plan
+ server ─────────(own key, forced "borg-1.x serve --append-only")──▶ uXXXXXX-subN : ./borg
+ <control-host> ─(admin key, unrestricted, weekly prune)───────────▶ every sub-account
+ <control-host> ─(Hetzner API token)──▶ sub-accounts, passwords, snapshot plan
 ```
 
-## Fleet (enrolled 2026-10-24)
+## Fleet
+
+One row per enrolled server; the real mapping is kept outside the repository. Example layout:
 
 | Whiskers id | Server | Sub-account | borg | Nightly (Europe/Berlin) | DB dumps |
 |---|---|---|---|---|---|
-| `local` | Badwolf | `u699949-sub2` | 1.2 | 01:15 | pack-postgres, authentik-postgresql-1 |
-| `zirkuswagen` | Zirkuswagen | `u699949-sub3` | 1.2 | 01:45 | zirkuswagen-postgres |
-| `burgcloud` | BurgCloud | `u699949-sub4` | 1.2 | 02:15 | burgcloud_mysql, stargarder-postgres |
-| `infomaniak` | LupusMalus | `u699949-sub1` | 1.2 | 02:45 | lupusmalus-web-postgres-1 |
-| `rabenhof` | Rabenhof | `u699949-sub5` | 1.4 | 03:15 | — |
-| `hetzner-apps` | AppServer | `u699949-sub8` | 1.4 | 03:45 | — |
-| `a1a73e7c3050` | BurgCloud-Office | `u699949-sub6` | 1.4 | 04:15 | — |
-| `hostinger-kvm2` | GitLab & Hermes | `u699949-sub7` | 1.2 | 04:45 | gitlab-4rq9-gitlab-1 (Omnibus) |
+| `local` | `<control-host>` | `uXXXXXX-sub1` | 1.2 | 01:15 | `<postgres-container>` |
+| `<server-a>` | `<server-a>` | `uXXXXXX-sub2` | 1.4 | 01:45 | `<mysql-container>` |
+| `<server-n>` | `<server-n>` | `uXXXXXX-subN` | 1.2 | 04:45 | `<gitlab-container>` (Omnibus) |
 
-Repo of each: `ssh://<sub-account>@u699949.your-storagebox.de:23/./borg` (home dir
-`whiskers-<id>` on the box). Prune: Sun 07:30 on Badwolf. Box snapshots: daily 06:30 UTC, 14 kept.
+Repo of each: `ssh://<sub-account>@<storagebox-host>:23/./borg` (home dir `whiskers-<id>` on the box).
+Prune: Sun 07:30 on the control host. Box snapshots: daily 06:30 UTC, 14 kept.
 
 ## Files
 
 | Where | What |
 |---|---|
-| `borg-enroll` (Badwolf, `/opt/borg-fleet`) | enrols one server — idempotent, the one-liner below |
+| `borg-enroll` (control host, `/opt/borg-fleet`) | enrols one server — idempotent, the one-liner below |
 | `borg-fleet-client` (every server, `/usr/local/sbin`) | `prepare` / `init` / `backup` / `status` |
-| `borg-fleet-prune` + `.service`/`.timer` (Badwolf) | weekly retention, Sun 07:30 |
+| `borg-fleet-prune` + `.service`/`.timer` (control host) | weekly retention, Sun 07:30 |
 | `fleet.json.example` | copy to `/root/.config/borg-fleet/fleet.json` |
 
-Badwolf, root-only (`/root/.config/…`):
+### Tools (no Python since 1.0.0, contract 0017 part I)
+
+| Script | Needs | Without it |
+|---|---|---|
+| `borg-enroll` (POSIX `sh`) | `curl jq base64 sha256sum awk sed tr head tail cut grep cp cat rm mkdir chmod dirname date sleep mktemp ssh-keygen sshpass sftp` | refuses to start (exit 1, `missing tool: …`) |
+| `borg-fleet-prune` | `jq borg sftp ssh sed grep comm sort mktemp wc rm cat basename` | refuses to start (exit 1) |
+| `borg-fleet-client` | `borg`, `flock`, coreutils, `find`; `docker` + `gzip` for the DB dumps | no docker: no DB dumps (as before) |
+| `borg-fleet-client` | **`sqlite3`** (`.timeout`, `.backup`, each copy under `timeout 300`) | the SQLite snapshot is skipped with a WARN; the backup itself still runs, and `last-status.json` says `"sqlite_snapshot":"skipped"` with `result` `warning` |
+
+`borg-enroll` keeps its arguments, outputs and exit codes (0 = enrolled, 1 = anything else). It now refuses a
+`--time` that is not a time of day (`00:00`–`23:59`), and an empty server id or one with `/` or a leading `.`, all of
+which end up in commands or paths. Secrets (API token, MCP key, sub-account passwords) never stand in a program's
+arguments; they travel in 0600 files or on stdin. The client's `last-status.json` gained `sqlite_snapshot`: `ok`,
+`errors` (some files could not be copied or moved into place; no half copy is left; `result` `warning`) or
+`skipped` (`result` `warning`).
+
+**Rollout `[braucht Nutzer]`:** install `jq` on the control host and `sqlite3` on **every** fleet server
+(`apt-get install -y sqlite3`) **before** the new `borg-fleet-client` is rolled out (re-run `borg-enroll <id>`, which
+refreshes the client); then check `borg-fleet-client status` after the next night for `"sqlite_snapshot":"ok"`.
+
+Control host, root-only (`/root/.config/…`):
 
 | Path | Content |
 |---|---|
@@ -59,33 +76,37 @@ What it does: installs borg, creates the server's key and passphrase, creates/re
 sub-account labelled `whiskers-server=<id>`, writes its `authorized_keys` (server key forced to
 append-only + admin key), rotates the sub-account password to a value nobody keeps, creates the
 repo (`repokey-blake2`, `append_only=1`), installs the nightly timer, escrows passphrase + repokey
-on Badwolf. Timer slot: from `fleet.json` `times`, otherwise a fixed 15-minute slot between 00:30
+on the control host. Timer slot: from `fleet.json` `times`, otherwise a fixed 15-minute slot between 00:30
 and 05:15 derived from the server id.
 
 Logs: `/var/log/borg-enroll-<id>.log` when started via `systemd-run`; on the target
 `journalctl -u borg-fleet-first` (first run) / `-u borg-fleet-backup` (nightly).
 
 **Prerequisite per server:** outbound TCP 23 to the box. Hetzner Cloud firewalls with an egress
-allowlist (Zirkuswagen) need a rule `out tcp 23` to `u699949.your-storagebox.de`.
+allowlist need a rule `out tcp 23` to `<storagebox-host>`.
 
 ## What is backed up
 
 `/etc /home /root /opt /srv /usr/local /var/lib/docker/volumes` plus every bind-mount source of
 running containers, plus `/var/backups/borg-fleet` which holds, freshly made before each run:
 
-- `db/<container>.pg_dumpall.sql.gz` — every running Postgres container (`pg_dumpall`)
+- `db/<container>.pg_dumpall.sql.gz` — every running Postgres server container (`pg_dumpall` as its
+  `POSTGRES_USER`); recognised by `POSTGRES_PASSWORD`/`POSTGRES_USER`/`PGDATA` or the `postgres` server binary, not by
+  client tools alone (Whiskers' own image has those)
 - `db/<container>.mysqldump.sql.gz` — every running MySQL/MariaDB container
 - GitLab Omnibus containers: `pg_dumpall` of the bundled Postgres (socket
   `/var/opt/gitlab/postgresql`); its live `postgresql/data` dir is excluded. For a full GitLab
   restore also keep `/etc/gitlab/gitlab-secrets.json` (in the config volume, backed up).
-- `sqlite/…` — consistent copies (SQLite online-backup API) of every SQLite file found
+- `sqlite/…` — consistent copies (SQLite online-backup API via `sqlite3 .backup`, 30 s busy timeout, 300 s per
+  file) of every SQLite file found under `/opt /srv /home /root /var/lib/docker/volumes` (512 bytes to 8 GiB,
+  SQLite header checked, symlinks skipped)
 
 The live data directories of the DB containers are **excluded** — no hot copies of running
 database files. Skip a directory by dropping a `.nobackup` file into it.
 
 ## Restore
 
-You need: the passphrase (`escrow/<id>/passphrase` on Badwolf **and** in the password manager).
+You need: the passphrase (`escrow/<id>/passphrase` on the control host **and** in the password manager).
 Without it the repo is unreadable — Hetzner cannot help.
 
 From the server itself (its key can read):
@@ -99,10 +120,10 @@ borg extract ::<archive> opt/some/dir       # partial restore (paths without lea
 ```
 
 From anywhere else (server lost): take the repo URL from `servers/<id>.json`, the passphrase from
-escrow, and use the admin key on Badwolf:
+escrow, and use the admin key on the control host:
 
 ```bash
-export BORG_REPO=ssh://u699949-subN@u699949.your-storagebox.de:23/./borg
+export BORG_REPO=ssh://uXXXXXX-subN@<storagebox-host>:23/./borg
 export BORG_REMOTE_PATH=borg-1.4          # or borg-1.2, see servers/<id>.json
 export BORG_RSH="ssh -i /root/.config/borg-fleet/admin_ed25519 -o IdentitiesOnly=yes"
 export BORG_PASSCOMMAND="cat /root/.config/borg-fleet/escrow/<id>/passphrase"
@@ -111,7 +132,8 @@ borg extract --list ::<archive>
 
 If the repo key were ever damaged: `borg key import $BORG_REPO escrow/<id>/repokey`.
 
-Databases: `gunzip -c <c>.pg_dumpall.sql.gz | docker exec -i <c> psql -U postgres`,
+Databases: `gunzip -c <c>.pg_dumpall.sql.gz | docker exec -i <c> sh -c 'exec psql -U "${POSTGRES_USER:-postgres}" -d postgres'`
+(the role the dump was taken with: the container's `POSTGRES_USER`, `postgres` only when it sets none),
 `gunzip -c <c>.mysqldump.sql.gz | docker exec -i <c> sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'`.
 
 ## Protection model and its limits
@@ -120,8 +142,8 @@ Databases: `gunzip -c <c>.pg_dumpall.sql.gz | docker exec -i <c> psql -U postgre
   and the repo itself is `append_only=1`. Deletions it "commits" are only recorded and would take
   effect at the next non-append-only write — `borg-fleet-prune` therefore compares the archive
   list with last week's and refuses to prune a repo where archives vanished.
-- Verified 2026-10-24 on LupusMalus: the server key can neither `ls`/`rm` (forced into
+- Verified 2026-10-24 on one enrolled server: the server key can neither `ls`/`rm` (forced into
   `borg serve`) nor SFTP; `append_only = 1`; a faked "vanished archive" makes the prune abort.
-- **Badwolf is the trust anchor**: it holds the admin key, every passphrase and the API token.
-  Root on Badwolf can delete every backup. The Storage Box's own snapshots (snapshot plan, set
+- **The control host is the trust anchor**: it holds the admin key, every passphrase and the API token.
+  Root on the control host can delete every backup. The Storage Box's own snapshots (snapshot plan, set
   via the API, not reachable over SSH) are the last line against that.

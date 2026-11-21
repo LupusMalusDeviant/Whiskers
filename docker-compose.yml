@@ -9,7 +9,7 @@
 #
 # If Whiskers only monitors REMOTE hosts (mesh + mTLS) and should not have these
 # privileges, use the locked-down profile instead: docker-compose.hardened.yml
-# (non-root, no privileged, socket-proxy, dropped caps). See docs/container-hardening.md.
+# (non-root, no privileged, socket-proxy, dropped caps). See docs/operations/container-hardening.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The service, container and volume keep their pre-rebrand name `serverwatch` (Whiskers was called
@@ -37,6 +37,9 @@ services:
       - VAULT_KEY=${VAULT_KEY:-}
       # Path inside the container (mount the secret file there too); empty = not set.
       - VAULT_KEY_FILE=${VAULT_KEY_FILE:-}
+      # Only for a key rotation (docs/operations/vault-key-rotation.md): the NEW key's file inside the container (mount it
+      # there too); empty = no rotation.
+      - VAULT_KEY_NEW_FILE=${VAULT_KEY_NEW_FILE:-}
       # Admin bootstrap: seeded as Admin on first run + flips the whitelist fail-closed. See .env.example.
       - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       # Local login (F1): path to a mounted secret file with the admin password → unattended local admin. See .env.example.
@@ -98,7 +101,8 @@ services:
       # Metrics collection (sample interval / retention / on-off) + metric-alert thresholds → AI triggers.
       - Metrics__Enabled=${METRICS_ENABLED:-true}
       - Metrics__CollectionIntervalSeconds=${METRICS_COLLECTIONINTERVALSECONDS:-30}
-      - Metrics__RetentionDays=${METRICS_RETENTIONDAYS:-7}
+      # Raw retention in days: empty (the default) = edited under Settings -> Metric retention; a value fixes it read-only.
+      - Metrics__RetentionDays=${METRICS_RETENTIONDAYS:-}
       - MetricAlert__Enabled=${METRICALERT_ENABLED:-true}
       - MetricAlert__CpuPercent=${METRICALERT_CPUPERCENT:-90}
       - MetricAlert__MemoryPercent=${METRICALERT_MEMORYPERCENT:-90}

@@ -10,6 +10,7 @@
 @inject IComposePlanner ComposePlanner
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IJSRuntime JS
+@inject ILogger<WebhooksView> Logger
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive webhooks UI. Rendered by Webhooks.razor only when the Webhooks module is enabled (via
@@ -95,6 +96,8 @@ else
                     @if (owner.State != OwnerState.Active)
                     {
                         <MudText Typo="Typo.caption" Color="Color.Error">@L[$"AutomationOwners_State_{owner.State}"]</MudText>
+                        @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                        <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
                     }
                 }
                 @if (_role >= AppRole.Admin && _me is not null && context.Owner != _me)
@@ -273,7 +276,17 @@ else
         var sid = _formServerId;
         // all: true — a stopped container is a legitimate restart/rebuild target too. The server-scoped
         // overload is used on purpose; ListAllContainersAsync spans the whole fleet.
-        _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        try
+        {
+            _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): an unreachable server leaves the picker empty and says so; the dialog still opens
+            // (another server can be chosen) instead of the listing error ending the circuit.
+            _containers = new();
+            Snackbar.Add(L["Common_Error_ContainersUnavailable", UiFailure.Report(Logger, "list containers", ex)].Value, Severity.Warning);
+        }
     }
 
     private async Task CreateWebhook()

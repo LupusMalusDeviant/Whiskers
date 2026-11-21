@@ -1,11 +1,11 @@
 # Whiskers.Migrations.Sqlite
 
-The **SQLite** EF Core migrations for the app's two DbContexts (both in [`Whiskers.Data`](../Whiskers.Data/)). Kept in its own assembly, separate from the PostgreSQL migrations, because EF Core allows only one model snapshot per context per assembly ([ADR-0004](../../docs/adr/0004-postgres-provider-support.md)).
+The **SQLite** EF Core migrations for the app's two DbContexts (both in [`Whiskers.Data`](../Whiskers.Data/)). Kept in its own assembly, separate from the PostgreSQL migrations, because EF Core allows only one model snapshot per context per assembly ([ADR-0004](../../docs/architecture/adr/0004-postgres-provider-support.md)).
 
 - `MetricsDbContext` (root of this project): `20260707164258_InitialCreate` (+ `.Designer`) — the frozen baseline. Its **name must never change** (ADR-0003): `DatabaseInitializer` stamps legacy `EnsureCreated` databases against exactly this id. `MetricsDbContextModelSnapshot` is its snapshot.
 - `WhiskersIdentityDbContext` (under `Identity/`, F1 local auth): the ASP.NET Identity user schema, applied at boot into its **own `__IdentityMigrationsHistory`** table so it never touches the metrics baseline path. `WhiskersIdentityDbContextModelSnapshot` is its snapshot.
 
-Later metrics migrations are additive (ADR-0004), each with a twin of the same name in the PostgreSQL assembly — the newest, `InstanceMarkers` (contract 0010), adds the table `InstanceMarkers` (the record that a guardrail policy has existed, INV-25).
+Later metrics migrations are additive (ADR-0004), each with a twin of the same name in the PostgreSQL assembly — the newest, `ApprovalDecidedVia` (contract 0019), adds the nullable column `Approvals.DecidedVia` (where a human decided an approval: `page`, `dialog`, `chat`); before it, `InstanceMarkers` (contract 0010) added the table `InstanceMarkers` (the record that a guardrail policy has existed, INV-25).
 
 The app pins this assembly with `MigrationsAssembly("Whiskers.Migrations.Sqlite")` for both contexts.
 

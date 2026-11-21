@@ -128,7 +128,7 @@
         </MudSelect>
         <MudTextField @bind-Value="_projectName" Label="@L["ComposeEditor_Label_ProjectName"]" Variant="Variant.Outlined"
                       Style="max-width: 200px;" Placeholder="my-app" />
-        @if (_role >= AppRole.Operator)
+        @if (_role >= CapabilityCatalog.RoleOf("compose.deploy"))
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch"
                        OnClick="Deploy" Disabled="@(_deploying || string.IsNullOrWhiteSpace(_projectName))">
@@ -180,7 +180,11 @@
 
     private void AddService()
     {
-        var svc = new ComposeService { Name = $"service{_services.Count + 1}" };
+        // The first free name (review 1.0.0, T3): after a removal the count named the next service like an existing one,
+        // and the YAML then held one service under that key.
+        var number = _services.Count + 1;
+        while (_services.Any(s => s.Name == $"service{number}")) number++;
+        var svc = new ComposeService { Name = $"service{number}" };
         _services.Add(svc);
         _selectedService = svc;
     }

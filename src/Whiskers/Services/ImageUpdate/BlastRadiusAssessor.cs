@@ -29,7 +29,7 @@ public sealed record BlastRadius(
 /// Who else a change to one container touches (GAP-7, 2026-08-28).
 ///
 /// <para><b>Why this exists, in one sentence:</b> on 2026-08-27 the same prediction was made twice by hand and
-/// was wrong both times. Adding a compose override to Authentik was expected to recreate two services and
+/// was wrong both times. Adding a compose override to the identity provider was expected to recreate two services and
 /// recreated all three, restarting the database. The same thing then happened to the docker-proxy stack. The
 /// rule nobody had written down is that a change to the project's <em>configuration</em> — a new override file
 /// included — changes the config hash for every service in it, so <c>compose up -d</c> recreates the lot.</para>
@@ -93,7 +93,7 @@ public static class BlastRadiusAssessor
         }
 
         // EH-6: the branch you are sitting on. Recreating the container that terminates the control plane
-        // kills the command mid-flight — on 2026-08-27 that was ghostunnel on infomaniak, and the only reason
+        // kills the command mid-flight — on 2026-08-27 that was ghostunnel on web-02, and the only reason
         // it came back was that the command had been detached first.
         var severs = serverIsRemoteControlled &&
                      (PublishesDockerApi(target) || siblings.Any(PublishesDockerApi));

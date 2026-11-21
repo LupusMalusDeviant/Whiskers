@@ -114,6 +114,11 @@ public sealed record ComposeMount(string Source, bool ProjectScoped)
     /// <summary>What the entry refers to by name until every file is read: <c>service</c> (<c>volumes_from</c> of
     /// another service), <c>secret</c> or <c>config</c> (a file-backed one is mounted into the container).</summary>
     public string? Reference { get; init; }
+
+    /// <summary>Contract 0017, A1: the engine's API socket that <c>use_api_socket</c> binds. Kept through
+    /// <c>volumes_from</c>, so the re-check decides the engine's socket whatever its path on the host (rootless
+    /// <c>/run/user/&lt;uid&gt;/docker.sock</c>) for the receiving service too.</summary>
+    public bool ApiSocket { get; init; }
 }
 
 /// <summary>A compose deployment's impact could not be determined; the deployment does not run (fail closed).</summary>
@@ -281,6 +286,10 @@ public sealed record ComposePlan(
     /// <summary>Contract 0013, D16: the host files the third-party detection read while planning (path → SHA-256, or
     /// <c>absent</c>); step 4 reads them again and refuses when one changed.</summary>
     public IReadOnlyDictionary<string, string> ThirdPartyFiles { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>Contract 0021: the networks the plan's active services join, as the planner looked them up among the
+    /// host's live networks; step 4 looks them up again (<see cref="ComposeLiveNetworks"/>).</summary>
+    public IReadOnlyList<ComposeNetworkRef> Networks { get; init; } = [];
 
     /// <summary>Every exposure of the services compose will start, in a stable order (contract 0006).</summary>
     public IReadOnlyList<ComposeExposure> Exposures() => Services.SelectMany(s => s.Exposures).ToList();
@@ -810,6 +819,14 @@ public static partial class ComposeModel
                         if (((entry as YamlScalarNode)?.Value ?? (entry is YamlMappingNode em ? Scalar(em, "source") : null))
                             is { } entryName)
                             yield return new ComposeMount(entryName, ProjectScoped: false) { Reference = kind };
+            // Contract 0017, A1: use_api_socket binds the engine's socket into the container, read-write.
+            if (source.Children.TryGetValue(new YamlScalarNode("use_api_socket"), out var apiSocket))
+            {
+                var raw = (apiSocket as YamlScalarNode)?.Value
+                          ?? throw new ComposePlanException($"The use_api_socket of '{service}' cannot be read.");
+                if (IsOn(Interpolate(raw, env, $"The use_api_socket of '{service}'")))
+                    yield return new ComposeMount(DockerSocket, ProjectScoped: false) { FromVariable = raw.Contains('$'), ApiSocket = true };
+            }
             if (!source.Children.TryGetValue(new YamlScalarNode("volumes"), out var node)) continue;
             if (node is not YamlSequenceNode list)
                 throw new ComposePlanException($"The volumes of '{service}' are not a list.");
@@ -847,6 +864,15 @@ public static partial class ComposeModel
         }
     }
 
+    /// <summary>The host path of the Docker socket that <c>use_api_socket: true</c> binds into a container (contract 0017,
+    /// A1), read-write: decided like a <c>volumes:</c> entry of that path.</summary>
+    public const string DockerSocket = "/var/run/docker.sock";
+
+    /// <summary>Whether a boolean field of compose (<c>use_api_socket</c>, a hook's <c>privileged</c>) is on: every value
+    /// except the ones compose reads as false (fail closed).</summary>
+    public static bool IsOn(string value) =>
+        value.Trim().ToLowerInvariant() is not ("false" or "no" or "n" or "off" or "0" or "");
+
     /// <summary>A mapping and every mapping it merges with <c>&lt;&lt;</c>, through any depth (anchors of anchors).</summary>
     private static IEnumerable<YamlMappingNode> Merged(YamlMappingNode map, int depth)
     {
@@ -877,8 +903,11 @@ public static partial class ComposeModel
         return services.Select(s => effects.TryGetValue(s.Name, out var resolved)
             ? s with
             {
-                Mounts = s.Mounts.Concat(resolved.Where(r =>
-                    !s.Mounts.Any(m => m.Source == r.Source && m.Container == r.Container))).ToList(),
+                // A model mount compose also reports keeps the model's reading, plus compose's API-socket fact.
+                Mounts = s.Mounts.Select(m => !m.ApiSocket && resolved.Any(r => r.ApiSocket && r.Source == m.Source && r.Container == m.Container)
+                        ? m with { ApiSocket = true } : m)
+                    .Concat(resolved.Where(r =>
+                        !s.Mounts.Any(m => m.Source == r.Source && m.Container == r.Container))).ToList(),
             }
             : s).ToList();
     }

@@ -86,6 +86,73 @@ public sealed class ExposureChangeRuleTests
         Assert.Contains("label (withheld)", reason);
     }
 
+    /// <summary>Contract 0021: a LAN network is of class host; its reason names the network and the driver.</summary>
+    [Fact]
+    public void A_lan_network_needs_a_confirmation_and_names_network_and_driver()
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.LanNetwork, "lan", "macvlan"), out var reason);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets its own address on the LAN through network 'lan' (driver macvlan), past the host's firewall.", reason);
+        // The same for a network operation (network.create's identity).
+        Verdict(Admin(), LanDrivers.CreateIdentity("lan", "ipvlan")!, out var created);
+        Assert.Equal("network lan gets its own address on the LAN through network 'lan' (driver ipvlan), past the host's firewall.", created);
+    }
+
+    [Fact]
+    public void A_withheld_lan_network_names_kind_and_class_only()
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.LanNetwork, "secret-net", "secret-driver"), out var reason, withheld: true);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets a LAN network (withheld) of class 'host'; it needs a confirmation.", reason);
+        Assert.DoesNotContain("secret", reason);
+    }
+
+    [Fact]
+    public void Without_host_in_the_confirm_classes_a_lan_network_is_allowed()
+    {
+        var policy = Admin();
+        policy.ExposureConfirmClasses = [ExposureClasses.Public, ExposureClasses.Published];
+
+        Assert.Equal(GuardrailVerdict.Allow, Verdict(policy, Resolved(ExposureKind.LanNetwork, "lan", "macvlan"), out _));
+    }
+
+    /// <summary>Contract 0017, A1: a socket mount is of class host; its reason names the registry credentials, never the key.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_socket_mount_needs_a_confirmation_and_names_the_registry_credentials(bool withheld)
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.SocketMount, "mount:/var/run/docker.sock", "/var/run/docker.sock"),
+            out var reason, withheld);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets the Docker socket mounted (root on the host); with use_api_socket compose may also hand it the " +
+                     "registry credentials of the Docker client on the host (class 'host').", reason);
+    }
+
+    /// <summary>Contract 0017, A2: a privileged hook says which hook and that it is decided at planning only.</summary>
+    [Theory]
+    [InlineData("hook:post_start:0", false, "web runs a privileged post_start hook (hook:post_start:0); it is decided at planning only.")]
+    [InlineData("hook:pre_stop:2", false, "web runs a privileged pre_stop hook (hook:pre_stop:2); it is decided at planning only.")]
+    [InlineData("hook:pre_stop:2", true, "web runs a privileged hook (withheld); it is decided at planning only.")]
+    public void A_privileged_hook_needs_a_confirmation_and_says_it_is_decided_at_planning_only(string key, bool withheld,
+        string expected)
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.Privileged, key, "true"), out var reason, withheld);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal(expected, reason);
+    }
+
+    [Fact]
+    public void Privileged_on_the_service_keeps_its_reason()
+    {
+        Verdict(Admin(), Resolved(ExposureKind.Privileged, "privileged", "true"), out var reason);
+        Assert.Equal("web runs privileged.", reason);
+    }
+
     [Fact]
     public void An_entry_that_cannot_be_read_needs_a_confirmation() =>
         Assert.Equal(GuardrailVerdict.Confirm, Verdict(Admin(), "garbage", out _));
@@ -113,6 +180,11 @@ public sealed class ExposureChangeRuleTests
         Assert.Equal(GuardrailVerdict.Confirm, agent.Verdict);
         Assert.Contains(ExposureChangeRule.RuleId, agent.MatchedRuleIds);
         Assert.Equal(GuardrailVerdict.Allow, person.Verdict);
+
+        // Contract 0021: the same for a LAN network — confirmed for the agent, never asked of a person (PC-D1).
+        var lan = Request(Admin(), (ExposureChangeRule.ResolvedPrefix + "0", Resolved(ExposureKind.LanNetwork, "lan", "macvlan")));
+        Assert.Equal(GuardrailVerdict.Confirm, GuardrailEngine.CreateDefault().Evaluate(lan).Verdict);
+        Assert.Equal(GuardrailVerdict.Allow, GuardrailEngine.CreateForHumans().Evaluate(lan).Verdict);
     }
 
     [Fact]

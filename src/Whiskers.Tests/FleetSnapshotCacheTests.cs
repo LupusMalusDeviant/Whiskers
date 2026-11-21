@@ -45,10 +45,10 @@ public class FleetSnapshotCacheTests
     {
         // The age is the whole difference between a useful cache and a quiet lie.
         var (cache, time) = New();
-        cache.Put("badwolf", Info("badwolf"));
+        cache.Put("host-a", Info("host-a"));
 
         time.Advance(TimeSpan.FromSeconds(42));
-        var cached = cache.Get("badwolf");
+        var cached = cache.Get("host-a");
 
         Assert.NotNull(cached);
         Assert.Equal(42, cached!.Age.TotalSeconds, precision: 0);
@@ -61,11 +61,11 @@ public class FleetSnapshotCacheTests
         // Past ten minutes — twenty missed metrics cycles — the number says more about the outage than about
         // the server. Handing it over would dress an outage as a healthy fleet.
         var (cache, time) = New();
-        cache.Put("badwolf", Info("badwolf"));
+        cache.Put("host-a", Info("host-a"));
 
         time.Advance(IFleetSnapshotCache.MaxAge + TimeSpan.FromSeconds(1));
 
-        Assert.Null(cache.Get("badwolf"));
+        Assert.Null(cache.Get("host-a"));
         Assert.Empty(cache.GetAll());
     }
 
@@ -91,28 +91,28 @@ public class FleetSnapshotCacheTests
         var (cache, time) = New();
         for (var i = 0; i < 200; i++)
         {
-            cache.Put("badwolf", Info("badwolf"));
+            cache.Put("host-a", Info("host-a"));
             time.Advance(TimeSpan.FromSeconds(1));
         }
 
-        cache.Put("badwolf", Info("badwolf"));   // and the newest write wins
+        cache.Put("host-a", Info("host-a"));   // and the newest write wins
 
         Assert.Single(cache.GetAll());
-        Assert.Equal(0, cache.Get("badwolf")!.Age.TotalSeconds, precision: 0);
+        Assert.Equal(0, cache.Get("host-a")!.Age.TotalSeconds, precision: 0);
     }
 
     [Fact]
     public void A_server_that_no_longer_exists_is_swept_out()
     {
         var (cache, _) = New();
-        cache.Put("badwolf", Info("badwolf"));
+        cache.Put("host-a", Info("host-a"));
         cache.Put("deleted-in-july", Info("deleted-in-july"));
 
-        var removed = cache.PruneRemovedServers(new HashSet<string> { "badwolf" });
+        var removed = cache.PruneRemovedServers(new HashSet<string> { "host-a" });
 
         Assert.Equal(1, removed);
         Assert.Null(cache.Get("deleted-in-july"));
-        Assert.NotNull(cache.Get("badwolf"));
+        Assert.NotNull(cache.Get("host-a"));
     }
 
     [Fact]
@@ -121,22 +121,22 @@ public class FleetSnapshotCacheTests
         // Same rule as the CVE store learned on 2026-08-27: an empty list is far more likely to mean "could
         // not be read" than "there are no servers", and acting on it blanks the dashboard over a config hiccup.
         var (cache, _) = New();
-        cache.Put("badwolf", Info("badwolf"));
+        cache.Put("host-a", Info("host-a"));
 
         Assert.Equal(0, cache.PruneRemovedServers(new HashSet<string>()));
-        Assert.NotNull(cache.Get("badwolf"));
+        Assert.NotNull(cache.Get("host-a"));
     }
 
     [Fact]
     public void Server_ids_are_matched_without_regard_to_case()
     {
-        // servers.json is hand-edited; "BurgCloud" and "burgcloud" are one machine.
+        // servers.json is hand-edited; "Host-B" and "host-b" are one machine.
         var (cache, _) = New();
-        cache.Put("BurgCloud", Info("BurgCloud"));
+        cache.Put("Host-B", Info("Host-B"));
 
-        Assert.NotNull(cache.Get("burgcloud"));
+        Assert.NotNull(cache.Get("host-b"));
         Assert.Equal(0, cache.PruneRemovedServers(
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "burgcloud" }));
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "host-b" }));
     }
 
     [Fact]
@@ -144,10 +144,10 @@ public class FleetSnapshotCacheTests
     {
         // Would render as "from the future" and sort wrong everywhere it is shown.
         var (cache, time) = New();
-        cache.Put("badwolf", Info("badwolf"));
+        cache.Put("host-a", Info("host-a"));
 
         time.Advance(TimeSpan.FromSeconds(-30));
 
-        Assert.True(cache.Get("badwolf")!.Age >= TimeSpan.Zero);
+        Assert.True(cache.Get("host-a")!.Age >= TimeSpan.Zero);
     }
 }

@@ -156,7 +156,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
         var policy = request.Context.Policy.ProtectedResources;
-        // Contract 0017 (D-1): the additions a guardrails save lists are what the trusted-script list protects, not
+        // Contract 0022 (D-1): the additions a guardrails save lists are what the trusted-script list protects, not
         // resources the save acts on.
         if (string.Equals(request.ToolName, TrustedScripts.SaveCapability, StringComparison.Ordinal)
             && request.Arguments.ContainsKey(TrustedScripts.AdditionsArgument))
@@ -177,7 +177,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
         // the control plane's own check finds something in the same argument (not a server named whiskers-vps).
         // Free text that cannot be analysed could name such a resource, so it is refused too.
         // Looked for on its own, before any name: a protected word elsewhere in the text must not hide it.
-        // Contract 0017: a call of a script an Admin vouched for, verified by the resolver (server and hash).
+        // Contract 0022: a call of a script an Admin vouched for, verified by the resolver (server and hash).
         var trusted = TrustedScripts.TrustedCallOf(request.Arguments, request.Context.Policy);
         if (change && policy.Count > 0 && ProtectedResourceMatcher.FirstUnanalyzable(request.Arguments, trusted) is { } dynamicText)
         {
@@ -202,7 +202,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                 return GuardrailVerdict.Deny;
             }
         }
-        // Contract 0017 (point 5): a listed script is protected from changes on every server; only the command word of
+        // Contract 0022 (point 5): a listed script is protected from changes on every server; only the command word of
         // a trusted call is not a finding. Confirmable by an interactive Admin like the control plane.
         if (change) paths = [.. paths, .. TrustedScripts.PathsOf(request.Context.Policy)];
         var hit = ProtectedResourceMatcher.FirstHit(request.Arguments, policy, paths, analyseFreeText: change, trustedCall: trusted)
@@ -210,7 +210,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
                       ? ProtectedResourceMatcher.FirstHit(request.Arguments, ControlPlaneResources.NamePatterns, [],
                           analyseFreeText: true, ControlPlaneResources.NamesApplyTo(request.Arguments), trusted)
                       : null);
-        // Contract 0017, amendment 2 (B1): a listed script reached by its file name or through its directory.
+        // Contract 0022, amendment 2 (B1): a listed script reached by its file name or through its directory.
         if (hit is null && change)
             hit = ProtectedResourceMatcher.ListedScriptHit(request.Arguments, TrustedScripts.PathsOf(request.Context.Policy), trusted);
         // A capability that changes the control plane by what it is, not by what it names (mTLS material, a restore
@@ -231,6 +231,10 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             reason += " An Admin may approve it explicitly.";
             return GuardrailVerdict.Confirm;
         }
+        // Contract 0018: a refused abandon (onboard_server with abandon: true) on a host with mTLS state names where it
+        // can run instead. Only the reason changes; the verdict stays Deny.
+        if (hit.Pattern == "control plane" && ControlPlaneResources.IsOnboardingAbandon(request.ToolName, request.Arguments))
+            reason += " " + ControlPlaneResources.AbandonInUiHint;
         return GuardrailVerdict.Deny;
     }
 
@@ -266,7 +270,7 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             StringComparison.Ordinal);
 }
 
-/// <summary>Contract 0017, D-1: a save of the guardrails that adds a trusted script or changes its hash needs a second
+/// <summary>Contract 0022, D-1: a save of the guardrails that adds a trusted script or changes its hash needs a second
 /// Admin's approval while the policy requires a second approver. The gateway binds the approval to the call's
 /// arguments, so to exactly these additions; <c>ApprovalEligibility</c> keeps the requester from deciding it.</summary>
 public sealed class TrustedScriptApprovalRule : IGuardrailRule

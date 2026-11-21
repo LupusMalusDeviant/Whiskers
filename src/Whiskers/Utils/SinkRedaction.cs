@@ -39,7 +39,7 @@ public static class SinkRedaction
     private static readonly HashSet<string> NotPayloadNames = new(StringComparer.Ordinal)
     {
         "description", "subscription",
-        // Contract 0017 (D-1): preset, server, path and hash of each trusted script a save adds — what the second
+        // Contract 0022 (D-1): preset, server, path and hash of each trusted script a save adds — what the second
         // Admin must see on the approval card. Still redacted value by value.
         "trustedscriptsadded",
     };

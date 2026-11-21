@@ -50,6 +50,7 @@ public static class NotificationFormatter
         NotificationEventTypes.WebhookDisabled => ("Webhook disabled", "Warning"),
         NotificationEventTypes.AutomationSuspended => ("Automation suspended", "Warning"),
         NotificationEventTypes.AutomationRefused => ("Automation refused", "Warning"),
+        NotificationEventTypes.AutomationHandedOver => ("Automation handed over", "Info"),
         NotificationEventTypes.ExposureChange => ("Exposure change deployed", "Info"),
         NotificationEventTypes.ExposureViolation => ("Undecided exposure after a deployment", "Error"),
         NotificationEventTypes.ServerUnreachable => ("Server unreachable", "Error"),

@@ -51,6 +51,45 @@ Every Admin action runs through the Mutation Gateway and is recorded with the ac
 account is added) — never with a password or code. Roles stay in *Settings → User roles*; an account added here gets
 its role there as well.
 
+### Local accounts and the email whitelist
+
+While the email whitelist is **enabled**, it decides for every sign-in method: a local account whose address is not
+listed cannot sign in, just like a Google or OIDC user.
+
+- **Adding an account** lists its address in an enabled whitelist, in the same audited `account.create` operation. A
+  whitelist entry admits the address for **every** sign-in method — a Google or OIDC identity with the same address
+  can then sign in to the account as well (as an identity binding, see
+  [Identity bindings](identity-bindings.md)). If the whitelist cannot be written, the account is not created.
+- A **disabled** whitelist is not touched.
+- An address that was **listed before** the account was added stays a manual entry.
+- **Automations of a deleted account** (scheduled tasks, webhooks, AI triggers, endpoint checks, Git-deploy apps,
+  fleet features such as AutoPatch) stop:
+  they run as their owner, and the owner is gone. Under *Settings > Automation owners* an Admin hands them over, to
+  another person or to themselves; handed-over items stay off (a Git-deploy app held) until someone switches them on,
+  and the handover is audited with every item. A per-item *Take over* makes the clicking Admin the owner, and for a
+  fleet feature switches it on at once. Signing in again with the same address, also through an identity provider, never gives them back
+  (contract 0020, INV-66).
+- **Deleting an account** removes the whitelist entry its creation added (with the identity bindings of that
+  address), in the same audited `account.delete` operation. An address that was listed before stays. If an Admin
+  removed or re-added the entry by hand in the meantime, the deletion leaves it: it is a manual entry now. If the entry
+  cannot be removed, the account is not deleted. The deletion also removes its recorded entry when the whitelist was
+  disabled in the meantime (the address stays in the stored list until then).
+- A record whose account vanished outside Whiskers (for example a database restored from an older backup) keeps its
+  stale account id; the entry then stays until an Admin removes it by hand.
+- The whitelist editor in *Settings → Authentication* reloads after every account added or deleted **on the same
+  page**, so saving it there does not undo these changes. Another browser tab or another Admin with an older copy of
+  the list can still save it over them: the last save wins (a version check is planned for 1.1.0).
+  Reload *Settings* before editing the whitelist after accounts changed elsewhere.
+- If a creation fails after its whitelist entry was written and the entry cannot be taken back either, the entry
+  stays (the error is logged); remove it in *Settings → Authentication*.
+- If a deletion fails after its whitelist entry was removed, the entry is put back — only when the removal was
+  really written, never because of what the list looked like before.
+- Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
+  address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
+  stays listed.
+- Accounts that existed before the update to 1.0.0 (from 0.15.0 or older), and the Admin seeded from `WHISKERS_ADMIN_EMAIL` on an install that already had
+  a `whitelist.json`, are not added: list their addresses yourself.
+
 ### Sessions end on every credential change
 
 Changing a password, resetting it, redeeming a recovery code, issuing a code on the host and deleting the account all
@@ -132,7 +171,7 @@ staged restore. The account's password is removed and its sessions end; set a ne
   of that container's log and may be shipped by a logging driver.
 - It works only for an **existing** local account and changes nothing else: it never creates an account and never
   grants a role. To re-create a lost Admin entirely, see the admin bootstrap (`WHISKERS_ADMIN_EMAIL`, first run only)
-  in [configuration.md](../configuration.md).
+  in [configuration.md](configuration.md).
 - The audit row (`auth.recovery_issued`, actor `cli (--recover-local-account)`) is written **before** anything changes;
   if it cannot be written, nothing changes (exit code 1).
 - While a code could not be redeemed — the guardrail policy is fail-closed (`guardrails.json` unreadable, missing

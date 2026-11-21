@@ -41,12 +41,12 @@ public sealed class LogRuleRegexTimeoutTests : IDisposable
     public async Task A_regex_that_times_out_skips_only_its_own_rule()
     {
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-app", Name = "app", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-app", Name = "app", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         docker.Logs["local/c-app"] = new string('a', 4000) + "! FATAL disk full";
         var notifications = new FakeNotifications();
         var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
         var monitor = new LogMonitorService(_sp.GetRequiredService<IServiceScopeFactory>(), docker,
-            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }),
             notifications, NullLogger<LogMonitorService>.Instance,
             TestBudget.Create(), metrics, new NoExclusions(), new NoOutcomes(), TimeSpan.FromSeconds(5))
         {

@@ -49,7 +49,7 @@
                 $"{ServerName(p.ServerId)} ({(p.Automatic ? "Whiskers paused itself" : "paused by an operator")}, " +
                 $"{ServerMonitoring.Remaining(p.Until - DateTime.UtcNow)})"))
         </MudText>
-        <MudLink Href="/servers" Typo="Typo.caption">Manage on the servers page</MudLink>
+        <MudLink Href="servers" Typo="Typo.caption">Manage on the servers page</MudLink>
     </MudAlert>
 }
 
@@ -231,7 +231,7 @@
                 {
                     <MudTooltip Text="@L["Dashboard_Server_CachedAge", cachedAge.TotalSeconds.ToString("F0")]">
                         <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small"
-                                 Style="color:rgba(255,255,255,0.35); margin-left:4px;" />
+                                 Style="color:var(--sw-text-muted); margin-left:4px;" />
                     </MudTooltip>
                 }
                 var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);
@@ -353,6 +353,13 @@
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-3" Elevation="1">
                             <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">@L["Dashboard_Chart_CpuHistory"]</MudText>
+                            @* Each chart checks its own history: one series can be read while the other failed. *@
+                            @if (!hasCpu)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Dashboard_Chart_NoHistory"]</MudText>
+                            }
+                            else
+                            {
                             <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_cpuChartOptions">
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="cpuHist"
                                                  SeriesType="ApexCharts.SeriesType.Area"
@@ -369,11 +376,18 @@
                                                  Name="@L["Metrics_Series_Peak"]" />
                                 }
                             </ApexCharts.ApexChart>
+                            }
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="6">
                         <MudPaper Class="pa-3" Elevation="1">
                             <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">@L["Dashboard_Chart_MemoryHistory"]</MudText>
+                            @if (!hasMem)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Dashboard_Chart_NoHistory"]</MudText>
+                            }
+                            else
+                            {
                             <ApexCharts.ApexChart TItem="MetricPoint" Height="180" Options="@_memChartOptions">
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="memHist"
                                                  SeriesType="ApexCharts.SeriesType.Area"
@@ -389,6 +403,7 @@
                                                  Name="@L["Metrics_Series_Peak"]" />
                                 }
                             </ApexCharts.ApexChart>
+                            }
                         </MudPaper>
                     </MudItem>
                 </MudGrid>

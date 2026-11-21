@@ -91,15 +91,17 @@
         // send users straight to the dashboard.
         if (Config.GetValue<bool>("Auth:Disabled"))
         {
-            Nav.NavigateTo("/", forceLoad: false);
+            Nav.NavigateTo("", forceLoad: false);
             return;
         }
 
         _googleEnabled = !string.IsNullOrWhiteSpace(Config["GoogleAuth:ClientId"]);
         _oidcEnabled = Config.GetValue<bool>("Oidc:Enabled") && !string.IsNullOrWhiteSpace(Config["Oidc:Authority"]);
         _oidcName = string.IsNullOrWhiteSpace(Config["Oidc:DisplayName"]) ? "SSO" : Config["Oidc:DisplayName"]!;
-        // Local username/password login (F1) — on by default so the "no provider" dead-end disappears; a
-        // deployment that wants federated-only can set Auth:LocalLogin:Enabled=false.
+        // Local username/password login (F1) — on by default so the "no provider" dead-end disappears.
+        // Auth:LocalLogin:Enabled=false only hides the password form here; /login-local does not read it, so an
+        // existing local account can still sign in. Federated-only means deleting the local accounts
+        // (docs/operations/local-accounts.md).
         _localEnabled = Config.GetValue("Auth:LocalLogin:Enabled", true);
     }
 }

@@ -1,4 +1,5 @@
-using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 
 namespace Whiskers.Services.Onboarding;
@@ -22,6 +23,14 @@ public static class OnboardingCommands
     public static string TailscaleUp(string slug) =>
         $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}";
 
+    /// <summary>Contract 0018 D9: <c>tailscale up</c> with the onboarding auth key as <c>--auth-key=file:&lt;path&gt;</c>. The key
+    /// is never in the command text: it arrives in the environment variable <paramref name="variable"/>
+    /// (<c>HostCommandSecrets</c>), is written into a 0600 temporary file and removed again whatever the outcome.</summary>
+    public static string TailscaleUpWithAuthKey(string slug, string variable) =>
+        "umask 077; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; " +
+        $"printf '%s' \"${variable}\" > \"$f\"; " +
+        $"sudo tailscale up --accept-dns=false --hostname={slug} --auth-key=file:\"$f\"";
+
     /// <summary>Writes a file on the target by piping base64 through <c>sudo tee</c> — content
     /// never touches shell quoting. The directory part must be a fixed, code-owned path.</summary>
     public static string WriteFileB64(string path, string b64)
@@ -30,30 +39,37 @@ public static class OnboardingCommands
         return $"sudo mkdir -p {dir} && echo {b64} | base64 -d | sudo tee {path} >/dev/null";
     }
 
-    /// <summary>The regenerate-safe scrape-config append, shipped as base64-encoded python so the
-    /// YAML content and IP/serverId values never meet the shell.</summary>
-    public static string AddScrapeTargetCommand(string scrapeFileOnHost, string serverId, string tsIp)
+    /// <summary>The host's answer to <c>tailscale ip -4</c> as a normalised IPv4 literal, or null. <c>IPAddress.TryParse</c>
+    /// alone also accepts IPv6 with a zone id that carries arbitrary text (<c>fe80::1%';…</c>) and lenient IPv4 forms;
+    /// only <c>AddressFamily.InterNetwork</c> passes, and callers use the returned <c>ToString()</c>, never the raw
+    /// answer.</summary>
+    public static string? TailnetIPv4(string? raw) =>
+        raw is not null
+        && IPAddress.TryParse(raw.Trim(), out var parsed)
+        && parsed.AddressFamily == AddressFamily.InterNetwork
+            ? parsed.ToString()
+            : null;
+
+    /// <summary>Prints a file base64-encoded on one line, so its bytes reach Whiskers unchanged. The path must be a fixed,
+    /// code-owned path. Onboarding step 8 reads the scrape config with it, edits it in C# (<see cref="ScrapeConfigEditor"/>)
+    /// and writes it back with <see cref="WriteFileB64"/>; no interpreter runs on the host (contract 0017 part I1).</summary>
+    public static string ReadFileB64(string path) => $"base64 -w0 {path}";
+
+    /// <summary>Writes a code-owned file on the Whiskers host ("local") as root, the way the CA steps do
+    /// (<see cref="Whiskers.Services.Certificates.MtlsCertificateCommands.AsRootScript"/>: <c>sh</c> when already root,
+    /// else <c>sudo sh</c>). The content is decoded into a temporary file first, so a failed decode never truncates the
+    /// file; it is then copied over the original in place (owner and mode stay). Path and directory must be fixed,
+    /// code-owned paths; the content travels base64 inside a base64 script.</summary>
+    public static string WriteFileAsRootB64(string path, string b64)
     {
-        var py =
-            "import sys\n" +
-            $"f='{scrapeFileOnHost}'\n" +
-            "import re\n" +
-            "s=open(f).read()\n" +
-            $"ip='{tsIp}'; sid='{serverId}'\n" +
-            "if ip in s:\n    print('already present'); sys.exit(0)\n" +
-            "lines=s.rstrip().split(chr(10))\n" +
-            "out=[]\n" +
-            "ins=False\n" +
-            "for ln in lines:\n" +
-            "    out.append(ln)\n" +
-            "    if not ins and ln.strip()=='static_configs:':\n" +
-            "        out.append(\"      - targets: ['%s:9100']\" % ip)\n" +
-            "        out.append(\"        labels: { server: '%s' }\" % sid)\n" +
-            "        ins=True\n" +
-            "open(f,'w').write(chr(10).join(out)+chr(10))\n" +
-            "print('added' if ins else 'no static_configs anchor found')\n";
-        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(py));
-        return $"echo {b64} | base64 -d | python3 -";
+        var dir = path[..path.LastIndexOf('/')];
+        return Whiskers.Services.Certificates.MtlsCertificateCommands.AsRootScript($"""
+            set -e
+            mkdir -p {dir}
+            echo {b64} | base64 -d > {path}.whiskers-new
+            cat {path}.whiskers-new > {path}
+            rm -f {path}.whiskers-new
+            """.Replace("\r\n", "\n", StringComparison.Ordinal));   // a CRLF checkout must not put CRs into the script
     }
 
     // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.

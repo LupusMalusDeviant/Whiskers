@@ -39,7 +39,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IGuardrailStore>(_store);
         Services.AddSingleton<IAgentToolRegistry>(new NoTools());
         Services.AddSingleton<ICurrentUserService>(_user);
-        // Contract 0017: the trusted-script editor lists servers, reads a hash and audits a change of the list.
+        // Contract 0022: the trusted-script editor lists servers, reads a hash and audits a change of the list.
         Services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(ProtectionHarness.Local));
         Services.AddSingleton<Whiskers.Services.Server.IHostCommandExecutor>(_host);
         Services.AddSingleton<Whiskers.Services.AuditLog.IAuditLogService>(_auditLog);
@@ -155,7 +155,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Assert.Contains("begin:guardrails.save:", Events());
     }
 
-    // ---- Contract 0017: trusted scripts ----
+    // ---- Contract 0022: trusted scripts ----
 
     private const string Script = "/usr/local/sbin/burgcloud-db-dump.sh";
     private const string ScriptHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";

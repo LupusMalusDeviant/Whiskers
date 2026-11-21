@@ -18,12 +18,12 @@ namespace Whiskers.Tests;
 /// </summary>
 public class SelfStatusPresenterTests
 {
-    private static readonly ServerConfig Badwolf = new()
+    private static readonly ServerConfig HostA = new()
     {
-        Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
+        Id = "host-a", Name = "Host-A", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local
     };
 
-    private static string Name(string id) => id == "badwolf" ? "Badwolf" : id;
+    private static string Name(string id) => id == "host-a" ? "Host-A" : id;
 
     private static LoopHealth Loop(
         TimeSpan? sinceSuccess, TimeSpan? interval, string? skipReason = null, string name = "logmonitor",
@@ -31,7 +31,7 @@ public class SelfStatusPresenterTests
     {
         var now = DateTime.UtcNow;
         return new LoopHealth(
-            name, "badwolf",
+            name, "host-a",
             sinceSuccess is null ? null : now - sinceSuccess.Value,
             now, TimeSpan.FromMilliseconds(120), cycles, failures, Skips: 0, skipReason, interval);
     }
@@ -164,19 +164,19 @@ public class SelfStatusPresenterTests
         var suspended = new[]
         {
             new Whiskers.Services.LogMonitor.SuspendedContainer(
-                "badwolf", "c1", "burg-web", DateTime.UtcNow.AddMinutes(15), ConsecutiveTimeouts: 4)
+                "host-a", "c1", "web", DateTime.UtcNow.AddMinutes(15), ConsecutiveTimeouts: 4)
         };
         var excluded = new[]
         {
             new Whiskers.Services.LogMonitor.Hygiene.LogScanExclusion(
-                "badwolf", "c2", "ghostunnel", "access-path", "Whiskers reaches Docker through this container.")
+                "host-a", "c2", "ghostunnel", "access-path", "Whiskers reaches Docker through this container.")
         };
 
         var rows = SelfStatusPresenter.UnreadContainers(suspended, excluded, Name, DateTime.UtcNow);
 
         Assert.Equal(2, rows.Count);
         Assert.True(rows[0].IsFault);                       // faults first: a symptom outranks a decision
-        Assert.Equal("burg-web", rows[0].Container);
+        Assert.Equal("web", rows[0].Container);
         Assert.Contains("4 log fetches in a row timed out", rows[0].Detail);
 
         Assert.False(rows[1].IsFault);
@@ -197,11 +197,11 @@ public class SelfStatusPresenterTests
     [Fact]
     public void A_paused_server_is_flagged_with_its_reason()
     {
-        var servers = new FakeServerConfig(Badwolf);
+        var servers = new FakeServerConfig(HostA);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
         var suspension = new LoopSuspensionService(
             new FakeNotifications(), servers, NullLogger<LoopSuspensionService>.Instance, new NoOutcomes());
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "investigating high load");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "investigating high load");
 
         var rows = SelfStatusPresenter.ServerRows(
             servers.GetEnabledServers(),

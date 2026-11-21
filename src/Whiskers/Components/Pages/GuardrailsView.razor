@@ -23,7 +23,7 @@
         <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" />
         <MudText Typo="Typo.h5">Guardrails</MudText>
     </div>
-    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
         @L["GuardrailsView_Intro"]
     </MudText>
 
@@ -81,7 +81,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Warning" Size="Size.Large" />
                 <div style="flex:1; min-width:220px;">
                     <MudText Typo="Typo.subtitle1">@L["GuardrailsView_KillSwitch_Title"]</MudText>
-                    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">
+                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-secondary);">
                         @L["GuardrailsView_KillSwitch_Caption"]
                     </MudText>
                 </div>
@@ -173,7 +173,7 @@
             </MudItem>
         </MudGrid>
 
-        @* Trusted scripts (contract 0017) *@
+        @* Trusted scripts (contract 0022) *@
         <MudPaper Class="pa-4 mt-4" id="trusted-scripts">
             <div style="display:flex; align-items:center; gap:8px;" class="mb-1">
                 <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Primary" Size="Size.Small" />
@@ -242,7 +242,7 @@
                     <MudSelectItem Value="@("allow")">@L["GuardrailsView_ToolMode_Allow"]</MudSelectItem>
                 </MudSelect>
             </div>
-            <MudText Typo="Typo.caption" Class="mb-3" Style="color: rgba(255,255,255,0.5);">
+            <MudText Typo="Typo.caption" Class="mb-3" Style="color: var(--sw-text-secondary);">
                 @L["GuardrailsView_ToolHint"]
                 @(_edit.Policy.ToolMode == "allow" ? L["GuardrailsView_ToolHint_AllowMode"].Value : L["GuardrailsView_ToolHint_DenyMode"].Value)
             </MudText>
@@ -251,7 +251,7 @@
             {
                 <div class="mt-2 mb-1" style="display:flex; align-items:center; gap:8px;">
                     <MudText Typo="Typo.subtitle2" Color="Color.Primary">@grp.Key</MudText>
-                    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.4);">(@grp.Count())</MudText>
+                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">(@grp.Count())</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, true))">@L["GuardrailsView_SelectAll_Button"]</MudButton>
                     <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, false))">@L["GuardrailsView_SelectNone_Button"]</MudButton>
                 </div>
@@ -262,7 +262,7 @@
                         <MudCheckBox T="bool" Dense="true" Color="Color.Primary"
                                      Value="@IsAllowed(name)" ValueChanged="@(v => SetAllowed(name, v))">
                             <span style="font-family:monospace; font-size:0.8rem;">@name</span>
-                            <span style="color:rgba(255,255,255,0.35); font-size:0.7rem;"> · @t.Level</span>
+                            <span style="color:var(--sw-text-muted); font-size:0.7rem;"> · @t.Level</span>
                         </MudCheckBox>
                     }
                 </div>
@@ -281,13 +281,13 @@
 
     private bool _isAdmin;
     private GuardrailConfig _config = new();
-    // Contract 0017, amendment 3 (C5): the configuration this page started from; its additions are counted against it.
+    // Contract 0022, amendment 3 (C5): the configuration this page started from; its additions are counted against it.
     private GuardrailConfig _loaded = new();
     private int _editIndex;
     private GuardrailPreset? _edit;
     private List<IGrouping<string, ToolInfo>> _toolsByCategory = new();
 
-    // Contract 0017: the trusted-script editor.
+    // Contract 0022: the trusted-script editor.
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _newScriptServer = "";
     private string _newScriptPath = "";
@@ -438,7 +438,7 @@
         try
         {
             var principal = await BuildPrincipalAsync();
-            // Contract 0017 (D-1, A4): the trusted scripts this save adds (or re-hashes) are part of the call, so a second
+            // Contract 0022 (D-1, A4): the trusted scripts this save adds (or re-hashes) are part of the call, so a second
             // Admin's approval binds to exactly them; the store compares them under its lock, writes the audit row (A5)
             // and saves nothing when they changed meanwhile.
             // C5: what the Admin added on this page; an entry someone else removed meanwhile makes the store refuse.
@@ -531,11 +531,11 @@
         ExposureLabelPrefixes = s.ExposureLabelPrefixes is null ? null : new(s.ExposureLabelPrefixes),
         ExposureConfirmClasses = s.ExposureConfirmClasses is null ? null : new(s.ExposureConfirmClasses),
         KillSwitchBlockedExemptions = s.KillSwitchBlockedExemptions is null ? null : new(s.KillSwitchBlockedExemptions),
-        // Contract 0017: edited on this page; a copy never shares entries with the stored policy.
+        // Contract 0022: edited on this page; a copy never shares entries with the stored policy.
         TrustedScripts = s.TrustedScripts?.Select(t => t.Clone()).ToList(),
     };
 
-    // ---- Trusted scripts (contract 0017) ----
+    // ---- Trusted scripts (contract 0022) ----
 
     private static string ShortHash(string sha) => sha.Length > 12 ? sha[..12] + "…" : sha;
 

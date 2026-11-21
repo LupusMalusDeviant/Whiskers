@@ -21,7 +21,7 @@
         <MudIcon Icon="@Icons.Material.Filled.Bolt" Color="Color.Primary" />
         <MudText Typo="Typo.h5">@L["AiTriggersView_Title"]</MudText>
     </div>
-    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
         @((MarkupString)L["AiTriggersView_Intro"].Value)
     </MudText>
 
@@ -38,7 +38,7 @@
         </div>
 
         <MudPaper Class="pa-3 mb-4" Style="background: var(--sw-glass);">
-            <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);" Class="mb-2">
+            <MudText Typo="Typo.caption" Style="color: var(--sw-text-secondary);" Class="mb-2">
                 @L["AiTriggersView_Templates_Caption"]
             </MudText>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -51,9 +51,9 @@
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Storage"
                            OnClick="@(() => AddTemplate(L["AiTriggersView_Template_HighMem_Name"].Value, new[]{"high_memory"}, "Investigate the container's sustained high memory usage (possible leak?), check logs/metrics and summarize the cause plus a recommendation."))">@L["AiTriggersView_Template_HighMem_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Insights"
-                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Anomaly_Name"].Value, new[]{"metric_anomaly"}, "Es wurde ein Ausreißer in den Metriken erkannt. Untersuche den Container und das Umfeld, bewerte ob es kritisch ist und fasse das Ergebnis zusammen."))">@L["AiTriggersView_Template_Anomaly_Button"]</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Anomaly_Name"].Value, new[]{"metric_anomaly"}, "A metric outlier was detected. Investigate the container and its surroundings, judge whether it is critical and summarize the result."))">@L["AiTriggersView_Template_Anomaly_Button"]</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Security"
-                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Cve_Name"].Value, new[]{"cve_finding"}, "Bewerte die neu gefundene Schwachstelle: Schweregrad, betroffene Komponente, ob ein Update verfügbar ist, und empfiehl konkrete Schritte."))">@L["AiTriggersView_Template_Cve_Button"]</MudButton>
+                           OnClick="@(() => AddTemplate(L["AiTriggersView_Template_Cve_Name"].Value, new[]{"cve_finding"}, "Assess the newly found vulnerability: severity, affected component, whether an update is available, and recommend concrete steps."))">@L["AiTriggersView_Template_Cve_Button"]</MudButton>
             </div>
         </MudPaper>
 
@@ -89,6 +89,8 @@
                 @if (t.SuspendedReason is { } suspended)
                 {
                     <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@L["AiTriggersView_Suspended_Alert", suspended]</MudAlert>
+                    @* Contract 0020: the owner's items can also be handed over in Settings → Automation owners. *@
+                    <MudLink Href="settings#owners-who-can-no-longer-act" Typo="Typo.caption">@L["AutomationHandover_Link"]</MudLink>
                 }
 
                 <MudGrid>
@@ -99,7 +101,7 @@
                                    MultiSelectionTextFunc="@(s => L["AiTriggersView_EventsCount", s.Count].Value)">
                             @foreach (var e in AiTriggerEvents.All)
                             {
-                                <MudSelectItem T="string" Value="@e.Type">@e.Label</MudSelectItem>
+                                <MudSelectItem T="string" Value="@e.Type">@EventLabel(e.Type, e.Label)</MudSelectItem>
                             }
                         </MudSelect>
                     </MudItem>
@@ -168,6 +170,13 @@
         _presets = GuardrailStore.Config.Presets.Select(p => p.Name).ToList();
         _capabilities = Capabilities.All.Where(c => c.McpTool is not null && !AiTriggerAuthority.NotGrantable.Contains(c.Id)).OrderBy(c => c.McpTool ?? c.Id, StringComparer.Ordinal).ToList();
         if (_presets.Count == 0) _presets.Add("Standard");
+    }
+
+    // The event names in the page's language (review 1.0.0, T3); a type without a text keeps the English label.
+    private string EventLabel(string type, string fallback)
+    {
+        var text = L["AiTriggersView_Event_" + type];
+        return text.ResourceNotFound ? fallback : text.Value;
     }
 
     private void AddTrigger()

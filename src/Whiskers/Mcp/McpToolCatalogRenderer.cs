@@ -6,7 +6,7 @@ namespace Whiskers.Mcp;
 /// <summary>
 /// Renders the tool catalog — name, level, module, description — as Markdown (Plan-0013 WP3).
 ///
-/// <para>The rendered file is checked in at <c>docs/mcp-tool-catalog.md</c> and compared against a fresh render
+/// <para>The rendered file is checked in at <c>docs/guide/mcp-tool-catalog.md</c> and compared against a fresh render
 /// by <c>McpToolCatalogSnapshotTests</c>. Its purpose is to make a change to the served surface a visible,
 /// deliberate act: adding, removing or re-levelling a tool shows up as a diff someone has to accept. Without it,
 /// the surface can shift release to release and only the users notice.</para>

@@ -14,7 +14,7 @@ out/
 *.swp
 *~
 .claude/
-# Local assistant instructions (moved out of the public repo; architecture rules live in docs/ARCHITECTURE.md)
+# Local assistant instructions (moved out of the public repo; architecture rules live in docs/architecture/ARCHITECTURE.md)
 /CLAUDE.md
 
 ## OS

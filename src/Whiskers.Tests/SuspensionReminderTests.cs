@@ -17,7 +17,7 @@ public class SuspensionReminderTests
 
     private static (SuspensionReminder Reminder, ILoopSuspensionService Suspension, FakeNotifications Sent) Build()
     {
-        var servers = new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true });
+        var servers = new FakeServerConfig(new ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true });
         var sent = new FakeNotifications();
         var suspension = new LoopSuspensionService(new FakeNotifications(), servers, NullLogger<LoopSuspensionService>.Instance, new NoOutcomes());
         var reminder = new SuspensionReminder(
@@ -29,13 +29,13 @@ public class SuspensionReminderTests
     public void A_pause_that_outlives_its_reason_gets_reported()
     {
         var (reminder, suspension, sent) = Build();
-        suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "quick look");
+        suspension.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "quick look");
 
         Assert.Empty(reminder.Remind(DateTime.UtcNow));
 
         var reminded = reminder.Remind(DateTime.UtcNow + After + TimeSpan.FromMinutes(1));
 
-        Assert.Equal(new[] { "badwolf" }, reminded);
+        Assert.Equal(new[] { "host-a" }, reminded);
         var evt = Assert.Single(sent.Events);
         Assert.Equal("loops_paused_reminder", evt.EventType);
         Assert.Contains("Nothing there is being watched", evt.ImageInfo);
@@ -47,11 +47,11 @@ public class SuspensionReminderTests
         // The case the first draft got backwards: "until revoked" is stored as a deadline ten years out, so a
         // reminder measured against the END would have skipped exactly the pauses that can become permanent.
         var (reminder, suspension, sent) = Build();
-        suspension.Suspend("badwolf", until: null, reason: "investigating");
+        suspension.Suspend("host-a", until: null, reason: "investigating");
 
         var reminded = reminder.Remind(DateTime.UtcNow + After + TimeSpan.FromMinutes(1));
 
-        Assert.Equal(new[] { "badwolf" }, reminded);
+        Assert.Equal(new[] { "host-a" }, reminded);
         Assert.Single(sent.Events);
     }
 
@@ -60,12 +60,12 @@ public class SuspensionReminderTests
     {
         // One message scrolls out of the channel. The blind spot does not.
         var (reminder, suspension, sent) = Build();
-        suspension.Suspend("badwolf", until: null, reason: "investigating");
+        suspension.Suspend("host-a", until: null, reason: "investigating");
         var start = DateTime.UtcNow;
 
         reminder.Remind(start + After + TimeSpan.FromMinutes(1));
         Assert.Empty(reminder.Remind(start + After + TimeSpan.FromHours(2)));   // not a fresh nag every hour
-        Assert.Equal(new[] { "badwolf" }, reminder.Remind(start + After + After + TimeSpan.FromMinutes(2)));
+        Assert.Equal(new[] { "host-a" }, reminder.Remind(start + After + After + TimeSpan.FromMinutes(2)));
 
         Assert.Equal(2, sent.Events.Count);
     }
@@ -79,17 +79,17 @@ public class SuspensionReminderTests
         var (reminder, suspension, sent) = Build();
         var start = DateTime.UtcNow;
 
-        suspension.Suspend("badwolf", until: null, reason: "first");
+        suspension.Suspend("host-a", until: null, reason: "first");
         reminder.Remind(start + After + TimeSpan.FromMinutes(1));
         Assert.Single(sent.Events);
 
-        suspension.Resume("badwolf");
+        suspension.Resume("host-a");
         reminder.Remind(start + After + TimeSpan.FromMinutes(2));   // the pass that forgets it
-        suspension.Suspend("badwolf", until: null, reason: "second");
+        suspension.Suspend("host-a", until: null, reason: "second");
 
         // Only a minute later on the reminder's clock — well inside the window that would suppress a repeat
         // nag, but the entry should be gone, so the new pause gets its own first reminder.
-        Assert.Equal(new[] { "badwolf" }, reminder.Remind(start + After + TimeSpan.FromMinutes(3)));
+        Assert.Equal(new[] { "host-a" }, reminder.Remind(start + After + TimeSpan.FromMinutes(3)));
         Assert.Equal(2, sent.Events.Count);
     }
 }

@@ -12,18 +12,20 @@ namespace Whiskers.Tests;
 public sealed class MtlsCertificateRenewalTests : IDisposable
 {
     private const string Ip = "100.64.0.9";
-    private static readonly MtlsIdentity Identity = new("rabenhof-dockerproxy", ["rabenhof"], [Ip]);
+    private static readonly MtlsIdentity Identity = new("host-d-dockerproxy", ["host-d"], [Ip]);
 
     private readonly TestCa _ca = new();
 
     // ---- identity: the allow-list between certificate fields and the shell ----
 
     [Theory]
-    [InlineData("rabenhof;reboot", "rabenhof", Ip)]
-    [InlineData("rabenhof-dockerproxy", "a b", Ip)]
-    [InlineData("rabenhof-dockerproxy", "rabenhof", "100.64.0.9,DNS:evil")]
-    [InlineData("Rabenhof", "rabenhof", Ip)]
-    [InlineData("rabenhof-dockerproxy", "$(id)", Ip)]
+    [InlineData("host-d;reboot", "host-d", Ip)]
+    [InlineData("host-d-dockerproxy", "a b", Ip)]
+    [InlineData("host-d-dockerproxy", "host-d", "100.64.0.9,DNS:evil")]
+    [InlineData("Host-D", "host-d", Ip)]
+    [InlineData("host-d-dockerproxy", "$(id)", Ip)]
+    [InlineData("host-d-dockerproxy\n", "host-d", Ip)]
+    [InlineData("host-d-dockerproxy", "host-d\n", Ip)]
     public void Identity_rejects_anything_that_could_reach_the_shell(string cn, string dns, string ip)
     {
         Assert.Throws<ArgumentException>(() => new MtlsIdentity(cn, [dns], [ip]));
@@ -40,7 +42,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         var script = Decode(MtlsCertificateCommands.GenerateKeyAndCsr(Identity));
         Assert.Contains("-keyout server.key.new", script);
-        Assert.Contains("-subj /CN=rabenhof-dockerproxy -addext subjectAltName=DNS:rabenhof,IP:100.64.0.9", script);
+        Assert.Contains("-subj /CN=host-d-dockerproxy -addext subjectAltName=DNS:host-d,IP:100.64.0.9", script);
         Assert.Contains("base64 -w0 server.csr.new", script);
         Assert.DoesNotContain("base64 -w0 server.key", script);
         Assert.DoesNotContain("cat server.key", script);
@@ -70,14 +72,14 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public void A_csr_for_exactly_the_expected_identity_passes()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        Assert.NotNull(MtlsCertificateValidator.ValidateCsr(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), Identity));
+        Assert.NotNull(MtlsCertificateValidator.ValidateCsr(Csr(key, "host-d-dockerproxy", ["host-d"], [Ip]), Identity));
     }
 
     [Fact]
     public void A_csr_asking_for_another_hosts_ip_is_refused()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var csr = Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip, "100.64.0.10"]);
+        var csr = Csr(key, "host-d-dockerproxy", ["host-d"], [Ip, "100.64.0.10"]);
         Assert.Contains("expected", Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateCsr(csr, Identity)).Message);
     }
 
@@ -86,9 +88,9 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         Assert.Throws<InvalidOperationException>(() =>
-            MtlsCertificateValidator.ValidateCsr(Csr(key, "serverwatch-client", ["rabenhof"], [Ip]), Identity));
+            MtlsCertificateValidator.ValidateCsr(Csr(key, "serverwatch-client", ["host-d"], [Ip]), Identity));
         Assert.Throws<InvalidOperationException>(() =>
-            MtlsCertificateValidator.ValidateCsr(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip], asCa: true), Identity));
+            MtlsCertificateValidator.ValidateCsr(Csr(key, "host-d-dockerproxy", ["host-d"], [Ip], asCa: true), Identity));
     }
 
     [Fact]
@@ -96,8 +98,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         using var hostKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var otherKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var csrKey = MtlsCertificateValidator.ValidateCsr(Csr(hostKey, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), Identity);
-        var bundle = _ca.Sign(Csr(otherKey, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), out _);
+        var csrKey = MtlsCertificateValidator.ValidateCsr(Csr(hostKey, "host-d-dockerproxy", ["host-d"], [Ip]), Identity);
+        var bundle = _ca.Sign(Csr(otherKey, "host-d-dockerproxy", ["host-d"], [Ip]), out _);
         Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateIssued(bundle, _ca.BundlePem, csrKey, Identity));
     }
 
@@ -105,7 +107,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public void An_issued_certificate_from_another_ca_is_refused()
     {
         using var hostKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var csr = Csr(hostKey, "rabenhof-dockerproxy", ["rabenhof"], [Ip]);
+        var csr = Csr(hostKey, "host-d-dockerproxy", ["host-d"], [Ip]);
         var csrKey = MtlsCertificateValidator.ValidateCsr(csr, Identity);
         using var foreign = new TestCa();
         Assert.Throws<InvalidOperationException>(() =>
@@ -120,19 +122,19 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         var host = new SimulatedFleet(_ca);
         var svc = Service(host);
 
-        var result = await svc.RenewAsync("rabenhof", CancellationToken.None);
+        var result = await svc.RenewAsync("host-d", CancellationToken.None);
 
         Assert.True(result.Success, result.Message);
         Assert.Equal(["ca", "keygen", "sign", "ca", "stage", "activate-guarded", "confirm"], host.Steps);
         Assert.Equal("local", host.ServerOf("sign"));
-        Assert.Equal("rabenhof", host.ServerOf("keygen"));
+        Assert.Equal("host-d", host.ServerOf("keygen"));
     }
 
     [Fact]
     public async Task A_host_whose_csr_overreaches_is_never_activated()
     {
         var host = new SimulatedFleet(_ca) { CsrIps = [Ip, "100.64.0.10"] };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.DoesNotContain("sign", host.Steps);
@@ -143,7 +145,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public async Task A_renewal_that_cannot_be_confirmed_leaves_the_rollback_to_the_host()
     {
         var host = new SimulatedFleet(_ca) { ProxyComesBack = false };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("restores the previous certificate on its own", result.Message);
@@ -156,7 +158,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         // R1-44 review r1: an allow-list run (or another renewal) still waits for its confirmation there.
         var host = new SimulatedFleet(_ca) { GuardUnits = "whiskers-allow-guard-r7.timer" };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("guard timer is armed", result.Message);
@@ -168,7 +170,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         var host = new SimulatedFleet(_ca);
         host.Server.TcpUseTls = false;
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
         Assert.False(result.Success);
         Assert.Empty(host.Steps);
     }
@@ -179,8 +181,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public async Task A_certificate_the_fleet_ca_did_not_issue_is_never_renewed()
     {
         // A compromised host presents its own certificate naming another host's IP. Nothing is signed.
-        var host = new SimulatedFleet(_ca) { PresentedToday = SelfSigned("rabenhof-dockerproxy", [Ip, "100.64.0.10"]) };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var host = new SimulatedFleet(_ca) { PresentedToday = SelfSigned("host-d-dockerproxy", [Ip, "100.64.0.10"]) };
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("not one the fleet CA issued", result.Message);
@@ -192,8 +194,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public async Task A_renewal_names_only_the_address_whiskers_connects_to()
     {
         // The proxy's current certificate (from the fleet CA) carries a second IP. The renewal does not carry it on.
-        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("rabenhof-dockerproxy", ["rabenhof"], [Ip, "100.64.0.10"]) };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("host-d-dockerproxy", ["host-d"], [Ip, "100.64.0.10"]) };
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.True(result.Success, result.Message);
         var san = host.Issued!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single();
@@ -205,10 +207,10 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     {
         // The case renewal exists for: the fleet CA issued it for this address, and its time is up.
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        _ca.Sign(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), out var expired, notAfter: DateTimeOffset.UtcNow.AddHours(-1));
+        _ca.Sign(Csr(key, "host-d-dockerproxy", ["host-d"], [Ip]), out var expired, notAfter: DateTimeOffset.UtcNow.AddHours(-1));
         var host = new SimulatedFleet(_ca) { PresentedToday = expired };
 
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.True(result.Success, result.Message);
         Assert.Contains("sign", host.Steps);
@@ -218,9 +220,9 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     public async Task A_fleet_certificate_for_another_address_is_never_renewed()
     {
         // Issued by the fleet CA, but for a different host's address: not this host's identity to carry on.
-        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("rabenhof-dockerproxy", [], ["100.64.0.10"]) };
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("host-d-dockerproxy", [], ["100.64.0.10"]) };
 
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("not one the fleet CA issued", result.Message);
@@ -229,11 +231,11 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
 
     [Theory]
     [InlineData("serverwatch-client")]
-    [InlineData("whiskers-client-zirkus-g1")]
+    [InlineData("whiskers-client-host-e-g1")]
     public async Task A_proxy_certificate_named_like_a_client_is_never_renewed(string cn)
     {
         var host = new SimulatedFleet(_ca) { PresentedToday = Signed(cn, [], [Ip]) };
-        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+        var result = await Service(host).RenewAsync("host-d", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("client name", result.Message);
@@ -241,9 +243,9 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     }
 
     [Theory]
-    [InlineData("serverwatch-client", "rabenhof")]
-    [InlineData("whiskers-client-rabenhof-g2", "rabenhof")]
-    [InlineData("rabenhof-dockerproxy", "whiskers-client-zirkus-g1")]
+    [InlineData("serverwatch-client", "host-d")]
+    [InlineData("whiskers-client-host-d-g2", "host-d")]
+    [InlineData("host-d-dockerproxy", "whiskers-client-host-e-g1")]
     public void A_proxy_identity_never_carries_a_client_name(string cn, string dns)
     {
         Assert.Throws<ArgumentException>(() => new MtlsIdentity(cn, [dns], [Ip]));
@@ -295,7 +297,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
 
     public void Dispose() => _ca.Dispose();
 
-    /// <summary>A host with a running proxy plus Badwolf's step-ca, answering the scripts by what they do.</summary>
+    /// <summary>A host with a running proxy plus Host-A's step-ca, answering the scripts by what they do.</summary>
     private sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
     {
         private readonly ECDsa _hostKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -307,7 +309,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
 
         public Whiskers.Models.ServerConfig Server { get; } = new()
         {
-            Id = "rabenhof", Name = "Rabenhof", ConnectionType = Whiskers.Models.ConnectionType.TCP,
+            Id = "host-d", Name = "Host-D", ConnectionType = Whiskers.Models.ConnectionType.TCP,
             TcpHost = Ip, TcpPort = 2376, TcpUseTls = true,
         };
         public string[] CsrIps { get; init; } = [Ip];
@@ -338,7 +340,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
             var output = script switch
             {
                 _ when script.Contains("openssl req -new") =>
-                    Step("keygen", B64(Csr(_hostKey, "rabenhof-dockerproxy", ["rabenhof"], CsrIps))),
+                    Step("keygen", B64(Csr(_hostKey, "host-d-dockerproxy", ["host-d"], CsrIps))),
                 _ when script.Contains("step certificate sign") =>
                     Step("sign", B64(SignFromScript(script))),
                 _ when script.StartsWith("cat /opt/step-ca/certs/root_ca.crt", StringComparison.Ordinal) =>
@@ -365,7 +367,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         private static X509Certificate2 CurrentCert(TestCa ca)
         {
             using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            ca.Sign(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), out var leaf);
+            ca.Sign(Csr(key, "host-d-dockerproxy", ["host-d"], [Ip]), out var leaf);
             return leaf;
         }
 

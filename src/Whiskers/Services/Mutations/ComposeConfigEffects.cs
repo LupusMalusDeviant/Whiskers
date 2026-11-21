@@ -9,7 +9,8 @@ namespace Whiskers.Services.Mutations;
 /// files merged, YAML anchors and <c>extends</c> followed, variables interpolated from the <c>.env</c>, relative paths
 /// made absolute — compose's own model, not a copy of it. Every source is a <see cref="ComposeMount"/> per service:
 /// bind sources, a volume's real name and the host device a local volume binds, the files of file-backed secrets and
-/// configs, and the containers (<see cref="ComposeMount.Container"/>) or services <c>volumes_from</c> takes over.
+/// configs, the Docker socket <c>use_api_socket</c> binds (contract 0017, A1), and the containers
+/// (<see cref="ComposeMount.Container"/>) or services <c>volumes_from</c> takes over.
 /// Anything that cannot be read throws <see cref="ComposePlanException"/> (fail closed).
 /// </summary>
 public static class ComposeConfigEffects
@@ -114,6 +115,10 @@ public static class ComposeConfigEffects
 
         /// <summary>Contract 0013, D16: the inputs of the third-party detection from compose's model.</summary>
         public ToolSpec Tool { get; init; } = new();
+
+        /// <summary>Contract 0021 (§ 1.4): the networks the service joins by the name compose resolved (withheld: only
+        /// compose's model read them), for the live lookup.</summary>
+        public IReadOnlyList<ComposeNetworkRef> Networks { get; init; } = [];
     }
 
     /// <summary>
@@ -152,9 +157,30 @@ public static class ComposeConfigEffects
                 DeclaresCgroup = service.Value.TryGetProperty("cgroup", out var cgroup)
                                  && cgroup.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined),
                 Tool = ComposeThirdParty.FromConfig(image, service.Value),
+                Networks = NetworksOf(service.Name, service.Value, networks),
             });
         }
         return active;
+    }
+
+    /// <summary>Contract 0021: the networks a service of compose's resolved model joins — the keys of its
+    /// <c>networks</c> (compose fills <c>default</c>) by their resolved name, and a <c>network_mode</c> that names a
+    /// network (which must exist).</summary>
+    private static IReadOnlyList<ComposeNetworkRef> NetworksOf(string service, JsonElement definition,
+        IReadOnlyDictionary<string, JsonElement> networks)
+    {
+        var refs = new List<ComposeNetworkRef>();
+        if (definition.TryGetProperty("networks", out var joined) && joined.ValueKind == JsonValueKind.Object)
+            foreach (var network in joined.EnumerateObject())
+                // compose itself refuses a service on a network it does not define; such an entry is looked up by its key.
+                refs.Add(ComposeExposures.ConfigNetwork(network.Name, networks) is { } top
+                    ? new ComposeNetworkRef(service, top.Name, top.External, Withheld: true)
+                    : new ComposeNetworkRef(service, network.Name, External: false, Withheld: true));
+        if (String(definition, "network_mode") is { Length: > 0 } mode
+            && mode is not ("none" or "host" or "bridge" or "default")
+            && !mode.StartsWith("service:", StringComparison.Ordinal) && !mode.StartsWith("container:", StringComparison.Ordinal))
+            refs.Add(new ComposeNetworkRef(service, mode, External: true, Withheld: true));
+        return refs;
     }
 
     private static IEnumerable<ComposeMount> MountsOf(JsonElement service,
@@ -188,6 +214,10 @@ public static class ComposeConfigEffects
                         throw new ComposePlanException("A service mounts something whose kind is unknown.");
                 }
             }
+        // Contract 0017, A1: use_api_socket binds the engine's socket into the container, read-write; compose prints
+        // only the key, no volume.
+        if (ComposeExposures.UsesApiSocket(service))
+            yield return Mount(ComposeModel.DockerSocket) with { ApiSocket = true };
         if (service.TryGetProperty("volumes_from", out var from) && from.ValueKind == JsonValueKind.Array)
             foreach (var entry in from.EnumerateArray())
             {

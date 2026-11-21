@@ -64,7 +64,7 @@
     protected override void OnInitialized()
     {
         // Without real authentication there are no local sign-ins to recover.
-        if (Config.GetValue<bool>("Auth:Disabled")) Nav.NavigateTo("/", forceLoad: false);
+        if (Config.GetValue<bool>("Auth:Disabled")) Nav.NavigateTo("", forceLoad: false);
     }
 
     private async Task Redeem()

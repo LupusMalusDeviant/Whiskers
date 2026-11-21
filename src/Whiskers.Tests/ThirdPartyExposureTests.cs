@@ -334,7 +334,7 @@ public sealed class ThirdPartyExposureTests
         "{\"Id\":\"" + id + "\",\"Name\":\"/shop-" + service + "-1\",\"Image\":\"@IMAGE@\",\"Config\":{" + config +
         (config.Length > 0 ? "," : "") +
         "\"Labels\":{\"com.docker.compose.project\":\"shop\",\"com.docker.compose.service\":\"" + service + "\"}}," +
-        "\"HostConfig\":{\"NetworkMode\":\"shop_default\"},\"Mounts\":[]}";
+        "\"HostConfig\":{\"NetworkMode\":\"shop_default\"},\"Mounts\":[],\"NetworkSettings\":{\"Networks\":{}}}";
 
     private Task<ComposePlan> PlanAsync(string yaml, string config)
     {

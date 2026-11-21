@@ -24,10 +24,16 @@ The private key of a proxy is generated **on the host** and never leaves it:
 1. The host creates a P-256 key (`server.key.new`) and a CSR.
 2. Whiskers checks the CSR before anything is signed: its signature, the subject, exactly the expected SANs and
    that it does not ask to be a CA. The host is the very thing the certificate vouches for. A host that could
-   pick its own SANs could get a certificate for another host's IP and impersonate that proxy.
-3. step-ca on Badwolf signs it for one year (leaf + intermediate).
-4. Whiskers checks the result: same key as the CSR, the expected identity, and a chain plus host name that its
-   own mTLS check accepts.
+   pick its own SANs could get a certificate for another host's IP and impersonate that proxy. "Exactly" counts
+   every SAN, not only DNS names and IPs: a URI or e-mail SAN is refused (contract 0017 E2).
+3. step-ca on the Whiskers host signs it for one year (leaf + intermediate). The host's answer itself never reaches the Whiskers host
+   (contract 0017 E1): `ValidateCsrAnswer` refuses an answer with any non-base64 character, an answer holding more
+   than one PEM block, and a request followed by extra data; it returns the DER of the one CSR block it verified.
+   `SignCsr` takes those DER bytes, writes the PEM file itself and base64-encodes it, so the script on the Whiskers host holds
+   no byte of host output. The client-credential path (`MtlsClientCredentialStore`) hands it the DER of the CSR it
+   made in-process.
+4. Whiskers checks the result: same key as the CSR, the expected identity (the same exact SAN count), and a chain
+   plus host name that its own mTLS check accepts.
 5. The host stages the files and refuses them if the certificate does not match the new key.
 
 At **onboarding** the staged files simply become the live ones before the proxy first starts.

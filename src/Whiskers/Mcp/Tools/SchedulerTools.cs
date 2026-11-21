@@ -27,7 +27,7 @@ public class SchedulerTools
         if (!tasks.Any()) return "No scheduled tasks configured.";
 
         var lines = tasks.Select(t =>
-            $"- [{(t.Enabled ? "ON" : "OFF")}] {t.Name} ({t.TaskType}) | Cron: {t.CronExpression} | Target: {t.TargetName ?? t.TargetId ?? "-"} | Next: {t.NextRun?.ToString("g") ?? "n/a"} | Last: {(t.LastSuccess ? "OK" : "FAIL")} {t.LastRun?.ToString("g") ?? "never"}");
+            $"- [{(t.Enabled ? "ON" : "OFF")}] {t.Name} ({t.TaskType}) | Cron: {t.CronExpression} | Target: {t.TargetName ?? t.TargetId ?? "-"} | Next: {(t.NextRun is null ? "n/a" : SchedulerService.FormatUtc(t.NextRun))} | Last: {(t.LastSuccess ? "OK" : "FAIL")} {(t.LastRun is null ? "never" : SchedulerService.FormatUtc(t.LastRun))}");
         return $"Scheduled tasks ({tasks.Count}):\n{string.Join('\n', lines)}";
     }
 
@@ -92,7 +92,7 @@ public class SchedulerTools
             : $"type={type}, cron={cronExpression}";
         await auditLog.LogAsync(actor, actorType, "scheduler.create", "scheduled-task", task.TaskId, task.Name, auditDetails, serverId);
 
-        return $"Task created:\n  Name: {task.Name}\n  Type: {task.TaskType}\n  Cron: {task.CronExpression}\n  Next run: {task.NextRun?.ToString("g")}";
+        return $"Task created:\n  Name: {task.Name}\n  Type: {task.TaskType}\n  Cron: {task.CronExpression}\n  Next run: {SchedulerService.FormatUtc(task.NextRun)}";
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
@@ -130,6 +130,27 @@ public class SchedulerTools
         // as execute_command so run_scheduled_task cannot be used to bypass that boundary.
         var target = (await scheduler.GetTasksAsync()).FirstOrDefault(t => t.TaskId == taskId);
         if (target is null) return MutationScope.Fail($"Task '{taskId}' not found.");
+        // The gateway decided on the task as it was then (R1-05); its type or retention may have changed since. The run is
+        // held to what the task it now runs needs, for every task type: more than the decided level refuses it.
+        // Without a gateway decision there is nothing to hold the run to: refused (fail-closed).
+        if (MutationScope.Current?.DecidedLevel is not { } decided)
+            return MutationScope.Fail($"Task '{taskId}' was not run: no gateway decision to check it against.");
+        {
+            if (httpContextAccessor.HttpContext?.RequestServices?.GetService<IEffectiveRequirementResolver>()
+                is not SchedulerRequirementResolver requirements)
+                return MutationScope.Fail($"Task '{taskId}' was not run: its requirement cannot be checked.");
+            string now;
+            try
+            {
+                now = requirements.LevelToRun(target);
+            }
+            catch (CapabilityDisabledException ex)
+            {
+                return MutationScope.Fail($"Task '{taskId}' was not run: '{ex.Capability.McpTool ?? ex.Capability.Id}' is disabled in Settings → MCP.");
+            }
+            if (!McpPermissionLevels.HasAccess(decided, now))
+                return MutationScope.Fail($"Task '{taskId}' was not run: it now needs '{now}', more than the '{decided}' it was decided at.");
+        }
         // The caller must also be allowed what the task does (tool switch, level, key tool list): running a task is
         // not a way around restart_container, backup_database or execute_command.
         var underlying = target.TaskType switch

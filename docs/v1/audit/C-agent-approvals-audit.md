@@ -1,3 +1,5 @@
+> Historical audit of 0.15.0 (2026-10-26), kept for reference.
+
 # Audit C: Agent, MCP permissions, guardrails, approvals, audit, identity
 
 Scope: read-only review of `src/Whiskers` (Services/Agent/**, Mcp/**, Services/Mcp/McpPermissionService.cs, Services/AuditLog/**, Services/Observability/McpCallLogStore.cs, Models/Agent/**, Configuration/Guardrail*.cs, Modules/Agent/AgentModule.cs, Utils/SecretRedactor.cs, Approvals/Guardrails/AgentHistory pages).

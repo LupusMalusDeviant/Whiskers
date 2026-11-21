@@ -60,7 +60,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task Switching_off_forgets_at_once_without_waiting_for_a_cycle()
     {
         var client = StubPromClient.From(_ => Queries(smart: SmartFailed));
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
         for (var i = 0; i < 3; i++) { await rig.Monitor.RunCycleAsync(CancellationToken.None); rig.Clock.Utc += DiskHealthMonitor.Interval; }
         Assert.Single(rig.Notifications.Events);
 
@@ -87,7 +87,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
             if (Volatile.Read(ref block)) await release.Task;
             return await inner.QueryAsync(endpoint, promql, ct);
         });
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
         for (var i = 0; i < 3; i++) { await rig.Monitor.RunCycleAsync(CancellationToken.None); rig.Clock.Utc += DiskHealthMonitor.Interval; }
         Assert.Single(rig.Notifications.Events);
 
@@ -107,7 +107,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
     [Fact]
     public async Task Switching_off_with_the_flow_already_suppressed_still_forgets()
     {
-        var rig = Make(StubPromClient.From(_ => Queries(smart: SmartFailed)), [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(StubPromClient.From(_ => Queries(smart: SmartFailed)), [Server("host-a", "http://tsdb:8428")]);
         for (var i = 0; i < 3; i++) { await rig.Monitor.RunCycleAsync(CancellationToken.None); rig.Clock.Utc += DiskHealthMonitor.Interval; }
 
         using (ExecutionContext.SuppressFlow())
@@ -123,7 +123,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
         var client = StubPromClient.From(_ => Queries(smart: SmartFailed, md: MdFailedDisk));
         var notify = new FailingFirst();
         var clock = new DiskHealthClock(Now);
-        var monitor = new DiskHealthMonitor(new FakeServerConfig(Server("badwolf", "http://tsdb:8428")), client, new Switch(true),
+        var monitor = new DiskHealthMonitor(new FakeServerConfig(Server("host-a", "http://tsdb:8428")), client, new Switch(true),
             new DiskHealthService(), notify, NullLogger<DiskHealthMonitor>.Instance, null, clock);
 
         for (var i = 0; i < 3; i++) { await monitor.RunCycleAsync(CancellationToken.None); clock.Utc += DiskHealthMonitor.Interval; }
@@ -136,11 +136,11 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task A_first_read_whose_queries_all_fail_is_not_read_yet_not_unsupported()
     {
         var client = new StubPromClient((_, _, _) => Task.FromResult(PromQueryResult.Failed("the metrics endpoint could not be reached (ConnectionError)")));
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
 
-        var reading = rig.Readings.Latest("badwolf")!;
+        var reading = rig.Readings.Latest("host-a")!;
         Assert.Equal(DiskHealthState.Unsupported, reading.Overall);
         Assert.StartsWith("not read yet: query failed", Assert.Single(reading.Items).Reason);
     }
@@ -165,7 +165,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task Off_queries_nothing_and_shows_nothing()
     {
         var client = Good();
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")], enabled: false);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")], enabled: false);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
 
@@ -177,14 +177,14 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task On_reads_each_host_with_its_six_queries_on_its_own_endpoint()
     {
         var client = Good();
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428"), Server("zirkus", "http://tsdb:8428/")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428"), Server("host-e", "http://tsdb:8428/")]);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
 
         Assert.Equal(12, client.Calls.Count);
-        Assert.Equal(6, client.Calls.Count(c => c.PromQl.Contains("server=\"zirkus\"")));
-        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("badwolf")!.Overall);
-        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("zirkus")!.Overall);
+        Assert.Equal(6, client.Calls.Count(c => c.PromQl.Contains("server=\"host-e\"")));
+        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("host-a")!.Overall);
+        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("host-e")!.Overall);
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
             if (endpoint.Contains("broken") && failing) throw new InvalidOperationException("the handler blew up");
             return Good().QueryAsync(endpoint, promql, ct);
         });
-        var rig = Make(client, [Server("broken", "http://broken:8428"), Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("broken", "http://broken:8428"), Server("host-a", "http://tsdb:8428")]);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
 
@@ -216,7 +216,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
         var broken = rig.Readings.Latest("broken")!;
         Assert.Equal(DiskHealthState.Unsupported, broken.Overall);
         Assert.StartsWith("not read yet: query failed", Assert.Single(broken.Items).Reason);
-        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("badwolf")!.Overall);  // the other host is read
+        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("host-a")!.Overall);  // the other host is read
 
         failing = false;                                                              // the next cycle runs normally
         rig.Clock.Utc += DiskHealthMonitor.Interval;
@@ -231,14 +231,14 @@ public sealed class DiskHealthMonitorTests : IDisposable
         var client = new StubPromClient((endpoint, promql, ct) => reachable
             ? Good().QueryAsync(endpoint, promql, ct)
             : Task.FromResult(PromQueryResult.Failed("the metrics endpoint could not be reached (ConnectionError)")));
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
         reachable = false;
         rig.Clock.Utc += DiskHealthMonitor.Interval;
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
 
-        var reading = rig.Readings.Latest("badwolf")!;
+        var reading = rig.Readings.Latest("host-a")!;
         Assert.Equal(DiskHealthState.Unknown, reading.Overall);
         Assert.All(reading.Items, i => Assert.StartsWith("query failed: ", i.Reason));
     }
@@ -255,7 +255,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
             await Task.Delay(Timeout.Infinite, ct);
             return PromQueryResult.Of([]);
         });
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428"), Server("zirkus", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428"), Server("host-e", "http://tsdb:8428")]);
         using var stop = new CancellationTokenSource();
 
         var cycle = rig.Monitor.RunCycleAsync(stop.Token);
@@ -265,7 +265,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
         await sawStop.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cycle.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Empty(rig.Readings.All());                    // nothing published after the stop
-        Assert.DoesNotContain(client.Calls, c => c.PromQl.Contains("zirkus"));
+        Assert.DoesNotContain(client.Calls, c => c.PromQl.Contains("host-e"));
         Assert.Empty(rig.Notifications.Events);
     }
 
@@ -273,8 +273,8 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task The_hosted_loop_stops_on_the_hosts_stop()
     {
         var client = Good();
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
-        var monitor = new DiskHealthMonitor(new FakeServerConfig(Server("badwolf", "http://tsdb:8428")), client, rig.Setting,
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
+        var monitor = new DiskHealthMonitor(new FakeServerConfig(Server("host-a", "http://tsdb:8428")), client, rig.Setting,
             rig.Readings, rig.Notifications, NullLogger<DiskHealthMonitor>.Instance) { StartupOffsetForTests = TimeSpan.Zero };
 
         await monitor.StartAsync(CancellationToken.None);
@@ -282,14 +282,14 @@ public sealed class DiskHealthMonitorTests : IDisposable
         await monitor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(6, client.Calls.Count);
-        Assert.NotNull(rig.Readings.Latest("badwolf"));
+        Assert.NotNull(rig.Readings.Latest("host-a"));
     }
 
     [Fact]
     public async Task A_failing_disk_is_delivered_after_ten_minutes_and_closed_when_the_feature_is_switched_off()
     {
         var client = StubPromClient.From(_ => Queries(smart: SmartFailed));
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
 
         for (var i = 0; i < 3; i++)
         {
@@ -299,8 +299,8 @@ public sealed class DiskHealthMonitorTests : IDisposable
 
         var raised = Assert.Single(rig.Notifications.Events);
         Assert.Equal(NotificationEventTypes.DiskFailing, raised.EventType);
-        Assert.Equal("badwolf", raised.ServerId);
-        Assert.Equal("Badwolf", raised.ServerName);
+        Assert.Equal("host-a", raised.ServerId);
+        Assert.Equal("Host-a", raised.ServerName);
 
         rig.Setting.Enabled = false;
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
@@ -316,7 +316,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
     public async Task A_removed_server_has_its_alerts_closed_and_its_reading_dropped()
     {
         var client = StubPromClient.From(_ => Queries(md: MdFailedDisk));
-        var servers = new List<ServerConfig> { Server("badwolf", "http://tsdb:8428") };
+        var servers = new List<ServerConfig> { Server("host-a", "http://tsdb:8428") };
         var config = new MutableServers(servers);
         var readings = new DiskHealthService();
         var notifications = new FakeNotifications();
@@ -331,7 +331,7 @@ public sealed class DiskHealthMonitorTests : IDisposable
 
         Assert.Equal("array_degraded_recovered", notifications.Events[^1].EventType);
         Assert.True(notifications.Events[^1].RecoveryUnconfirmed);
-        Assert.Null(readings.Latest("badwolf"));
+        Assert.Null(readings.Latest("host-a"));
     }
 
     [Fact]
@@ -339,18 +339,18 @@ public sealed class DiskHealthMonitorTests : IDisposable
     {
         var path = Path.Combine(_dir, "disk-health.json");
         var failing = StubPromClient.From(_ => Queries(smart: SmartFailed));
-        var first = Make(failing, [Server("badwolf", "http://tsdb:8428")], state: new DiskHealthStateStore(path));
+        var first = Make(failing, [Server("host-a", "http://tsdb:8428")], state: new DiskHealthStateStore(path));
         for (var i = 0; i < 3; i++) { await first.Monitor.RunCycleAsync(CancellationToken.None); first.Clock.Utc += DiskHealthMonitor.Interval; }
         Assert.Single(first.Notifications.Events);
 
         // Restart: the endpoint does not answer yet. The disk was read before, so it reads Unknown — not Unsupported —
         // and the open alert is neither raised again nor closed.
         var unreachable = new StubPromClient((_, _, _) => Task.FromResult(PromQueryResult.Failed("the metrics endpoint could not be reached (ConnectionError)")));
-        var second = Make(unreachable, [Server("badwolf", "http://tsdb:8428")], state: new DiskHealthStateStore(path));
+        var second = Make(unreachable, [Server("host-a", "http://tsdb:8428")], state: new DiskHealthStateStore(path));
         second.Clock.Utc = first.Clock.Utc;
         for (var i = 0; i < 3; i++) { await second.Monitor.RunCycleAsync(CancellationToken.None); second.Clock.Utc += DiskHealthMonitor.Interval; }
 
-        Assert.Equal(DiskHealthState.Unknown, second.Readings.Latest("badwolf")!.Overall);
+        Assert.Equal(DiskHealthState.Unknown, second.Readings.Latest("host-a")!.Overall);
         Assert.DoesNotContain(second.Notifications.Events, e => e.EventType == NotificationEventTypes.DiskFailing);
         Assert.DoesNotContain(second.Notifications.Events, e => e.EventType == "disk_failing_recovered");
         Assert.Contains(second.Monitor.Alerts.OpenFindings(), f => f.Kind == NotificationEventTypes.DiskFailing);
@@ -365,17 +365,17 @@ public sealed class DiskHealthMonitorTests : IDisposable
         var client = new StubPromClient((endpoint, promql, ct) => throwing
             ? throw new HttpIOException(HttpRequestError.ResponseEnded, "the response ended prematurely")
             : Good().QueryAsync(endpoint, promql, ct));
-        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        var rig = Make(client, [Server("host-a", "http://tsdb:8428")]);
 
         await rig.Monitor.RunCycleAsync(CancellationToken.None);
-        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("badwolf")!.Overall);
+        Assert.Equal(DiskHealthState.Healthy, rig.Readings.Latest("host-a")!.Overall);
 
         throwing = true;
         for (var i = 0; i < 3; i++)
         {
             rig.Clock.Utc += DiskHealthMonitor.Interval;
             await rig.Monitor.RunCycleAsync(CancellationToken.None);
-            Assert.Equal(DiskHealthState.Unknown, rig.Readings.Latest("badwolf")!.Overall);
+            Assert.Equal(DiskHealthState.Unknown, rig.Readings.Latest("host-a")!.Overall);
         }
 
         Assert.Contains(rig.Notifications.Events, e => e.EventType == NotificationEventTypes.DiskHealthUnknown);

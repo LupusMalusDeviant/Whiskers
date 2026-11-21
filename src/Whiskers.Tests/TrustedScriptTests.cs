@@ -9,7 +9,7 @@ using Whiskers.Services.Server;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// Contract 0017: a script an Admin vouched for on one server, pinned to its SHA-256, runs when it is called exactly by
+/// Contract 0022: a script an Admin vouched for on one server, pinned to its SHA-256, runs when it is called exactly by
 /// its path with literal arguments — read on the server before the decision and again right before the run. Anything
 /// else stays as INV-24 has it, and the listed paths are protected from changes.
 /// </summary>

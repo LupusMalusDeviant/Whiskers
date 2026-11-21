@@ -1,6 +1,6 @@
 # Telemetry stack (mesh-only)
 
-Push/scrape-based host metrics instead of SSH `/proc`-exec. See `../../docs/ARCHITECTURE.md`.
+Push/scrape-based host metrics instead of SSH `/proc`-exec. See `../../docs/architecture/ARCHITECTURE.md`.
 
 **Stack:** `node_exporter` on every host > VictoriaMetrics on the controller, scraped only over the
 Tailscale mesh.

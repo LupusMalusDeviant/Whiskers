@@ -252,7 +252,7 @@ public sealed class WebhookReplayTests : IDisposable
         var request = Signed(wh, "delivery-0006");
         _runner.Hold();
         var first = await Service().AcceptAsync(wh.WebhookId, request);
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
 
         // The process that runs it "stopped"; the provider delivers again to the new one.
         var afterRestart = await Service().AcceptAsync(wh.WebhookId, request);
@@ -366,7 +366,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service(docker);
         _runner.Hold();
         var first = await service.AcceptAsync(byName.WebhookId, Signed(byName, "delivery-0114"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
 
         // The rebuild has started the replacement under a new id but has not ended: runs on the replacement — by
         // its name or by its new id — wait for it.
@@ -398,7 +398,7 @@ public sealed class WebhookReplayTests : IDisposable
 
         // The rebuild does not stop at its time limit: it keeps the server's containers until it ends.
         var first = await service.AcceptAsync(rebuild.WebhookId, Signed(rebuild, "delivery-0164"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var deployment = await service.AcceptAsync(deploy.WebhookId, Signed(deploy, "delivery-0165"));
 
         Assert.Equal("Failed", (await Finished(deployment.RunId!)).State);   // it never got its turn
@@ -439,7 +439,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _runner.Hold();
         var running = await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0121"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var waiting = await service.AcceptAsync(second.WebhookId, Signed(second, "delivery-0122"));
         await Task.Delay(100);   // the second run waits for the target
 
@@ -460,7 +460,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _runner.Hold();
         await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0131"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var waiting = await service.AcceptAsync(second.WebhookId, Signed(second, "delivery-0132"));
         await Task.Delay(100);
 
@@ -484,7 +484,7 @@ public sealed class WebhookReplayTests : IDisposable
         _runner.Hold();
 
         var first = await service.AcceptAsync(stuck.WebhookId, Signed(stuck, "delivery-0141"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var blocked = await service.AcceptAsync(sameTarget.WebhookId, Signed(sameTarget, "delivery-0142"));
         // The only worker comes free once the first run is past its time: the second fails to get the target in
         // time (the first still holds it), and a run on another target goes on.
@@ -512,7 +512,7 @@ public sealed class WebhookReplayTests : IDisposable
 
         // The first overdue run takes the only overdue slot; the second finds none free.
         var first = await service.AcceptAsync(handedOver.WebhookId, Signed(handedOver, "delivery-0144"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var second = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0145"));
         await WaitFor(() => _runner.Runs == 2);
         var third = await service.AcceptAsync(kept.WebhookId, Signed(kept, "delivery-0146"));
@@ -541,7 +541,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service(text: new KeyLocalizer());
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0147"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
 
         // The target stays held past the test's run time: it does not get its turn.
         var (success, output) = await service.TriggerSignedTestAsync(tested.WebhookId);
@@ -574,17 +574,40 @@ public sealed class WebhookReplayTests : IDisposable
     /// read as an answer (asserted).</summary>
     private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(15);
 
+    /// <summary>How long a test waits for a premise signal — a run reached the runner, a fault tripped, a run was
+    /// queued — or for an answer whose proof rests on order alone (it comes while something the test holds
+    /// indefinitely is still held). Nothing these waits prove depends on their length: the signal either comes or the
+    /// test is broken. On a loaded CI runner (the full suite in parallel, the thread pool starved by blocking SQLite
+    /// work) a run can take well over 10 s to be scheduled, so the former 10 s and 15 s bounds failed healthy runs
+    /// with a bare <see cref="TimeoutException"/>. Waits whose bound is part of the proof keep their own, tighter
+    /// bound (<see cref="HangGuard"/>, <see cref="Finished"/>).</summary>
+    private static readonly TimeSpan SignalGuard = TimeSpan.FromSeconds(90);
+
     /// <summary>The run deadline of the lock tests: long enough that, on a loaded runner, the run reaches its start
     /// (and the lock) before it — nothing they prove depends on the deadline being short.</summary>
     private static readonly TimeSpan LockTestRunTimeout = TimeSpan.FromMilliseconds(2500);
 
+    /// <summary>Waits for a page Test's answer while the test holds the database lock; a missing answer fails with
+    /// what it means, not a bare <see cref="TimeoutException"/>.</summary>
+    private static async Task<T> AnsweredWhileLocked<T>(Task<T> answer, TimeSpan guard)
+    {
+        try { return await answer.WaitAsync(guard); }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"The worker did not answer within {guard.TotalSeconds:0} s while the test held the database lock.");
+            throw;
+        }
+    }
+
     /// <summary>The answer of a page Test came while the database still held it up: the run's start had taken the
     /// lock (premise) and was still waiting for it, and no other command had failed or been cancelled — so the answer
-    /// did not wait for the locked start; that it waited for no other bounded wait either rests on
-    /// <see cref="HangGuard"/>.</summary>
+    /// did not wait for the locked start. That it waited for no other bounded wait either rests on
+    /// <see cref="HangGuard"/> where a refusal write can meet the lock (it is given up without a command event), and on
+    /// <see cref="Faults.EndedBadlySinceArmed"/> for commands. The page Test's own wait exceeds both guards.</summary>
     private void AssertAnsweredBeforeTheDatabase()
     {
-        Assert.True(_options.TestRunTimeout > HangGuard, "premise: the page Test waits longer than the hang guard");
+        Assert.True(_options.TestRunTimeout > SignalGuard && SignalGuard > HangGuard,
+            "premise: the page Test waits longer than either guard");
         Assert.True(_faults.LockTaken.IsCompleted,
             "premise: the run's start reached the lock before its deadline (a setup or runner problem, not the product)");
         Assert.Equal(1, _faults.Tripped);
@@ -594,7 +617,7 @@ public sealed class WebhookReplayTests : IDisposable
 
     private static async Task Until(Func<bool> condition)
     {
-        var until = DateTime.UtcNow.AddSeconds(10);
+        var until = DateTime.UtcNow + SignalGuard;
         while (!condition())
         {
             if (DateTime.UtcNow > until) throw new TimeoutException("The signal never came.");
@@ -637,7 +660,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0301"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
 
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0302"));
 
@@ -659,13 +682,13 @@ public sealed class WebhookReplayTests : IDisposable
     {
         RecordRefusals();
         _options.MaxConcurrentRuns = 2;
-        _options.RunTimeout = TimeSpan.FromSeconds(20);
+        _options.RunTimeout = SignalGuard;   // never reached: the delivery waits for the held target, not for time
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var service = Service();
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0303"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var reads = _faults.RunCommands(WebhookReads);
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0304"));
         // The waiting run has read its webhook (a signal, not a time) and waits for the target, which the holder keeps.
@@ -692,13 +715,13 @@ public sealed class WebhookReplayTests : IDisposable
     {
         RecordRefusals();
         _options.MaxConcurrentRuns = 1;
-        _options.RunTimeout = TimeSpan.FromSeconds(20);
+        _options.RunTimeout = SignalGuard;   // never reached: the delivery waits for the held target, not for time
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var gone = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var service = Service();
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0305"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         // Queued behind the only worker; removed before that worker reads it.
         var accepted = await service.AcceptAsync(gone.WebhookId, Signed(gone, "delivery-0306"));
         Remove(gone.WebhookId);
@@ -742,7 +765,9 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        // Refusals are recorded here, so an answer that waited for a refusal write behind the lock (given up after
+        // 20 s without a command event) is caught only by the hang guard's bound.
+        var (success, _) = await AnsweredWhileLocked(service.TriggerSignedTestAsync(wh.WebhookId), HangGuard);
         // Answered while its start still waited for the lock: the start lands only after the deadline.
         AssertAnsweredBeforeTheDatabase();
         Assert.False(success);
@@ -773,7 +798,7 @@ public sealed class WebhookReplayTests : IDisposable
         service.SettleRetryDelay = TimeSpan.FromMilliseconds(50);
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0311"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         // The waiting run's settlement hangs past its bookkeeping time once (its acceptance, the first run write, passes).
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Stall, runsOnly: true, skip: 1);
 
@@ -834,7 +859,7 @@ public sealed class WebhookReplayTests : IDisposable
         service.StoppedUnsettled += runId => returned.TrySetResult(runId);
         _runner.Hold();
         var held = await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0314"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         // The give-up's settlement fails (its acceptance, the first run write, passes).
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Fail, runsOnly: true, skip: 1);
         var request = Signed(waiting, "delivery-0315");
@@ -844,7 +869,7 @@ public sealed class WebhookReplayTests : IDisposable
 
         stop.Cancel();
         // The give-up has returned unsettled — past the point where it used to let its claim go.
-        Assert.Equal(accepted.RunId, await returned.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(accepted.RunId, await returned.Task.WaitAsync(SignalGuard));
         var repeat = await service.AcceptAsync(waiting.WebhookId, request);
 
         Assert.Equal(WebhookReply.Duplicate, repeat.Reply);
@@ -873,13 +898,13 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service(stop: stop);
         _runner.Hold();
         var running = await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0322"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         // Waited for in the process, once the run is in the queue — not by its database state, which is written before
         // (review round 7, MINOR-2).
         var enqueued = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         service.RunEnqueued += runId => enqueued.TrySetResult(runId);
         var test = service.TriggerSignedTestAsync(second.WebhookId);
-        var queuedRunId = await enqueued.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var queuedRunId = await enqueued.Task.WaitAsync(SignalGuard);
 
         stop.Cancel();
 
@@ -979,7 +1004,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service(stop: stop);
         _runner.Hold();
         var before = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0327"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
 
         stop.Cancel();
         var during = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0328"));
@@ -1053,7 +1078,7 @@ public sealed class WebhookReplayTests : IDisposable
         service.SettleRetryDelay = TimeSpan.FromMilliseconds(20);
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0316"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.StallIgnoringCancellation, runsOnly: true, skip: 1);
         var before = _faults.RunWrites(Settlements);
 
@@ -1433,7 +1458,7 @@ public sealed class WebhookReplayTests : IDisposable
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.HoldAnswer, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
         var accepted = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0179"));
-        await _faults.Holding.WaitAsync(TimeSpan.FromSeconds(10));
+        await _faults.Holding.WaitAsync(SignalGuard);
 
         Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
         _faults.Resume();
@@ -1467,7 +1492,7 @@ public sealed class WebhookReplayTests : IDisposable
         // The first delivery's row is written; its answer is held, and then lost.
         _faults.Arm("INSERT INTO \"WebhookDeliveries\"", Fault.HoldAnswer);
         var first = Task.Run(() => service.AcceptAsync(wh.WebhookId, request));
-        await _faults.Holding.WaitAsync(TimeSpan.FromSeconds(10));
+        await _faults.Holding.WaitAsync(SignalGuard);
 
         // A repeat meanwhile is not told the delivery is queued: the first may yet fail.
         Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
@@ -1531,7 +1556,10 @@ public sealed class WebhookReplayTests : IDisposable
         // a timeout (until the test unlocks it), as SQLite waits synchronously and does not cancel a command under way.
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        // No refusal is recorded in this test, so no wait without a command event meets the lock: a command that
+        // waited in SQLite fails after its busy timeout and shows in EndedBadlySinceArmed. The proof is by order, and
+        // the generous signal guard is enough.
+        var (success, _) = await AnsweredWhileLocked(service.TriggerSignedTestAsync(wh.WebhookId), SignalGuard);
 
         // The worker came back within the deadline, not the database's timeout — proven by order: its start was still
         // waiting for the lock when it answered. Once the lock is gone the start that landed late is recorded as
@@ -1550,16 +1578,21 @@ public sealed class WebhookReplayTests : IDisposable
     public async Task Synchronous_work_before_the_action_returns_does_not_hold_a_worker_past_its_deadline()
     {
         _options.MaxConcurrentRuns = 1;
-        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        // Long enough that, on a loaded runner, the run's own lookups and its start land before it (300 ms did not
+        // always): nothing proven here depends on the deadline being short, the action stays blocked until the test
+        // unblocks it.
+        _options.RunTimeout = LockTestRunTimeout;
         var wh = Seed(WebhookSignatures.Whiskers);
         var service = Service(text: new KeyLocalizer());
         _runner.BlockSynchronously = true;
-        Assert.True(_options.TestRunTimeout > HangGuard, "premise: the page Test waits longer than the hang guard");
+        Assert.True(_options.TestRunTimeout > SignalGuard, "premise: the page Test waits longer than the signal guard");
 
         // The run is past its time while its owner's authority is still being looked up: it is handed over (it
         // keeps its server) and the worker comes back — by order: the action is still blocked (it is unblocked only
-        // below), so an answer at all, and "overdue", shows the worker did not wait for it.
-        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        // below), so an answer at all, and "overdue" (written only once the deadline ended the worker's wait), shows
+        // the worker did not wait for it. The proof needs no tight bound, so the generous signal guard is used: the
+        // former 15 s failed on a starved CI thread pool (the blocked action itself holds a pool thread).
+        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(SignalGuard);
 
         Assert.False(success);
         Assert.Equal("[Webhook_Run_Overdue]", output);
@@ -1605,7 +1638,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _runner.Hold();
         var running = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0201"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var waiting = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0202"));
 
         // Full: a new delivery is busy and not recorded; one already queued is named with its run, which will run.
@@ -1638,7 +1671,7 @@ public sealed class WebhookReplayTests : IDisposable
         SeedDelivery(wh, request, "left-queued", "Recording");
         _runner.Hold();
         await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0205"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await _runner.Started.WaitAsync(SignalGuard);
         var waiting = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0206"));
 
         // Nothing would run it, so it is not "queued": the provider is told to come back.
@@ -1807,6 +1840,28 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(StatusCodes.Status200OK, (await Endpoint(service, wh.WebhookId, Signed(wh, "delivery-0405"))).Status);
     }
 
+    [Fact]
+    public async Task During_a_restore_only_a_signed_delivery_learns_of_it_and_nothing_is_recorded()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var maintenance = new Whiskers.Services.Maintenance.MaintenanceStateService();
+        maintenance.EnterMaintenance("test restore");
+        var service = new WebhookService(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance, Options.Create(_options), _time,
+            lifetime: new StopsWith(_stop.Token), maintenance: maintenance);
+
+        // A stranger is answered as always: the restore is not revealed to an unsigned or forged request.
+        var valid = Signed(wh, "delivery-maint");
+        var forged = valid with { WhiskersSignature = WebhookSignatures.Sign("not-the-secret", valid.Body) };
+        Assert.Equal(StatusCodes.Status400BadRequest, (await Endpoint(service, wh.WebhookId, forged)).Status);
+
+        var (status, body) = await Endpoint(service, wh.WebhookId, valid);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, status);
+        Assert.Contains("maintenance", body);
+        using var scope = _sp.CreateScope();
+        Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AnyAsync());
+    }
+
     private async Task<(int? Status, string? Body)> Endpoint(IWebhookService service, string webhookId, WebhookRequest request,
         Stream? body = null)
     {
@@ -1825,7 +1880,9 @@ public sealed class WebhookReplayTests : IDisposable
 
     private static async Task WaitFor(Func<bool> condition)
     {
-        for (var i = 0; i < 200 && !condition(); i++) await Task.Delay(25);
+        // A premise or an eventual state, never a timing proof: bounded by the generous signal guard, not 200 polls.
+        var until = DateTime.UtcNow + SignalGuard;
+        while (!condition() && DateTime.UtcNow < until) await Task.Delay(25);
         Assert.True(condition());
     }
 
@@ -1891,7 +1948,7 @@ public sealed class WebhookReplayTests : IDisposable
 
         /// <summary>Commands that failed or were cancelled since the last <see cref="Arm"/> — any command, not only the
         /// locked one (a command that met the lock fails after SQLite's 30 s busy timeout). A wait abandoned without
-        /// its command ending does not show here; the lock tests' hang guard covers that.</summary>
+        /// its command ending does not show here; the hang guard covers that where a refusal write can meet the lock.</summary>
         public int EndedBadlySinceArmed => Volatile.Read(ref _endedBadly);
 
         private void Ended(DbCommand command)

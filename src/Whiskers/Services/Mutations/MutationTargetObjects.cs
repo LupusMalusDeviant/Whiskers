@@ -177,7 +177,7 @@ public sealed partial class MutationTargetResolver
         }
     }
 
-    // ---- Trusted scripts (contract 0017) ----
+    // ---- Trusted scripts (contract 0022) ----
 
     /// <summary>
     /// <c>host.exec</c> whose command is a trusted call of a script the active policy lists for the resolved server: the
@@ -411,6 +411,29 @@ public sealed partial class MutationTargetResolver
                 if (!known) return Refuse($"Identity binding not found: {target.Id}", target.Id);
                 return Done(whiskersWide, t => new ResolvedRecord(Token, t, Hash(t.Id), "identity", t.Id));
             }
+            case "automation-owner":
+            {
+                // Contract 0020: the old owner's record. It need not exist as an account: a principal id of the scheme, or
+                // a legacy value an item still stores.
+                if (target.Id.Length == 0) return Refuse("The automation owner is required.");
+                var inScheme = PrincipalIds.EmailOf(target.Id) is not null || PrincipalIds.KeyIdOf(target.Id) is not null;
+                if (!inScheme)
+                {
+                    if (_services.GetService<IAutomationHandover>() is not { } handover)
+                        return Refuse("Automation owners are not available to resolve the target.");
+                    if ((await handover.OwnedByAsync(target.Id, ct)).Count == 0)
+                        return Refuse($"Automation owner not found: {target.Id}", target.Id);
+                }
+                return Done(whiskersWide, t => new ResolvedRecord(Token, t, Hash(t.Id), "automation-owner", t.Id));
+            }
+            case "handover-notice":
+            {
+                if (target.Id.Length == 0) return Refuse("The handover notice is required.");
+                if (_services.GetService<IHandoverNotices>() is not { } notices)
+                    return Refuse("Handover notices are not available to resolve the target.");
+                if (notices.Find(target.Id) is null) return Refuse($"Handover notice not found: {target.Id}", target.Id);
+                return Done(whiskersWide, t => new ResolvedRecord(Token, t, Hash(t.Id), "handover-notice", t.Id));
+            }
         }
         return Refuse($"'{capability.Id}' has no record to resolve.");
     }
@@ -463,6 +486,8 @@ public static class ConfigSections
     {
         "agent", "aichat", "cvemonitor", "diskhealth", "dns", "guardrails", "healthmonitor", "imageupdate",
         "mcp-api-keys", "mcp-permissions", "metricalert", "metrics-retention", "notification-channels", "notifications",
+        // Contract 0018 D9: the onboarding Tailscale auth key reference (the key itself lives in the vault).
+        "onboarding",
         "outbound-exceptions", "quiet-hours", "registries", "roles", "terminal", "vault", "whitelist",
     };
 }

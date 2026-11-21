@@ -7,6 +7,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
+@inject IServiceProvider PageServices
 
 <PageTitle>@L["Networks_PageTitle"]</PageTitle>
 
@@ -108,6 +109,11 @@ else
                 <MudSelectItem Value="@("overlay")">overlay</MudSelectItem>
                 <MudSelectItem Value="@("macvlan")">macvlan</MudSelectItem>
             </MudSelect>
+            @if (LanDrivers.IsLan(_newNetworkDriver))
+            {
+                @* Contract 0021: a LAN driver is named before the click; the click itself asks nothing (PC-D1). *@
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3" data-testid="lan-driver-hint">@L["Networks_Hint_LanDriver"]</MudAlert>
+            }
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showCreateDialog = false)">@L["Networks_Button_Cancel"]</MudButton>
@@ -174,15 +180,22 @@ else
         try
         {
             var name = _newNetworkName;
-            var driver = _newNetworkDriver;
+            var driver = LanDrivers.Normalize(_newNetworkDriver);
+            string? decidedServer = null;
             var id = await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
                 async (ResolvedNew n, CancellationToken _) =>
                 {
+                    decidedServer = n.ServerId;
                     var created = await DockerService.CreateNetworkAsync(name, driver, n.ServerId);
                     // The created network is part of the gateway's event (R1-21).
                     MutationScope.Note($"Network {created}");
                     return created;
                 });
+            // Contract 0021 (§ 1.7): a person's LAN network is announced once, after it was created, for the server
+            // the gateway decided (its canonical id).
+            await LanDrivers.NotifyAsync(PageServices.GetService<Whiskers.Services.Notifications.INotificationService>(),
+                decidedServer ?? sid, name, driver,
+                logger: PageServices.GetService<ILoggerFactory>()?.CreateLogger("Whiskers.Components.Pages.Networks"));
             Snackbar.Add(L["Networks_Snackbar_Created", _newNetworkName].Value, Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();

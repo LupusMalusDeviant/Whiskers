@@ -212,14 +212,14 @@ public class ReleaseGateTests
     {
         var deleted = Bare with
         {
-            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **66** |", "| **Total** | **65** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
         Assert.Contains(findings, f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("neither a row of the table nor retired"));
 
-        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
-        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("above the pinned"));
+        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-66", "Highest invariant ID: INV-65") };
+        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-66" && f.Message.Contains("above the pinned"));
 
         // Retired properly: a 'Retired invariants' row with an accepted retirement decision.
         var retired = deleted with
@@ -241,8 +241,8 @@ public class ReleaseGateTests
 
         var pinBelowRetired = Bare with
         {
-            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-63"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-67 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-67"),
         };
         Assert.Contains(Evaluate(pinBelowRetired, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("below the highest retired ID"));
     }
@@ -505,11 +505,11 @@ public class ReleaseGateTests
         // An invariant ID that disappears, and a pin that goes down.
         var deleted = Snapshot(Bare with
         {
-            Invariants = RemoveLine(Bare.Invariants, "| INV-62 |"),
-            ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61"),
+            Invariants = RemoveLine(Bare.Invariants, "| INV-66 |"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-66", "Highest invariant ID: INV-65"),
         });
         var lost = BaseComparison.Compare(deleted, Snapshot(Bare), "the base");
-        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-62");
+        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-66");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Message.Contains("went down"));
 
         // The previous release tag: the highest vX.Y.Z strictly below the version, by the three numbers.
@@ -601,6 +601,31 @@ public class ReleaseGateTests
         Assert.Contains(BaseComparison.Compare(At("1.0.3") with { Csproj = null }, At("1.0.3"), "the base"), f => f.Rule == "D2" && f.Message.Contains("no src/Whiskers/Whiskers.csproj"));
     }
 
+    [Theory]
+    [InlineData("c6e6629a8d15ace2a120c9d1636dd65bbff5aec5")]
+    [InlineData("58c2615be6259049a9426edef0e5bd61cc2bffef")]
+    public void The_withdrawn_1_0_1_may_go_back_to_1_0_0_once_against_its_own_commits(string commit)
+    {
+        // Contract 0008, Amendment 3: the one admitted reset after v1.0.0/v1.0.1 were withdrawn.
+        static string Project(string v) => $"<Project><PropertyGroup><Version>{v}</Version></PropertyGroup></Project>";
+        GateSnapshot At(string v) => new(Project(v), Real.Invariants, Real.ReleaseGate, Real.Contract);
+        Assert.DoesNotContain(BaseComparison.Compare(At("1.0.0"), At("1.0.1"), "the base", baseCommit: commit), f => f.Rule == "D2");
+    }
+
+    [Theory]
+    [InlineData("1.0.0", "1.0.1", null)]                                            // no commit: never admitted
+    [InlineData("1.0.0", "1.0.1", "c6e6629a")]                                      // an abbreviated ID is not the commit
+    [InlineData("1.0.0", "1.0.1", "0000000000000000000000000000000000000000")]      // another commit
+    [InlineData("0.15.0", "1.0.1", "c6e6629a8d15ace2a120c9d1636dd65bbff5aec5")]     // to below 1.0.0: the mode would drop
+    [InlineData("1.0.0", "1.0.2", "c6e6629a8d15ace2a120c9d1636dd65bbff5aec5")]      // from another version
+    [InlineData("1.0.1", "1.0.2", "58c2615be6259049a9426edef0e5bd61cc2bffef")]      // to another version
+    public void Every_other_decrease_stays_a_finding(string now, string before, string? commit)
+    {
+        static string Project(string v) => $"<Project><PropertyGroup><Version>{v}</Version></PropertyGroup></Project>";
+        GateSnapshot At(string v) => new(Project(v), Real.Invariants, Real.ReleaseGate, Real.Contract);
+        Assert.Contains(BaseComparison.Compare(At(now), At(before), "the base", baseCommit: commit), f => f.Rule == "D2" && f.Message.Contains("never goes down"));
+    }
+
     [Fact]
     public void A_malformed_table_in_the_base_is_a_finding_not_an_empty_base()
     {
@@ -663,7 +688,7 @@ public class ReleaseGateTests
     public void The_totals_match_the_rows()
     {
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R15");
-        var count = Real with { Contract = Mutate(Real.Contract, "| UI handler groups (U) | 40 |", "| UI handler groups (U) | 39 |") };
+        var count = Real with { Contract = Mutate(Real.Contract, "| UI handler groups (U) | 42 |", "| UI handler groups (U) | 41 |") };
         Assert.Contains(Evaluate(count, GateMode.Development, Dev), f => f.Rule == "R15" && f.Subject.Contains("(U)"));
         var row = Real with { Contract = RemoveLine(Real.Contract, "| T-03 |") };
         var findings = Evaluate(row, GateMode.Development, Dev);

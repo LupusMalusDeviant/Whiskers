@@ -385,7 +385,7 @@ Found while implementing; none changes an authority decision.
 - **A8 — Legacy approvals (D8).** A request without requesters is refused when it is raised (fail closed), and an
   approval stored before R1-15 without requesters counts against nobody; it is cancelled at the next start as before.
 
-## Amendment 2 (merge of main, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 2 (merge of main, 10 November 2026) — accepted by the maintainer on 18 November 2026
 
 - **A9 — A fourth host CLI.** INV-25 (contract 0010) added `--reset-guardrails`, which writes the audit row
   `guardrails.reset_on_host` before it changes anything. Its principal is `system:host-cli:reset-guardrails`; the
@@ -394,7 +394,7 @@ Found while implementing; none changes an authority decision.
   request with another key on it is refused before the tool runs; the `Mcp-Session-Id` a key's principal carries is
   therefore always a session of that key. Nothing else changes.
 
-## Amendment 3 (contract 0015, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 3 (contract 0015, 10 November 2026) — accepted by the maintainer on 18 November 2026
 
 - **A11 — A fifth system component.** The `VAULT_KEY` rotation of contract 0015 (INV-52) writes its audit row
   `vault.key_rotated` once after the switch, at start. D6 gains the component `system:vault-rotation` for it
