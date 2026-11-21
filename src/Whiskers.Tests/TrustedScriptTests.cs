@@ -867,4 +867,72 @@ public sealed class TrustedScriptTests
         }
         finally { Directory.Delete(dir, true); }
     }
+
+    // ---------------------------------------------------------------- fifth review
+
+    [Theory]
+    [InlineData("sh -c /tmp/unlisted.sh")]
+    [InlineData("sudo sh -c /tmp/unlisted.sh")]
+    [InlineData("su -c /tmp/unlisted.sh")]
+    [InlineData("bash -c python3")]
+    public void The_text_after_a_shells_c_is_a_command_quoted_or_not(string command)
+    {
+        var shell = ProtectedResourceMatcher.AnalyseShell(command);
+        Assert.True(shell.Unanalyzable);
+        Assert.True(shell.RunsHiddenCode);
+    }
+
+    [Theory]
+    [InlineData("sh -c uptime")]
+    [InlineData("sh -c 'docker ps'")]
+    public void A_plain_command_after_c_stays_analysable(string command) =>
+        Assert.False(ProtectedResourceMatcher.AnalyseShell(command).Unanalyzable);
+
+    [Fact]
+    public async Task A_trusted_call_cannot_start_an_unlisted_script_through_its_arguments()
+    {
+        var host = new HashHost();
+        var h = Trusting(host);
+
+        Assert.Equal(MutationStatus.Denied, (await AsKey(h, Dump + " sh -c /tmp/unlisted.sh")).Status);
+        Assert.Equal(MutationStatus.Denied, (await AsTask(h, Dump + " sh -c /tmp/unlisted.sh")).Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Theory]
+    [InlineData("tar -xf /tmp/p.tar -C /./proc/self/root/usr/local/sbin")]
+    [InlineData("tar -xf /tmp/p.tar -C //proc/1/root/usr/local/sbin")]
+    [InlineData("tar -xf /tmp/p.tar -C/proc/./1/root/usr/local/sbin")]
+    public void A_proc_alias_is_compared_after_normalising(string command) =>
+        Assert.True(ProtectedResourceMatcher.AnalyseShell(command).Unanalyzable);
+
+    [Fact]
+    public async Task The_second_Admin_sees_server_path_and_hash_of_each_addition()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        var lines = Line(Approved) + "\n" + Line(Other, server: "web");
+
+        await SaveAsync(h, lines);
+
+        var card = Assert.Single(h.Approvals.GetPending()).ParamsJson;
+        Assert.Contains(Dump, card, StringComparison.Ordinal);
+        Assert.Contains(Approved, card, StringComparison.Ordinal);
+        Assert.Contains(Other, card, StringComparison.Ordinal);
+        Assert.Contains("| web |", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("withheld", card, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Additions_too_long_for_the_approval_card_are_refused()
+    {
+        var h = new ProtectionHarness(p => p.RequireSecondApprover = true);
+        var many = string.Join("\n", Enumerable.Range(0, 40).Select(i => Line(Approved, server: $"server-{i:00}")));
+        Assert.True(many.Length > TrustedScripts.MaxAdditionsChars);
+
+        var outcome = await SaveAsync(h, many);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Empty(h.Approvals.GetPending());
+        Assert.Equal(0, h.Runs);
+    }
 }

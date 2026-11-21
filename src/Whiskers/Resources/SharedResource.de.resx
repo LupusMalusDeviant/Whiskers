@@ -6074,6 +6074,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_TrustedScripts_NeedsSecondAdmin" xml:space="preserve">
     <value>Ein freigegebenes Skript einzutragen braucht einen zweiten Admin. Die Anfrage wartet unter „Freigaben“. Hat ein anderer Admin sie freigegeben, noch einmal speichern.</value>
   </data>
+  <data name="GuardrailsView_TrustedScripts_TooMany" xml:space="preserve">
+    <value>Zu viele freigegebene Skripte auf einmal für die Freigabekarte. Bitte weniger auf einmal eintragen.</value>
+  </data>
   <data name="GuardrailsView_Problem_TrustedScriptsChangedMeanwhile" xml:space="preserve">
     <value>Die freigegebenen Skripte haben sich seit der Freigabe geändert. Nichts wurde gespeichert. Seite neu laden und noch einmal speichern.</value>
   </data>

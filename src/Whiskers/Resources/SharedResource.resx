@@ -6074,6 +6074,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_TrustedScripts_NeedsSecondAdmin" xml:space="preserve">
     <value>Adding a trusted script needs a second Admin: the request waits on the Approvals page. Once another Admin approved it, save again.</value>
   </data>
+  <data name="GuardrailsView_TrustedScripts_TooMany" xml:space="preserve">
+    <value>Too many trusted scripts in one save for the approval card. Add fewer at once.</value>
+  </data>
   <data name="GuardrailsView_Problem_TrustedScriptsChangedMeanwhile" xml:space="preserve">
     <value>The trusted scripts changed since the approval; nothing was saved. Reload the page and save again.</value>
   </data>

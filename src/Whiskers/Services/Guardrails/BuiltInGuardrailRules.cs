@@ -282,6 +282,13 @@ public sealed class TrustedScriptApprovalRule : IGuardrailRule
             && request.Arguments.TryGetValue(TrustedScripts.AdditionsArgument, out var added)
             && (added.ValueKind != System.Text.Json.JsonValueKind.String || !string.IsNullOrEmpty(added.GetString())))
         {
+            // The approval card must show every line; additions it would cut off are refused (fifth review).
+            if (added.ValueKind != System.Text.Json.JsonValueKind.String
+                || added.GetString()!.Length > TrustedScripts.MaxAdditionsChars)
+            {
+                reason = $"Too many trusted scripts in one save (at most {TrustedScripts.MaxAdditionsChars} characters); add fewer at once.";
+                return GuardrailVerdict.Deny;
+            }
             reason = "Adding a trusted script or changing its hash needs a second Admin's approval.";
             return GuardrailVerdict.Confirm;
         }

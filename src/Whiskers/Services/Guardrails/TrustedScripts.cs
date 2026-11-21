@@ -16,6 +16,10 @@ public static class TrustedScripts
     /// <summary>The argument the policy adapter carries the path the resolver verified in (hash and server).</summary>
     public const string ResolvedKey = "__resolvedTrustedScript";
 
+    /// <summary>The longest <see cref="AdditionsArgument"/> one save may carry, so that the approval card (capped at
+    /// 4000 characters for all arguments) shows every line (contract 0017, fifth review).</summary>
+    public const int MaxAdditionsChars = 3000;
+
     // An absolute path of plain characters; literal arguments of plain characters, separated by blanks. No quotes,
     // no $, no backticks, no braces, no globs, no ; | & < > # ~ or line breaks.
     private static readonly Regex Call = new(@"^[ \t]*(?<path>/[A-Za-z0-9._+/-]+)(?:[ \t]+[A-Za-z0-9._+/,:=@%-]+)*[ \t]*\z",

@@ -270,6 +270,21 @@ Tests for the amendment:
 - A page loaded before another Admin removed an entry cannot save it back.
 - On the page, a failed hash read adds no entry and shows the error.
 
+Clarification after the fifth review (21 November 2026; the maintainer asked for all three fixes). Each item makes the
+build hold what point 3, D-1 point 3 and C1 already say:
+- **The text after a shell's `-c` is read as a command, quoted or not.** `sh -c /tmp/x.sh` runs a script by its path
+  and is unanalysable, whether `sh` is the command word or an argument, for example of a trusted call
+  (`/opt/runner.sh sh -c /tmp/x.sh`). The same applies to `su -c`. Before, only quoted text was read again, so
+  `sudo sh -c /tmp/x.sh` passed as well. That gap is older than this contract.
+- **The second Admin sees the additions.** `trustedScriptsAdded` holds only preset, server, path and hash. It is not a
+  payload, so it is shown on the approval card and in the audit, still redacted value by value.
+  - So that the card can show every line, the additions of one save may hold at most 3000 characters (about 25
+    entries). `TrustedScriptApprovalRule` refuses a longer argument, and the page asks to add fewer entries at once.
+- **A `/proc` alias is compared after normalising.** `/./proc/self/root/…` and `//proc/…` count as `/proc/…`.
+
+Tests: an unquoted `sh -c` script as command word and as argument of a trusted call; the approval card of an addition
+lists server, path and hash; a too-long argument is refused; `/./proc/self/root/…` is unanalysable.
+
 ## Tests
 
 - A trusted call with the right hash runs, for an MCP key and for a scheduled task.

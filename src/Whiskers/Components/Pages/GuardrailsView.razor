@@ -443,6 +443,11 @@
             // and saves nothing when they changed meanwhile.
             // C5: what the Admin added on this page; an entry someone else removed meanwhile makes the store refuse.
             var added = TrustedScripts.Additions(_loaded, _config);
+            if (added.Length > TrustedScripts.MaxAdditionsChars)
+            {
+                Snackbar.Add(L["GuardrailsView_TrustedScripts_TooMany"].Value, Severity.Warning);
+                return;
+            }
             var arguments = new Dictionary<string, object> { ["section"] = "guardrails" };
             if (added.Length > 0) arguments[TrustedScripts.AdditionsArgument] = added;
             await Mutations.RunAsync("guardrails.save", arguments,

@@ -685,6 +685,14 @@ public static class ProtectedResourceMatcher
             else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = hidden = true;
             else if (IsInterpreter(name) && next is not null && (next.StartsWith('-') || next.Contains('.') || next.Contains('/')))
                 unanalyzable = hidden = true;
+            // The text a shell runs with -c is a command, quoted or not (sh -c /tmp/x.sh runs a script by its path);
+            // quoted text with shell syntax was read again already, a single word is read here (fifth review).
+            else if ((Shells.Contains(name) || name == "su") && IsCommandFlag(next) && w + 2 < words.Count
+                     && AnalyseShell(words[w + 2]) is { Unanalyzable: true } inner)
+            {
+                unanalyzable = true;
+                hidden |= inner.RunsHiddenCode;
+            }
         }
         // Decoding or escapes build the text at run time, whatever else the command runs.
         bool decoded;
@@ -692,7 +700,9 @@ public static class ProtectedResourceMatcher
         catch (RegexMatchTimeoutException) { decoded = true; }
         // Contract 0017, amendment 2 (B1): /proc/<pid>/root, cwd and fd reach any file under another spelling.
         // Amendment 3 (C1): in an option's value too, a thread's alias, and a cd or pushd into /proc.
-        var aliased = words.SelectMany(WithOptionValues).Any(ProcAlias.IsMatch)
+        // Compared after normalising (/./proc/…, /proc/./1/…), as the kernel resolves the path (fifth review).
+        var aliased = words.SelectMany(WithOptionValues).Select(c => c.StartsWith('/') ? NormalizePath(c) : c)
+                          .Any(ProcAlias.IsMatch)
                       || commands.Any(i => LastSegment(words[i]) is "cd" or "pushd" && i + 1 < words.Count
                                            && IntoProc(words[i + 1]));
         var result = unanalyzable || decoded || aliased;
