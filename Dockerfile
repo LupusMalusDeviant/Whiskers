@@ -8,7 +8,7 @@
 # The docker CLI only (a static binary): the local web terminal's `docker exec` (TerminalLaunch.Local). Whiskers talks
 # to the Docker API itself (Docker.DotNet) and runs `docker compose` on the managed host (nsenter / SSH), so the image
 # carries no daemon, containerd or runc.
-FROM docker:29.9.3-cli@sha256:4d742ab934c2149b628bf26369ac3ec51cb91e2e28fe6722a0e86a6d6efc4bd5 AS docker-cli
+FROM docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d AS docker-cli
 
 # The SDK is the exact version of global.json (BuildReproducibilityTests): the SDK adds its own framework packages to
 # packages.lock.json, so a different SDK patch would not restore the lock files in locked mode. Move both together.
