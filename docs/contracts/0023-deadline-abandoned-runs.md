@@ -6,7 +6,7 @@ acceptance and implements decision A2 of the 1.1.0 plan (24 November 2026):
 - a run that outlives its deadline is marked `abandoned` and audited;
 - a test forbids new places that discard the token, and the existing ones are fixed in batches.
 
-The open decisions D1–D7 are at the end, each with a recommendation.
+The open decisions D1–D8 are at the end, each with a recommendation.
 
 ## Purpose
 
@@ -173,20 +173,34 @@ The gateway answers early. Everything that protects the target must still last u
 - **The refusal:** reason code `MutationReasonCodes.TargetBusy`, and the reason "an earlier run on this target ran
   past its deadline and is still running".
 - **Who it applies to:** every principal, with two exceptions.
-  - **The run's own nested calls.** A request whose `ParentOperationId` chain (from `MutationScope.Current`) contains
-    the abandoned operation id is not refused. Otherwise an abandoned compose run would fail half-way at its own next
-    container call.
-  - **The kill switch.** Switching the kill switch on and off is never refused by the guard. Engaging the brake must
-    always work.
+  - **The run's own nested calls.** A call is not refused when the chain of **open `MutationScope` objects** it runs
+    in (parents with `IsClosed == false`) contains the abandoned operation. Otherwise an abandoned compose run would
+    fail half-way at its own next container call.
+    - The exemption never reads `request.ParentOperationId`.
+    - The gateway clears a `ParentOperationId` supplied by the caller when no enclosing scope is open.
+  - **The two kill-switch toggles.**
+    - Today the switch is turned on only through `guardrails.save`, which writes the whole edited policy, and turned
+      off through `guardrails.kill_switch_off`.
+    - This contract adds `guardrails.kill_switch_on`. It changes only `ReadOnlyMode`, like `DisableKillSwitchAsync`,
+      and the Guardrails page uses it for switching on (D8).
+    - Only `guardrails.kill_switch_on` and `guardrails.kill_switch_off` are exempt, never `guardrails.save`.
+    - **A late write never releases the brake.** A `guardrails.save` that ends after its abandon cannot change
+      `ReadOnlyMode`: the store keeps the stored value unless the save was started after the last toggle (a version
+      compare-and-set on the policy). Without that rule, an older snapshot finishing late would switch the brake off
+      silently.
 
   Every other refusal changes nothing, so the guard errs on the safe side.
+- **Remedy:** an abandoned host- or server-level run blocks every mutation on that server, `container.stop`
+  included, until it ends. The operator text names the remedy beside the refusal: fix the host, or restart Whiskers
+  to clear it (D5).
 - **Effect:** a retry by a UI user, an MCP agent, the scheduler or AutoUpdate cannot pile up background runs on a
   hung host. The number of abandoned runs is bounded by the number of distinct targets.
 
 **4c. Callers wait for the real end before they release what they hold:**
 - **`Completion`:** `MutationOutcome<T>` gets `Task Completion`.
-  - For an outcome that is not abandoned, it is already complete.
-  - For an abandoned one, it completes after the late end.
+  - It is complete once the run **and every run nested in it** have really ended:
+    - for a run that was not abandoned and has no abandoned nested run, it is already complete;
+    - otherwise it completes after its own late end (if it was abandoned) and after every nested `Completion`.
   - It never faults and is never cancelled, so awaiting it cannot throw.
 - **Who awaits it:** these callers await `Completion` before they release their lease, entry or bookkeeping:
   - `WebhookService`: lock and AsyncLocal `Holding`;
@@ -196,18 +210,21 @@ The gateway answers early. Everything that protects the target must still last u
 - **No release before the real end:** a caller never releases before `Completion`, however long that takes. The
   limit L of D5 only raises the readiness signal. Their own caller, for example the webhook's HTTP answer, does not
   wait; the release waits in the background.
-- **Drain entries:** UI, MCP and agent runs take no drain entry of their own. For them, the gateway takes one when
-  execution starts (point 6).
+- **Drain entries:** UI, MCP and agent runs take no drain entry of their own. For a top-level run, the gateway takes
+  one when execution starts (point 6).
 
-**4d. Nested runs.** A run that started a nested gateway run is not finished while that nested run is abandoned and
-still running.
-- The outer run's continuation awaits the nested runs' `Completion` before it:
-  - closes its scope;
-  - finishes its journal claim;
-  - releases its maintenance admission.
-- The inner action therefore keeps its scope chain and the outer admission that it relies on, so a restore cannot
-  swap the database under it.
-- If that wait takes the outer run past its own deadline + G, the outer run is abandoned too, with the same rules.
+**4d. Nested runs.** An outer run whose action has returned while a run nested in it is abandoned works like this:
+- **Its outcome** is decided when its own action returns. The outer caller is not blocked for the nested runs.
+- **Its verification** waits until every nested `Completion`, bounded by G after the outer action returned. If the
+  nested runs have not ended by then, the verification is `NotVerifiable` with the reason "a nested run is still
+  running past its deadline". A half state is never read as the effect.
+- **Its release moves to the background** and happens only after every nested `Completion`. That covers its scope
+  (so the inner action keeps its scope chain), its journal claim, its maintenance admission (so a restore cannot swap
+  the database under the inner run) and its drain entry.
+- **Its `Completion`** follows 4c, so a 4c caller of the outer run keeps its lease, lock or history until the nested
+  run has ended too.
+- **The outer run is not marked abandoned** for this. Only a run whose own action is still running after deadline + G
+  is abandoned.
 
 **Release:** neither the emergency stop nor the kill switch releases any of these. Releasing them would let two
 writers act on one target.
@@ -220,15 +237,23 @@ writers act on one target.
 - **A run that never ends (D5):** once an abandoned run has gone on longer than the limit L, readiness turns
   `Degraded` with the line "a mutation has been running past its deadline for over L". Whiskers stays usable;
   overlapping targets remain refused.
-- **What an Admin can do about it:** fix the host (or restart Whiskers). After a restart, the reconciliation of
+- **What an Admin can do about it:** fix the host, or restart Whiskers. After a restart, the reconciliation of
   INV-39 reports the run as interrupted.
+- **A late end that was never written.** `LateEndNotWritten` is kept in memory, like `OutcomeNotWritten`. The
+  `audit` health check flags the gap only while the process lives; after a restart the late end is gone. What then
+  counts is the outcome row (with `Abandoned`) together with the journal (`Failed` or `Interrupted`).
 
 ### 6. Shutdown
 
-- **The drain entry:** the gateway takes the entry when execution starts, not at the abandon. Once stopping has begun,
-  `IShutdownDrain.TryEnter` gives none. The shutdown drain (30 s budget) then waits for a running or abandoned run
-  like any other work. A run that would need a new entry after stopping has begun is not started. That is the
-  drain's existing behaviour.
+- **The drain entry:** for a top-level run, the gateway takes the entry when execution starts, not at the abandon.
+  The shutdown drain (30 s budget) then waits for a running or abandoned run like any other work.
+- **A nested call** takes no entry: the outer run's entry counts for it, the same pattern as the maintenance
+  admission. A scheduled compose run admitted before the stop can therefore finish its nested calls during the drain.
+- **A top-level call after stopping has begun.** `IShutdownDrain.TryEnter` gives no entry, so the call is refused.
+  - **This is new behaviour.** Today UI, MCP and agent mutations are not refused while Whiskers stops, for up to 45 s.
+  - The refusal is the attempt's single INV-45 event (`Denied`), with reason code `MutationReasonCodes.ShuttingDown`.
+    The database is not being replaced, so the refusal can be recorded.
+  - INV-40 and the CHANGELOG name the change.
 - **What is still running after the budget** is cut off by the stop:
   - the late end is written as `cut off at shutdown` if there is still time;
   - otherwise the journal claim stays `Running`, and the start-up reconciliation reports the operation as interrupted
@@ -278,6 +303,9 @@ source text. This covers the compiled `.razor` components too.
   - Compiler-generated names such as `<OnSaveAsync>b__42_0` are not part of the key. They change with unrelated edits,
     and then every break would become "regenerate the baseline".
   - **Residual risk, accepted:** inside the same method and capability, one discarding site can be swapped for another.
+    Lambdas written in `.razor` markup all sit in `BuildRenderTree`, and overloads with the same name merge. For a
+    call site inside an async method, the enclosing method is the one named by its state-machine type
+    (`<OnSave>d__N`), never `MoveNext`.
 - **The test fails in three ways:**
   - **A new site:** a method and capability that is not in the baseline, or a count above the baseline. The message
     names the file and the capability, and says to pass the token on.
@@ -323,7 +351,9 @@ source text. This covers the compiled `.razor` components too.
 | `MutationOutcome<T>` | new `bool Abandoned { get; init; }` (default `false`) and `Task Completion` (complete unless abandoned) |
 | `MutationAbandonedException` (new) | derives from `OperationCanceledException`; carries `Deadline` |
 | `MutationFailedException` | new `bool Abandoned` |
-| `MutationReasonCodes` | new `Abandoned`, `TargetBusy` |
+| `MutationReasonCodes` | new `Abandoned`, `TargetBusy`, `ShuttingDown` |
+| `CapabilityCatalog` | new `guardrails.kill_switch_on` (changes only `ReadOnlyMode`; Admin, as `kill_switch_off`) |
+| `GuardrailStore` | a `guardrails.save` cannot change `ReadOnlyMode` unless it started after the last toggle (version compare-and-set) |
 | `IMutationAuditSink` | new `CompleteLateEndAsync(auditId, operationId, how, duration, results, ct)`: a further chain version of the event's row (`Phase = "late_end"`), never a second row |
 | `IAuditRecovery` | new `LateEndNotWritten(...)`: kept and written again, like `OutcomeNotWritten` |
 | `IAbandonedRuns` (new, singleton) | `Running` (capability, operation id, target, since), `Overlaps(target)`; for `/self-status`, the gauge, readiness and 4b |
@@ -353,11 +383,22 @@ source text. This covers the compiled `.razor` components too.
     server) is refused with `TargetBusy`, also under the emergency stop and under a new operation id; once the run
     ends, it goes through;
   - the refusal is the single `Denied` event;
-  - the kill switch can be switched on and off while a `guardrails.save` is abandoned;
+  - `guardrails.kill_switch_on` and `guardrails.kill_switch_off` go through while a `guardrails.save` is abandoned;
+    a `guardrails.save` does not;
+  - the brake is engaged during an abandoned save, and the save then ends late: the brake stays on;
+  - a request with a forged `ParentOperationId` equal to the abandoned run and no open scope is refused with
+    `TargetBusy`;
 - **4b and 4d:** an abandoned compose run makes a nested container call after the abandon, and the call is not
   refused;
-- **4d:** an inner run is abandoned and the outer one returns. The outer scope, journal claim and maintenance
-  admission stay until the inner `Completion`, and a restore waits;
+- **4d:**
+  - an inner run is abandoned and the outer one returns. The outer caller gets its answer at once. The outer scope,
+    journal claim, maintenance admission and `Completion` stay until the inner `Completion`, the outer verification
+    is `NotVerifiable` if the inner run does not end within G, and a restore waits;
+  - a webhook whose outer mutation is not abandoned, but whose nested run is, keeps its server lock until the nested
+    run ends;
+- **shutdown:**
+  - a nested call during the drain is not refused;
+  - a top-level UI call after stopping has begun is refused with `ShuttingDown` and recorded;
 - a restore waits for the abandoned run;
 - `IAbandonedRuns`, the gauge and `/self-status` count it while it runs; after L, readiness is `Degraded`;
 - shutdown: the drain waits; what still runs is reconciled at the next start.
@@ -390,7 +431,11 @@ Every new test goes into the test manifest.
     G; the run is marked abandoned, keeps what protects its target until its real end, and that end is audited". The
     agent-tools sentence "a mutation is never abandoned there" is qualified: the agent invoker still does not abandon
     a run, but the gateway does after deadline + G. The count of discarding sites goes down with each batch.
-  - **INV-45:** the follow-up phase of an abandoned attempt.
+  - **INV-45:** the further version (`late_end`) of an abandoned attempt, and the new `TargetBusy` and `ShuttingDown`
+    refusals.
+  - **INV-40:** the refusal of top-level mutations while Whiskers stops (new behaviour).
+- `docs/operations/` where the kill switch is described: `guardrails.kill_switch_on`, and that a late save never
+  releases the brake.
 - `src/Whiskers/Services/Mutations/README.md`: the deadline section and the audit section. Also the `IUiMutationRunner`
   doc.
 - `docs/operations/observability.md`: the gauge, the `/self-status` line and the readiness line.
@@ -415,3 +460,4 @@ Every new test goes into the test manifest.
 | D5 | A run that never ends: the limit L before readiness turns `Degraded` | **15 min**; overlapping targets stay refused, and a restart reconciles | no readiness signal, `/self-status` only |
 | D6 | An action that returns after the deadline but within G | **Verify it with its own token bounded by G**: the action completed, so its effect can be checked | `Failed` "ran past its deadline", without verification |
 | D7 | Request-scoped services under an abandoned run | **Name the limit**; the batches move actions off request-scoped services | every MCP mutation in its own DI scope, as `AgentToolInvoker` already does (more change in the MCP filter) |
+| D8 | How is the kill switch switched on while a `guardrails.save` is abandoned? | **A new capability `guardrails.kill_switch_on`** that changes only `ReadOnlyMode`, exempt from the guard; a late save never lowers `ReadOnlyMode` | no exemption: switching on waits until the abandoned save ends (a local file write, rarely long) |
