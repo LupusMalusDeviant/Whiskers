@@ -376,8 +376,8 @@ source text. This covers the compiled `.razor` components too.
 | Type | Change |
 |---|---|
 | `MutationOutcome<T>` | new `bool Abandoned { get; init; }` (default `false`) and `Task Completion` (complete once the run and every run nested in it have really ended; never faults) |
-| `MutationAbandonedException` (new) | derives from `OperationCanceledException`; carries `Deadline` |
-| `MutationFailedException` | new `bool Abandoned` |
+| `MutationAbandonedException` (new) | derives from `OperationCanceledException`; carries `Deadline` and, for `NestedAbandoned`, the nested operation id |
+| `MutationFailedException` | new `bool Abandoned`: `true` for `Abandoned`, `false` for `NestedAbandoned` (as on the outcome) |
 | `MutationReasonCodes` | new `Abandoned`, `NestedAbandoned`, `TargetBusy`, `ShuttingDown` |
 | `CapabilityCatalog` | new `guardrails.kill_switch_on` (changes only `ReadOnlyMode`; Admin, as `kill_switch_off`) |
 | `GuardrailStore` | a `guardrails.save` cannot change `ReadOnlyMode` unless it started after the last toggle (version compare-and-set) |
