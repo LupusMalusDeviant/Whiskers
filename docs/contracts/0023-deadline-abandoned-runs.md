@@ -45,7 +45,7 @@ This contract does four things:
 - It holds **no per-target lock**.
 
 **The callers** hold the rest themselves, around their gateway call:
-- **Resource locks and leases:** `WebhookService.ExecuteRunAsync` (`IResourceLocks`, and an AsyncLocal `Holding`) and
+- **Resource locks and leases:** `WebhookService.ExecuteRunAsync` (`ResourceLocks`, and an AsyncLocal `Holding`) and
   the server lease of `GitDeployService`.
 - **Shutdown-drain entries:** only unattended work takes one: `SchedulerService`, `AutoUpdateService` and
   `AutoPatchService`. A UI, MCP or agent run has none.
@@ -109,7 +109,11 @@ When G has run out and the action is still running, the caller gets:
 
 Each surface reports it as follows:
 - **The UI runner** throws `MutationFailedException`, with the new property `Abandoned = true`. This holds for both
-  `RunAsync` overloads, so a page never shows success for it.
+  `RunAsync` overloads, so a page never shows success for it. `UiMutationRunner.Settle` gets an explicit `Abandoned`
+  branch that comes before the `OperationCanceledException` branch. A page token cancelled at the same moment
+  therefore does not let the inner exception through. The implementation also checks that no unfiltered
+  `catch (OperationCanceledException)` sits above a `throw outcome.Error`. Today there is one such rethrow
+  (`AutoUpdateService`), and its catches are correct.
 - **An MCP tool** answers with the failure envelope and the reason code.
 - **The automation runner and `TaskExecutor`** record the failure.
 
@@ -119,21 +123,28 @@ deadline.
 The action itself is neither cancelled any further nor killed. It keeps running in the background with everything
 point 4 lists.
 
-### 3. The late end is a second phase of the same audit event
+### 3. The late end is a further version of the same audit event
 
-When an abandoned action ends, the gateway appends a follow-up phase to the same audit event:
-- **The record:** same `EventId`, `OperationId` and `Action` (the capability id), with `Phase = "late_end"`. It is
-  written through a new `IMutationAuditSink.AppendLateEndAsync`. A failed write goes to the outbox, like
-  `CompleteAsync`.
+`AuditLog.EventId` is unique. One event is one row, and its outcome is written today as the next version of that row
+in the chain (`AuditChain.UpdateAsync`). The late end follows the same pattern.
+
+When an abandoned action ends, the gateway writes **one further chain version of the same row**:
+- **The record:** same `EventId`, `OperationId` and `Action` (the capability id), with `Phase = "late_end"`. The
+  status `Failed` is kept, and the late-end fields are added to the details. It is written through a new
+  `IMutationAuditSink.CompleteLateEndAsync`.
+- **No second row:** the late end is never written as a second row with the same `EventId`. The unique index would
+  swallow it silently.
+- **A failed write:** it goes to `IAuditRecovery`, through a new `LateEndNotWritten`, like `OutcomeNotWritten` for
+  the outcome. It is kept and written again, and the `audit` health check shows it as incomplete until then.
 - **What it holds:**
   - how the action ended: `returned`, `threw` (the exception type only, the message through the usual redaction) or
     `cut off at shutdown`;
   - how long it ran in total;
   - the scope's `Results` and `FailureReason` that the tool reported after the abandon, capped and redacted as today.
 - **What stays unchanged:**
-  - the first outcome row, because audit rows are append-only;
-  - INV-45. It is amended: "exactly one audit event per attempt; an abandoned attempt gets one follow-up phase on
-    that event".
+  - the outcome version. The chain keeps it, and the late end is a new version after it, never a rewrite;
+  - INV-45: still exactly one audit event per attempt. The amendment says that an abandoned attempt gets one further
+    version (`late_end`) of that event.
 - **No verification** runs on the late end. The status stays `Failed`: the effect is unknown, and nobody waits for
   the value any more.
 - **An `Information` log line** records the end.
@@ -151,29 +162,52 @@ The gateway answers early. Everything that protects the target must still last u
   reports after the abandon reach point 3.
 
 **4b. A target guard owned by the gateway** (new):
-- While an abandoned run is in `IAbandonedRuns`, every new mutation is refused fail-closed when its resolved target
-  overlaps that run's target:
-  - in kind, id and server;
-  - or in its `Related` resources.
-- The refusal has reason code `MutationReasonCodes.TargetBusy` and the reason "an earlier run on this target ran past
-  its deadline and is still running".
-- This holds for every principal, the emergency stop included. A refusal changes nothing, which makes it the safe
-  side.
+- **Where it is checked:** in the gateway's pipeline after the target is resolved and before the intent row. Its
+  refusal is the attempt's single INV-45 event (`Denied`), recorded with the target as resolved.
+- **What it refuses:** while an abandoned run is in `IAbandonedRuns`, a new mutation is refused fail-closed when its
+  resolved target overlaps that run's target. Targets overlap in three cases:
+  - same kind, id and server;
+  - one target's `Related` resources hold the other;
+  - **one of them is a host-level or server-level target** (kind `host` or `server`, for example `host.exec`): such a
+    target overlaps every target on that server.
+- **The refusal:** reason code `MutationReasonCodes.TargetBusy`, and the reason "an earlier run on this target ran
+  past its deadline and is still running".
+- **Who it applies to:** every principal, with two exceptions.
+  - **The run's own nested calls.** A request whose `ParentOperationId` chain (from `MutationScope.Current`) contains
+    the abandoned operation id is not refused. Otherwise an abandoned compose run would fail half-way at its own next
+    container call.
+  - **The kill switch.** Switching the kill switch on and off is never refused by the guard. Engaging the brake must
+    always work.
+
+  Every other refusal changes nothing, so the guard errs on the safe side.
 - **Effect:** a retry by a UI user, an MCP agent, the scheduler or AutoUpdate cannot pile up background runs on a
   hung host. The number of abandoned runs is bounded by the number of distinct targets.
 
 **4c. Callers wait for the real end before they release what they hold:**
-- `MutationOutcome<T>` gets `Task Completion`.
+- **`Completion`:** `MutationOutcome<T>` gets `Task Completion`.
   - For an outcome that is not abandoned, it is already complete.
   - For an abandoned one, it completes after the late end.
-- These callers await `Completion` before they release their lease, entry or bookkeeping:
+  - It never faults and is never cancelled, so awaiting it cannot throw.
+- **Who awaits it:** these callers await `Completion` before they release their lease, entry or bookkeeping:
   - `WebhookService`: lock and AsyncLocal `Holding`;
   - `GitDeployService`: server lease;
   - `SchedulerService`, `AutoUpdateService` and `AutoPatchService`: drain entry;
   - `AutoUpdateService`: `history.CompletedAt` and the interruption guard.
-- Their own caller, for example the webhook's HTTP answer, does not wait. They wait in the background, within the
-  limit of D5.
-- UI, MCP and agent runs take no drain entry. The gateway itself takes one for each abandoned run (point 6).
+- **No release before the real end:** a caller never releases before `Completion`, however long that takes. The
+  limit L of D5 only raises the readiness signal. Their own caller, for example the webhook's HTTP answer, does not
+  wait; the release waits in the background.
+- **Drain entries:** UI, MCP and agent runs take no drain entry of their own. For them, the gateway takes one when
+  execution starts (point 6).
+
+**4d. Nested runs.** A run that started a nested gateway run is not finished while that nested run is abandoned and
+still running.
+- The outer run's continuation awaits the nested runs' `Completion` before it:
+  - closes its scope;
+  - finishes its journal claim;
+  - releases its maintenance admission.
+- The inner action therefore keeps its scope chain and the outer admission that it relies on, so a restore cannot
+  swap the database under it.
+- If that wait takes the outer run past its own deadline + G, the outer run is abandoned too, with the same rules.
 
 **Release:** neither the emergency stop nor the kill switch releases any of these. Releasing them would let two
 writers act on one target.
@@ -191,8 +225,10 @@ writers act on one target.
 
 ### 6. Shutdown
 
-- **The drain entry:** the gateway takes one for each abandoned run, so the shutdown drain (30 s budget) waits for it
-  like any other work. The gateway learns of the stop through `IShutdownDrain`.
+- **The drain entry:** the gateway takes the entry when execution starts, not at the abandon. Once stopping has begun,
+  `IShutdownDrain.TryEnter` gives none. The shutdown drain (30 s budget) then waits for a running or abandoned run
+  like any other work. A run that would need a new entry after stopping has begun is not started. That is the
+  drain's existing behaviour.
 - **What is still running after the budget** is cut off by the stop:
   - the late end is written as `cut off at shutdown` if there is still time;
   - otherwise the journal claim stays `Running`, and the start-up reconciliation reports the operation as interrupted
@@ -220,28 +256,35 @@ The new architecture test `DeadlineTokenRatchetTests` works on the **compiled IL
 source text. This covers the compiled `.razor` components too.
 
 - **What it finds:** it reuses the scan of `MutationBypassArchitectureTests.UiRunnerLambdas` (`ldstr` capability, the
-  lambda via `ldftn`, then the call of the entry point). It is widened to:
+  lambda via `ldftn` or `ldvirtftn`, then the call of the entry point). It is widened to:
   - `IMutationGateway.ExecuteAsync`;
   - every method marked `[MutationEntryPoint]`: `IUiMutationRunner.RunAsync`, the automation runner and
     `TaskExecutor.RunGatedAsync`.
 
   It covers lambdas, method groups and local functions.
 - **When a site is clean:** the action, or the `MoveNext` of its async state machine, passes the token parameter (or
-  the field it was hoisted into) as an argument to a call. These do not count as passing it on:
+  the field it was hoisted into, or a local or hoisted local copied from it) as an argument to a call. These do not
+  count as passing it on:
   - `_ = ct`;
   - `ct.ThrowIfCancellationRequested()` alone;
   - `CancellationToken.None` or `default`.
+- **Accepted limit:** any call that takes the token makes the site clean, even `Task.Delay(0, ct)` followed by a call
+  without it. Reviews catch that; the ratchet does not.
 - **Baseline:**
-  - `src/Whiskers.Tests/Architecture/deadline-token-baseline.txt` holds one line per site: `<declaring type>|<capability
-    id>|<method name of the action>`;
-  - for `.razor` components, the type maps to its `.razor` path in the message;
-  - a site is identified by its compiler-generated method, not by a count, so one discarding site cannot be swapped
-    for another.
-- **The test fails in two ways:**
-  - a new site that is not in the baseline: the message names the file and the capability, and says to pass the
-    token on;
-  - a baseline line that no longer matches: the message says to remove it from the baseline. The list can therefore
-    only shrink.
+  - `src/Whiskers.Tests/Architecture/deadline-token-baseline.txt` holds one line per enclosing user method and
+    capability: `<file>|<enclosing method>|<capability id>|<count>`.
+    - The file is the `.razor` or `.cs` path.
+    - The enclosing method is taken from the `<X>` prefix of the generated name, or from the PDB sequence points.
+  - Compiler-generated names such as `<OnSaveAsync>b__42_0` are not part of the key. They change with unrelated edits,
+    and then every break would become "regenerate the baseline".
+  - **Residual risk, accepted:** inside the same method and capability, one discarding site can be swapped for another.
+- **The test fails in three ways:**
+  - **A new site:** a method and capability that is not in the baseline, or a count above the baseline. The message
+    names the file and the capability, and says to pass the token on.
+  - **A count below the baseline:** the message says to lower the line.
+  - **A line that no longer matches:** the message says to remove it.
+
+  The list can therefore only shrink.
 - **Outside the scan:**
   - MCP tool methods and agent tools that the reflection invoker calls;
   - whether a service method honours the token.
@@ -281,7 +324,8 @@ source text. This covers the compiled `.razor` components too.
 | `MutationAbandonedException` (new) | derives from `OperationCanceledException`; carries `Deadline` |
 | `MutationFailedException` | new `bool Abandoned` |
 | `MutationReasonCodes` | new `Abandoned`, `TargetBusy` |
-| `IMutationAuditSink` | new `AppendLateEndAsync(eventId, operationId, how, duration, results, ct)`; on failure: outbox, like `CompleteAsync` |
+| `IMutationAuditSink` | new `CompleteLateEndAsync(auditId, operationId, how, duration, results, ct)`: a further chain version of the event's row (`Phase = "late_end"`), never a second row |
+| `IAuditRecovery` | new `LateEndNotWritten(...)`: kept and written again, like `OutcomeNotWritten` |
 | `IAbandonedRuns` (new, singleton) | `Running` (capability, operation id, target, since), `Overlaps(target)`; for `/self-status`, the gauge, readiness and 4b |
 | `MutationGateway` | new options `AbandonGrace` (G) and `AbandonedLimit` (L); takes `IShutdownDrain` |
 | `IUiMutationRunner` | doc: an abandoned run throws `MutationFailedException` with `Abandoned` |
@@ -299,12 +343,21 @@ source text. This covers the compiled `.razor` components too.
 - an action that returns after the deadline but within G is verified with its own token, with no false
   "read-back failed";
 - abandon and normal end at the G boundary: exactly one of the two endings (repeated run);
-- the late end appends exactly one `late_end` phase (`returned`, or `threw` with the type only, plus the scope's later
-  results); a failed write lands in the outbox;
+- the late end writes exactly one further chain version of the same row (`late_end`: `returned`, or `threw` with the
+  type only, plus the scope's later results). There is no second row, and the outcome version stays in the chain;
+- a failed late-end write is kept by `IAuditRecovery` and written again;
 - the journal claim stays `Running` until the real end and is then `Failed`, never `Executed`;
 - the scope stays usable: a nested `[MutatingOperation]` call after the abandon is not refused by the scope guard;
-- 4b: a second mutation of an overlapping target (same id, or via `Related`) is refused with `TargetBusy`, also for
-  the emergency stop and for a new operation id; once the run ends, it goes through;
+- **4b:**
+  - a second mutation of an overlapping target (same id, via `Related`, or a host or server target on the same
+    server) is refused with `TargetBusy`, also under the emergency stop and under a new operation id; once the run
+    ends, it goes through;
+  - the refusal is the single `Denied` event;
+  - the kill switch can be switched on and off while a `guardrails.save` is abandoned;
+- **4b and 4d:** an abandoned compose run makes a nested container call after the abandon, and the call is not
+  refused;
+- **4d:** an inner run is abandoned and the outer one returns. The outer scope, journal claim and maintenance
+  admission stay until the inner `Completion`, and a restore waits;
 - a restore waits for the abandoned run;
 - `IAbandonedRuns`, the gauge and `/self-status` count it while it runs; after L, readiness is `Degraded`;
 - shutdown: the drain waits; what still runs is reconciled at the next start.
@@ -312,13 +365,20 @@ source text. This covers the compiled `.razor` components too.
 Further tests:
 - **Callers (4c):** webhook, Git deploy, scheduler, AutoUpdate and AutoPatch keep their lease, lock, drain entry or
   history until `Completion`.
-- **`UiMutationRunnerTests`:** both `RunAsync` overloads throw `MutationFailedException` with `Abandoned`.
+- **`UiMutationRunnerTests`:** both `RunAsync` overloads throw `MutationFailedException` with `Abandoned`, also when
+  the page's token is cancelled at the same moment.
 - **MCP filter:** the failure envelope with the reason code.
 - **`DeadlineTokenRatchetTests`:**
   - the baseline matches the IL exactly;
-  - a fixture with `_ = ct`, `ThrowIfCancellationRequested` alone, `CancellationToken.None` or a method group is
-    found;
-  - a fixture that passes the token on is not.
+  - fixtures that are found:
+    - `_ = ct`;
+    - `ThrowIfCancellationRequested` alone;
+    - `CancellationToken.None`;
+    - a method group, and a virtual method group (`ldvirtftn`);
+  - fixtures that are not found:
+    - a lambda that passes the token on;
+    - one that passes it on through a local;
+  - an unrelated lambda added to the same type leaves the baseline valid.
 - **One safe-point test** per multi-step service in the batches.
 
 Every new test goes into the test manifest.

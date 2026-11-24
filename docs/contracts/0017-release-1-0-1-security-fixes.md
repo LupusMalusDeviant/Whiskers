@@ -681,8 +681,12 @@ approver is always told about it. This amendment sits in the 1.0.1 contract beca
 - **The condition.** The resolved target of the call carries a privileged-hook exposure. That means
   `MutationTarget.Exposures` holds an identity for which `ComposeExposures.IsPrivilegedHook` is true.
 - **The approval (D-5a, recommended):** when the approval is raised, the fixed sentence is appended to
-  `Approval.Reason`, unless the reason already names a hook. The sentence: "Includes a privileged compose hook:
+  `Approval.Reason`, always, whenever the condition above holds. The sentence: "Includes a privileged compose hook:
   decided now only, not checked after the run."
+  - The decision rests on structured data only, the exposure identities of the resolved target. It never rests on
+    the text of the reason. A service name comes from the compose file and could imitate a hook sentence.
+  - When the rule's own reason already names the hook, the generic sentence follows it anyway. A little repetition is
+    the price of that.
   - This covers the card on the Approvals page and the inline dialog of contract 0019, because both show `Reason`.
   - It needs no new column and no migration.
 - **The notification:** `ApprovalDisplay.NotificationText` adds the same sentence **before** the link or
@@ -717,7 +721,9 @@ approver is always told about it. This amendment sits in the 1.0.1 contract beca
 - An approval for a compose run with a privileged `post_start` hook:
   - the notification contains the sentence, before the link;
   - `Reason` contains it.
-- The hook is the exposure that raised the approval: `Reason` names it once, not twice.
+- The hook is the exposure that raised the approval: `Reason` carries the rule's text and the sentence.
+- A service named like the hook sentence, with only a published port: no sentence. Another service with a real
+  privileged hook: the sentence. The decision never matches the text.
 - An approval raised by another rule (for example INV-59) for a run with a hook: the notification and `Reason` name
   it.
 - The same run without a hook, or with a hook that is not privileged: no sentence.
