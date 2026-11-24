@@ -183,6 +183,15 @@ The gateway answers early. Everything that protects the target must still last u
       off through `guardrails.kill_switch_off`.
     - This contract adds `guardrails.kill_switch_on`. It changes only `ReadOnlyMode`, like `DisableKillSwitchAsync`,
       and the Guardrails page uses it for switching on (D8).
+      - **Like `guardrails.kill_switch_off`, it is:**
+        - UI only (`Ui(...)`; not on MCP and not for the agent);
+        - Admin;
+        - marked root-equivalent;
+        - wired in `CapabilityCatalog.Singletons`, in a `[MutatingOperation("guardrails.kill_switch_on")]` method on
+          `IGuardrailStore`, in `MutationPolicy` and in `VerificationContracts`, with a read-back verifier of
+          `ReadOnlyMode`.
+      - It is no kill-switch exemption under contract 0009. While the switch is on, `ReadOnlyModeRule` refuses it,
+        which is harmless.
     - Only `guardrails.kill_switch_on` and `guardrails.kill_switch_off` are exempt, never `guardrails.save`.
     - **A late write never releases the brake.** A `guardrails.save` that ends after its abandon cannot change
       `ReadOnlyMode`: the store keeps the stored value unless the save was started after the last toggle (a version
@@ -214,10 +223,19 @@ The gateway answers early. Everything that protects the target must still last u
   one when execution starts (point 6).
 
 **4d. Nested runs.** An outer run whose action has returned while a run nested in it is abandoned works like this:
-- **Its outcome** is decided when its own action returns. The outer caller is not blocked for the nested runs.
-- **Its verification** waits until every nested `Completion`, bounded by G after the outer action returned. If the
-  nested runs have not ended by then, the verification is `NotVerifiable` with the reason "a nested run is still
-  running past its deadline". A half state is never read as the effect.
+- **Its outcome** is decided when its own action returns. The outer caller is blocked for the nested runs at most G
+  after that.
+- **Its verification** waits for every nested `Completion`, bounded by G after the outer action returned.
+- **Never `Executed` while a nested run is still running.** If a nested run has not ended within that G, the outer
+  run is `Failed`:
+  - verification `NotRun`;
+  - reason code `MutationReasonCodes.NestedAbandoned`;
+  - the reason "a nested run is still running past its deadline; its effect is unknown — read the current state
+    before retrying";
+  - `Abandoned = false`, because it is not counted as an abandoned run itself.
+
+  The UI runner throws `MutationFailedException`, and the MCP filter returns the failure envelope. A half state is
+  never read as the effect.
 - **Its release moves to the background** and happens only after every nested `Completion`. That covers its scope
   (so the inner action keeps its scope chain), its journal claim, its maintenance admission (so a restore cannot swap
   the database under the inner run) and its drain entry.
@@ -245,14 +263,17 @@ writers act on one target.
 
 ### 6. Shutdown
 
-- **The drain entry:** for a top-level run, the gateway takes the entry when execution starts, not at the abandon.
-  The shutdown drain (30 s budget) then waits for a running or abandoned run like any other work.
+- **The drain entry:** for a top-level run, the gateway takes the entry where it takes the maintenance admission
+  today. That point is before `PrepareAsync`, before the intent row, the journal claim and the consumption of an
+  approval. The entry is not taken at the abandon. The shutdown drain (30 s budget) then waits for a running or
+  abandoned run like any other work.
 - **A nested call** takes no entry: the outer run's entry counts for it, the same pattern as the maintenance
   admission. A scheduled compose run admitted before the stop can therefore finish its nested calls during the drain.
 - **A top-level call after stopping has begun.** `IShutdownDrain.TryEnter` gives no entry, so the call is refused.
   - **This is new behaviour.** Today UI, MCP and agent mutations are not refused while Whiskers stops, for up to 45 s.
-  - The refusal is the attempt's single INV-45 event (`Denied`), with reason code `MutationReasonCodes.ShuttingDown`.
-    The database is not being replaced, so the refusal can be recorded.
+  - The refusal goes through `RefuseAsync` at that point and is the attempt's single INV-45 event (`Denied`), with
+    reason code `MutationReasonCodes.ShuttingDown`. Nothing is claimed and no approval is used up. The database is
+    not being replaced, so the refusal can be recorded.
   - INV-40 and the CHANGELOG name the change.
 - **What is still running after the budget** is cut off by the stop:
   - the late end is written as `cut off at shutdown` if there is still time;
@@ -348,10 +369,10 @@ source text. This covers the compiled `.razor` components too.
 
 | Type | Change |
 |---|---|
-| `MutationOutcome<T>` | new `bool Abandoned { get; init; }` (default `false`) and `Task Completion` (complete unless abandoned) |
+| `MutationOutcome<T>` | new `bool Abandoned { get; init; }` (default `false`) and `Task Completion` (complete once the run and every run nested in it have really ended; never faults) |
 | `MutationAbandonedException` (new) | derives from `OperationCanceledException`; carries `Deadline` |
 | `MutationFailedException` | new `bool Abandoned` |
-| `MutationReasonCodes` | new `Abandoned`, `TargetBusy`, `ShuttingDown` |
+| `MutationReasonCodes` | new `Abandoned`, `NestedAbandoned`, `TargetBusy`, `ShuttingDown` |
 | `CapabilityCatalog` | new `guardrails.kill_switch_on` (changes only `ReadOnlyMode`; Admin, as `kill_switch_off`) |
 | `GuardrailStore` | a `guardrails.save` cannot change `ReadOnlyMode` unless it started after the last toggle (version compare-and-set) |
 | `IMutationAuditSink` | new `CompleteLateEndAsync(auditId, operationId, how, duration, results, ct)`: a further chain version of the event's row (`Phase = "late_end"`), never a second row |
@@ -399,6 +420,9 @@ source text. This covers the compiled `.razor` components too.
 - **shutdown:**
   - a nested call during the drain is not refused;
   - a top-level UI call after stopping has begun is refused with `ShuttingDown` and recorded;
+  - an approved call refused with `ShuttingDown` leaves its approval unused;
+- **4d, outcome:** an outer run whose nested run is still abandoned after G is `Failed` with `NestedAbandoned`, the UI
+  runner throws `MutationFailedException`, and the MCP filter returns the failure envelope;
 - a restore waits for the abandoned run;
 - `IAbandonedRuns`, the gauge and `/self-status` count it while it runs; after L, readiness is `Degraded`;
 - shutdown: the drain waits; what still runs is reconciled at the next start.
