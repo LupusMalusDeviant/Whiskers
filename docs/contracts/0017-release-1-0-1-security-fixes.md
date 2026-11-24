@@ -653,3 +653,76 @@ Where it differs from part G of Amendment 1, this amendment wins.
     `NotificationThrottleSubjects` builds it (source scan);
   - two loops stalled on one server carry their loop as subject and both pass one channel's throttle
     (`MonitoringAlarmLogicTests`).
+
+## Amendment 5 — privileged hooks are named to the approver (24 November 2026)
+
+Status: **Draft** · 24 November 2026, waiting for the maintainer's acceptance. It implements decision A3 of the 1.1.0
+plan (24 November 2026): the known limit of part A2 stays, and the approver is told about it.
+
+### A2b — the limit stays, and it is named where the decision is made
+
+- **The limit is unchanged.** A `post_start` or `pre_stop` hook with `privileged: true` is an exec, not container
+  state. It is decided at planning only, and the re-check after `up` cannot see it. Whiskers does not try to detect a
+  hook after the run.
+- **Why it matters.** Whoever approves such a run decides once, at planning, and nothing checks it afterwards. Today
+  the approver learns that only from the plan's exposure list. The notification does not say it.
+- **The approval notification.**
+  - When the resolved target of the call carries a privileged-hook exposure (`MutationTarget.Exposures`, an identity
+    whose key `ComposeExposure.IsHookKey` accepts), `ApprovalDisplay.NotificationText` appends one fixed sentence:
+    " · includes a privileged compose hook, decided now only — not checked after the run".
+  - The sentence names no service, no hook index and no command. Those come from the compose file, and a notification
+    never carries a value the caller could have put into the call (C-22).
+  - Both raising paths pass the flag: the gateway's `ApprovalGate` and the agent's `ApprovalCoordinator`.
+- **The deploy plan.** In the plan's exposure list (`Deploy.razor`, and the compose editor that shares it), a hook
+  exposure gets the same note as its class text: "decided now only — not checked after the run". It is a resx key,
+  in English and German.
+- **The approval card** (D-5a): the card on the Approvals page and the inline dialog of contract 0019 show the same
+  note. The approval row has no exposure list (the binding holds them only hashed), so the row gets one new field,
+  `PrivilegedHook` (`bool`, default `false`), set when the approval is raised. That requires a migration for SQLite
+  and PostgreSQL (ADR-0004).
+- **Unchanged.**
+  - How a hook is decided (agent rule set: confirmation; person: noted).
+  - The binding: the exposures stay part of the hash, as before.
+  - Throttling and the notification's other fields.
+
+### Interfaces
+
+| Type | Change |
+|---|---|
+| `ComposeExposure` | new `public static bool IsPrivilegedHook(string identity)`: parses the identity and applies `IsHookKey` to `Privileged` exposures |
+| `ApprovalDisplay.NotificationText` | new optional parameter `bool privilegedHook = false` |
+| `ApprovalSubject` | new `bool PrivilegedHook { get; init; }`, set by the gateway from the resolved target |
+| `Approval` (row) | new `bool PrivilegedHook` (only with D-5a), with a migration in both assemblies |
+
+### Tests (acceptance)
+
+`PrivilegedHookNoticeTests`:
+- an approval for a compose run with a `post_start` hook marked `privileged: true` gets a notification that ends with
+  the fixed sentence;
+- the same run without a hook, or with a hook that is not privileged, gets a notification without that sentence;
+- the sentence contains neither the service name nor the hook index (a service named like a secret, and one named
+  like a URL);
+- the agent path (`ApprovalCoordinator`) adds the sentence too;
+- the deploy plan shows the note next to the hook exposure and nowhere else (bUnit);
+- with D-5a: the card and the inline dialog show the note, and the migration adds the column with default `false` on
+  both providers.
+
+Every new test goes into the test manifest.
+
+### Documentation (same PR)
+
+- `docs/v1/SECURITY_INVARIANTS.md` INV-62: the known limit stays, with the addition "the approval notification and
+  the plan name it".
+- `src/Whiskers/Services/Mutations/README.md` (compose exposures) and `docs/operations/` where approvals are
+  described.
+- `CHANGELOG.md`.
+
+### Plan triage
+
+Everything is `[Claude-prüfbar]`. The look of the note on the real Approvals page is `[braucht Nutzer]` (D6).
+
+### Open decision
+
+| | Question | Recommendation | Alternative |
+|---|---|---|---|
+| D-5a | Does the approval card show the note as well? | **Yes**: the approver decides on the card, not in the notification; the cost is one column and its migration | notification and plan only, with no migration |
