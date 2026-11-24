@@ -653,3 +653,101 @@ Where it differs from part G of Amendment 1, this amendment wins.
     `NotificationThrottleSubjects` builds it (source scan);
   - two loops stalled on one server carry their loop as subject and both pass one channel's throttle
     (`MonitoringAlarmLogicTests`).
+
+## Amendment 5 — privileged hooks are named to the approver (24 November 2026)
+
+Status: **Accepted** · 24 November 2026 by the maintainer, D-5a as recommended (the sentence is appended to
+`Approval.Reason`, no migration). It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit
+of part A2 stays, and the approver is always told about it. This amendment sits in the 1.0.1 contract because part A2 is defined here. The
+1.1.0 plan points to it.
+
+### Current state (verified at `7d5bbe5e`)
+
+- **When the approval names the hook.** If the privileged hook is the exposure that raised the approval, the card
+  already says so in `Approval.Reason`. The text comes from `ExposureChangeRule`: "{service} runs a privileged
+  post_start hook (hook:post_start:0); it is decided at planning only."
+- **The gap:**
+  - the rule names only the **first** exposure that needs a confirmation;
+  - an approval raised by **another** rule (INV-59, a protected resource, the control plane …) never mentions the
+    hook;
+  - the **notification** (`ApprovalDisplay.NotificationText`) never mentions it, in either case.
+- **The plans:** only `Deploy.razor` shows a plan's exposure list. The compose editor and the `.env` save of the
+  container page show no plan; they share only the `DeployAsync` path.
+
+### A2b — the limit stays, and every approval of such a run names it
+
+- **The limit is unchanged.** A `post_start` or `pre_stop` hook with `privileged: true` is an exec, not container
+  state. It is decided at planning only, and the re-check after `up` cannot see it.
+- **The condition.** The resolved target of the call carries a privileged-hook exposure. That means
+  `MutationTarget.Exposures` holds an identity for which `ComposeExposures.IsPrivilegedHook` is true.
+- **The approval (D-5a, recommended):** when the approval is raised, the fixed sentence is appended to
+  `Approval.Reason`, always, whenever the condition above holds. The sentence: "Includes a privileged compose hook:
+  decided now only, not checked after the run."
+  - The decision rests on structured data only, the exposure identities of the resolved target. It never rests on
+    the text of the reason. A service name comes from the compose file and could imitate a hook sentence.
+  - When the rule's own reason already names the hook, the generic sentence follows it anyway. A little repetition is
+    the price of that.
+  - This covers the card on the Approvals page and the inline dialog of contract 0019, because both show `Reason`.
+  - It needs no new column and no migration.
+- **The notification:** `ApprovalDisplay.NotificationText` adds the same sentence **before** the link or
+  "(Whiskers → Approvals)". The sentence names no service, no hook index and no command. Those come from the compose
+  file, and a notification never carries a value the caller could have put into the call (C-22).
+- **Both raising paths:**
+  - the gateway (`ApprovalGate`, through `ApprovalSubject`);
+  - the agent (`AgentToolInvoker` → `GuardrailDecision` → `ApprovalCoordinator`).
+- **The deploy plan:** in `Deploy.razor`'s exposure list, a hook exposure gets the note "decided now only — not
+  checked after the run" as a resx key, in English and German.
+- **No change** to the compose editor or the `.env` save. They show no plan, and their approvals and notifications
+  are covered above.
+- **Unchanged:**
+  - how a hook is decided (agent rule set: confirmation; person: noted);
+  - the binding: the exposures stay part of the hash;
+  - throttling;
+  - the other fields of the notification.
+
+### Interfaces
+
+| Type | Change |
+|---|---|
+| `ComposeExposures` (static) | new `public static bool IsPrivilegedHook(string identity)`: `Parse`, then `Kind == Privileged && IsHookKey(Key)` |
+| `ApprovalDisplay.NotificationText` | new optional parameter `bool privilegedHook = false`; the sentence goes before the link |
+| `ApprovalSubject` | new `bool PrivilegedHook { get; init; }`, set by the gateway from the resolved target |
+| `GuardrailDecision` (`IAgentGuardrailEngine.cs`) | new `bool PrivilegedHook`, set in `AgentToolInvoker` from `decided.Target` |
+| `ApprovalRequest` (input of `ApprovalStore.CreateAsync`) | the `Reason` it carries gets the sentence; no new field with D-5a |
+
+### Tests (acceptance)
+
+`PrivilegedHookNoticeTests`:
+- An approval for a compose run with a privileged `post_start` hook:
+  - the notification contains the sentence, before the link;
+  - `Reason` contains it.
+- The hook is the exposure that raised the approval: `Reason` carries the rule's text and the sentence.
+- A service named like the hook sentence, with only a published port: no sentence. Another service with a real
+  privileged hook: the sentence. The decision never matches the text.
+- An approval raised by another rule (for example INV-59) for a run with a hook: the notification and `Reason` name
+  it.
+- The same run without a hook, or with a hook that is not privileged: no sentence.
+- The sentence holds neither the service name nor the hook index. Checked with a service named like a secret and one
+  named like a URL.
+- The agent path adds the sentence too.
+- The deploy plan shows the note beside the hook exposure and nowhere else (bUnit).
+
+Every new test goes into the test manifest.
+
+### Documentation (same PR)
+
+- `docs/v1/SECURITY_INVARIANTS.md` INV-62: the known limit stays, and every approval and notification of such a run
+  names it.
+- `src/Whiskers/Services/Mutations/README.md` (compose exposures), and the place in `docs/operations/` where
+  approvals are described.
+- `CHANGELOG.md`.
+
+### Plan triage
+
+Everything is `[Claude-prüfbar]`. The look on the real Approvals page is `[braucht Nutzer]` (D6 of the 1.1.0 plan).
+
+### Decision (maintainer, 24 November 2026: as recommended)
+
+| | Question | Recommendation | Alternative |
+|---|---|---|---|
+| D-5a | How does the card learn about the hook? | **Append the sentence to `Approval.Reason`**: the card and the dialog already show it, and no migration is needed | a new column `PrivilegedHook` on the approval row, with its own display (a migration on SQLite and PostgreSQL) |
