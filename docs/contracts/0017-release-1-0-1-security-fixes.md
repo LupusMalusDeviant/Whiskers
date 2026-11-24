@@ -656,8 +656,8 @@ Where it differs from part G of Amendment 1, this amendment wins.
 
 ## Amendment 5 — privileged hooks are named to the approver (24 November 2026)
 
-Status: **Draft** · 24 November 2026, revised the same day after review round 1, waiting for the maintainer's
-acceptance. It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit of part A2 stays, and the
+Status: **Accepted** · 24 November 2026 by the maintainer, D-5a as recommended (the sentence is appended to
+`Approval.Reason`, no migration). It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit of part A2 stays, and the
 approver is always told about it. This amendment sits in the 1.0.1 contract because part A2 is defined here. The
 1.1.0 plan points to it.
 
@@ -746,7 +746,7 @@ Every new test goes into the test manifest.
 
 Everything is `[Claude-prüfbar]`. The look on the real Approvals page is `[braucht Nutzer]` (D6 of the 1.1.0 plan).
 
-### Open decision
+### Decision (maintainer, 24 November 2026: as recommended)
 
 | | Question | Recommendation | Alternative |
 |---|---|---|---|

@@ -1,7 +1,7 @@
 # Contract 0023 — Runs past their deadline, and the token ratchet (INV-40)
 
-Status: **Draft** · 24 November 2026, revised the same day after review round 1. It waits for the maintainer's
-acceptance and implements decision A2 of the 1.1.0 plan (24 November 2026):
+Status: **Accepted** · 24 November 2026 by the maintainer, D1–D8 as recommended (G = 5 s, L = 15 min, the new
+`guardrails.kill_switch_on`). It implements decision A2 of the 1.1.0 plan (24 November 2026):
 - the deadline stays cooperative, and there is no hard abort;
 - a run that outlives its deadline is marked `abandoned` and audited;
 - a test forbids new places that discard the token, and the existing ones are fixed in batches.
@@ -482,7 +482,7 @@ Every new test goes into the test manifest.
 - Behaviour 1–7, the ratchet and every batch: `[Claude-prüfbar]`.
 - An abandoned run in the real app (for example on a slow host): `[braucht Nutzer]`, D6 in the 1.1.0 plan.
 
-## Open decisions
+## Decisions (maintainer, 24 November 2026: all as recommended)
 
 | | Question | Recommendation | Alternative |
 |---|---|---|---|
