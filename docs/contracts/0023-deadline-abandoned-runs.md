@@ -232,7 +232,13 @@ The gateway answers early. Everything that protects the target must still last u
   - reason code `MutationReasonCodes.NestedAbandoned`;
   - the reason "a nested run is still running past its deadline; its effect is unknown — read the current state
     before retrying";
-  - `Abandoned = false`, because it is not counted as an abandoned run itself.
+  - `Abandoned = false`, because it is not counted as an abandoned run itself;
+  - the value withheld (`Value = default`), as for the R1-36 verification failure;
+  - as `Error`, a `MutationAbandonedException` that carries the nested operation id.
+
+  Because of that `Error`, the explicit branch in `UiMutationRunner.Settle` and in the MCP filter catches it before
+  the "reported failure" branch (`Failed` with `Error == null`). That branch only applies on reason code `Abandoned`
+  or `NestedAbandoned`, never on `Abandoned = true` alone.
 
   The UI runner throws `MutationFailedException`, and the MCP filter returns the failure envelope. A half state is
   never read as the effect.
@@ -422,7 +428,8 @@ source text. This covers the compiled `.razor` components too.
   - a top-level UI call after stopping has begun is refused with `ShuttingDown` and recorded;
   - an approved call refused with `ShuttingDown` leaves its approval unused;
 - **4d, outcome:** an outer run whose nested run is still abandoned after G is `Failed` with `NestedAbandoned`, the UI
-  runner throws `MutationFailedException`, and the MCP filter returns the failure envelope;
+  runner throws `MutationFailedException` (both `RunAsync` overloads), and the MCP filter returns the failure envelope
+  with `NestedAbandoned`, not the tool's answer;
 - a restore waits for the abandoned run;
 - `IAbandonedRuns`, the gauge and `/self-status` count it while it runs; after L, readiness is `Degraded`;
 - shutdown: the drain waits; what still runs is reconciled at the next start.
@@ -458,6 +465,8 @@ Every new test goes into the test manifest.
   - **INV-45:** the further version (`late_end`) of an abandoned attempt, and the new `TargetBusy` and `ShuttingDown`
     refusals.
   - **INV-40:** the refusal of top-level mutations while Whiskers stops (new behaviour).
+  - **INV-19:** `guardrails.kill_switch_on` joins the root-equivalent set (count and list), together with the
+    architecture test that pins `CapabilityCatalog.RootEquivalent`.
 - `docs/operations/` where the kill switch is described: `guardrails.kill_switch_on`, and that a late save never
   releases the brake.
 - `src/Whiskers/Services/Mutations/README.md`: the deadline section and the audit section. Also the `IUiMutationRunner`
