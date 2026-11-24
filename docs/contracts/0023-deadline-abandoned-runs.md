@@ -6,7 +6,7 @@ Status: **Accepted** · 24 November 2026 by the maintainer, D1–D8 as recommend
 - a run that outlives its deadline is marked `abandoned` and audited;
 - a test forbids new places that discard the token, and the existing ones are fixed in batches.
 
-The open decisions D1–D8 are at the end, each with a recommendation.
+The decisions D1–D8 are at the end; the maintainer accepted each as recommended.
 
 ## Purpose
 

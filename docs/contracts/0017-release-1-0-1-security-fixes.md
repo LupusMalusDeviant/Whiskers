@@ -657,8 +657,8 @@ Where it differs from part G of Amendment 1, this amendment wins.
 ## Amendment 5 — privileged hooks are named to the approver (24 November 2026)
 
 Status: **Accepted** · 24 November 2026 by the maintainer, D-5a as recommended (the sentence is appended to
-`Approval.Reason`, no migration). It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit of part A2 stays, and the
-approver is always told about it. This amendment sits in the 1.0.1 contract because part A2 is defined here. The
+`Approval.Reason`, no migration). It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit
+of part A2 stays, and the approver is always told about it. This amendment sits in the 1.0.1 contract because part A2 is defined here. The
 1.1.0 plan points to it.
 
 ### Current state (verified at `7d5bbe5e`)
