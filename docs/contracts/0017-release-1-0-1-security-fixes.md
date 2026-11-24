@@ -656,73 +656,92 @@ Where it differs from part G of Amendment 1, this amendment wins.
 
 ## Amendment 5 — privileged hooks are named to the approver (24 November 2026)
 
-Status: **Draft** · 24 November 2026, waiting for the maintainer's acceptance. It implements decision A3 of the 1.1.0
-plan (24 November 2026): the known limit of part A2 stays, and the approver is told about it.
+Status: **Draft** · 24 November 2026, revised the same day after review round 1, waiting for the maintainer's
+acceptance. It implements decision A3 of the 1.1.0 plan (24 November 2026): the known limit of part A2 stays, and the
+approver is always told about it. This amendment sits in the 1.0.1 contract because part A2 is defined here. The
+1.1.0 plan points to it.
 
-### A2b — the limit stays, and it is named where the decision is made
+### Current state (verified at `7d5bbe5e`)
+
+- **When the approval names the hook.** If the privileged hook is the exposure that raised the approval, the card
+  already says so in `Approval.Reason`. The text comes from `ExposureChangeRule`: "{service} runs a privileged
+  post_start hook (hook:post_start:0); it is decided at planning only."
+- **The gap:**
+  - the rule names only the **first** exposure that needs a confirmation;
+  - an approval raised by **another** rule (INV-59, a protected resource, the control plane …) never mentions the
+    hook;
+  - the **notification** (`ApprovalDisplay.NotificationText`) never mentions it, in either case.
+- **The plans:** only `Deploy.razor` shows a plan's exposure list. The compose editor and the `.env` save of the
+  container page show no plan; they share only the `DeployAsync` path.
+
+### A2b — the limit stays, and every approval of such a run names it
 
 - **The limit is unchanged.** A `post_start` or `pre_stop` hook with `privileged: true` is an exec, not container
-  state. It is decided at planning only, and the re-check after `up` cannot see it. Whiskers does not try to detect a
-  hook after the run.
-- **Why it matters.** Whoever approves such a run decides once, at planning, and nothing checks it afterwards. Today
-  the approver learns that only from the plan's exposure list. The notification does not say it.
-- **The approval notification.**
-  - When the resolved target of the call carries a privileged-hook exposure (`MutationTarget.Exposures`, an identity
-    whose key `ComposeExposure.IsHookKey` accepts), `ApprovalDisplay.NotificationText` appends one fixed sentence:
-    " · includes a privileged compose hook, decided now only — not checked after the run".
-  - The sentence names no service, no hook index and no command. Those come from the compose file, and a notification
-    never carries a value the caller could have put into the call (C-22).
-  - Both raising paths pass the flag: the gateway's `ApprovalGate` and the agent's `ApprovalCoordinator`.
-- **The deploy plan.** In the plan's exposure list (`Deploy.razor`, and the compose editor that shares it), a hook
-  exposure gets the same note as its class text: "decided now only — not checked after the run". It is a resx key,
-  in English and German.
-- **The approval card** (D-5a): the card on the Approvals page and the inline dialog of contract 0019 show the same
-  note. The approval row has no exposure list (the binding holds them only hashed), so the row gets one new field,
-  `PrivilegedHook` (`bool`, default `false`), set when the approval is raised. That requires a migration for SQLite
-  and PostgreSQL (ADR-0004).
-- **Unchanged.**
-  - How a hook is decided (agent rule set: confirmation; person: noted).
-  - The binding: the exposures stay part of the hash, as before.
-  - Throttling and the notification's other fields.
+  state. It is decided at planning only, and the re-check after `up` cannot see it.
+- **The condition.** The resolved target of the call carries a privileged-hook exposure. That means
+  `MutationTarget.Exposures` holds an identity for which `ComposeExposures.IsPrivilegedHook` is true.
+- **The approval (D-5a, recommended):** when the approval is raised, the fixed sentence is appended to
+  `Approval.Reason`, unless the reason already names a hook. The sentence: "Includes a privileged compose hook:
+  decided now only, not checked after the run."
+  - This covers the card on the Approvals page and the inline dialog of contract 0019, because both show `Reason`.
+  - It needs no new column and no migration.
+- **The notification:** `ApprovalDisplay.NotificationText` adds the same sentence **before** the link or
+  "(Whiskers → Approvals)". The sentence names no service, no hook index and no command. Those come from the compose
+  file, and a notification never carries a value the caller could have put into the call (C-22).
+- **Both raising paths:**
+  - the gateway (`ApprovalGate`, through `ApprovalSubject`);
+  - the agent (`AgentToolInvoker` → `GuardrailDecision` → `ApprovalCoordinator`).
+- **The deploy plan:** in `Deploy.razor`'s exposure list, a hook exposure gets the note "decided now only — not
+  checked after the run" as a resx key, in English and German.
+- **No change** to the compose editor or the `.env` save. They show no plan, and their approvals and notifications
+  are covered above.
+- **Unchanged:**
+  - how a hook is decided (agent rule set: confirmation; person: noted);
+  - the binding: the exposures stay part of the hash;
+  - throttling;
+  - the other fields of the notification.
 
 ### Interfaces
 
 | Type | Change |
 |---|---|
-| `ComposeExposure` | new `public static bool IsPrivilegedHook(string identity)`: parses the identity and applies `IsHookKey` to `Privileged` exposures |
-| `ApprovalDisplay.NotificationText` | new optional parameter `bool privilegedHook = false` |
+| `ComposeExposures` (static) | new `public static bool IsPrivilegedHook(string identity)`: `Parse`, then `Kind == Privileged && IsHookKey(Key)` |
+| `ApprovalDisplay.NotificationText` | new optional parameter `bool privilegedHook = false`; the sentence goes before the link |
 | `ApprovalSubject` | new `bool PrivilegedHook { get; init; }`, set by the gateway from the resolved target |
-| `Approval` (row) | new `bool PrivilegedHook` (only with D-5a), with a migration in both assemblies |
+| `GuardrailDecision` (`IAgentGuardrailEngine.cs`) | new `bool PrivilegedHook`, set in `AgentToolInvoker` from `decided.Target` |
+| `ApprovalRequest` (input of `ApprovalStore.CreateAsync`) | the `Reason` it carries gets the sentence; no new field with D-5a |
 
 ### Tests (acceptance)
 
 `PrivilegedHookNoticeTests`:
-- an approval for a compose run with a `post_start` hook marked `privileged: true` gets a notification that ends with
-  the fixed sentence;
-- the same run without a hook, or with a hook that is not privileged, gets a notification without that sentence;
-- the sentence contains neither the service name nor the hook index (a service named like a secret, and one named
-  like a URL);
-- the agent path (`ApprovalCoordinator`) adds the sentence too;
-- the deploy plan shows the note next to the hook exposure and nowhere else (bUnit);
-- with D-5a: the card and the inline dialog show the note, and the migration adds the column with default `false` on
-  both providers.
+- An approval for a compose run with a privileged `post_start` hook:
+  - the notification contains the sentence, before the link;
+  - `Reason` contains it.
+- The hook is the exposure that raised the approval: `Reason` names it once, not twice.
+- An approval raised by another rule (for example INV-59) for a run with a hook: the notification and `Reason` name
+  it.
+- The same run without a hook, or with a hook that is not privileged: no sentence.
+- The sentence holds neither the service name nor the hook index. Checked with a service named like a secret and one
+  named like a URL.
+- The agent path adds the sentence too.
+- The deploy plan shows the note beside the hook exposure and nowhere else (bUnit).
 
 Every new test goes into the test manifest.
 
 ### Documentation (same PR)
 
-- `docs/v1/SECURITY_INVARIANTS.md` INV-62: the known limit stays, with the addition "the approval notification and
-  the plan name it".
-- `src/Whiskers/Services/Mutations/README.md` (compose exposures) and `docs/operations/` where approvals are
-  described.
+- `docs/v1/SECURITY_INVARIANTS.md` INV-62: the known limit stays, and every approval and notification of such a run
+  names it.
+- `src/Whiskers/Services/Mutations/README.md` (compose exposures), and the place in `docs/operations/` where
+  approvals are described.
 - `CHANGELOG.md`.
 
 ### Plan triage
 
-Everything is `[Claude-prüfbar]`. The look of the note on the real Approvals page is `[braucht Nutzer]` (D6).
+Everything is `[Claude-prüfbar]`. The look on the real Approvals page is `[braucht Nutzer]` (D6 of the 1.1.0 plan).
 
 ### Open decision
 
 | | Question | Recommendation | Alternative |
 |---|---|---|---|
-| D-5a | Does the approval card show the note as well? | **Yes**: the approver decides on the card, not in the notification; the cost is one column and its migration | notification and plan only, with no migration |
+| D-5a | How does the card learn about the hook? | **Append the sentence to `Approval.Reason`**: the card and the dialog already show it, and no migration is needed | a new column `PrivilegedHook` on the approval row, with its own display (a migration on SQLite and PostgreSQL) |
