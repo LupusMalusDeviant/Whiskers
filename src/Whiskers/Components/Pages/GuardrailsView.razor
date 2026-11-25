@@ -467,8 +467,15 @@
             if (added.Length > 0) arguments[TrustedScripts.AdditionsArgument] = added;
             await Mutations.RunAsync("guardrails.save", arguments,
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal, added));
-            _loaded = Clone(GuardrailStore.Config);
+            // Contract 0023 (D8): a save that started before the last kill-switch change keeps the stored kill switch.
+            // The page shows what was stored and takes the new stamp from the same copy.
+            var requested = _config.ActivePolicy().ReadOnlyMode;
+            var stored = GuardrailStore.Config;
+            _loaded = Clone(stored);
+            SyncKillSwitch(stored);
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
+            if (stored.ActivePreset == _config.ActivePreset && stored.ActivePolicy().ReadOnlyMode != requested)
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Kept_Snackbar"].Value, Severity.Warning);
         }
         catch (MutationRefusedException ex) when (ex.Status == MutationStatus.PendingApproval
                                                  && ex.MatchedRules.Contains(TrustedScriptApprovalRule.RuleId))
@@ -498,10 +505,7 @@
             await Mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.DisableKillSwitchAsync(principal));
             // Only ReadOnlyMode of the stored active preset changed; unsaved edits of other fields stay on screen.
-            var stored = GuardrailStore.Config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
-            var shown = _config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
-            if (stored is not null && shown is not null) shown.Policy.ReadOnlyMode = stored.Policy.ReadOnlyMode;
-            _config.KillSwitchVersion = GuardrailStore.Config.KillSwitchVersion;
+            SyncKillSwitch(GuardrailStore.Config);
             Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -514,6 +518,16 @@
         }
     }
 
+    /// <summary>Contract 0023 (D8): shows the stored kill switch of <paramref name="stored"/> and takes its stamp — one
+    /// copy, so the stamp belongs to the value shown.</summary>
+    private void SyncKillSwitch(GuardrailConfig stored)
+    {
+        var storedActive = stored.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
+        var shown = _config.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
+        if (storedActive is not null && shown is not null) shown.Policy.ReadOnlyMode = storedActive.Policy.ReadOnlyMode;
+        _config.KillSwitchVersion = stored.KillSwitchVersion;
+    }
+
     /// <summary>Contract 0023 (D8): switches the kill switch on through its own capability — only ReadOnlyMode changes,
     /// the other edits on the page stay unsaved on screen.</summary>
     private async Task EnableKillSwitch()
@@ -523,11 +537,7 @@
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("guardrails.kill_switch_on", new { section = "guardrails" },
                 (ResolvedRecord rt, CancellationToken ct) => GuardrailStore.EnableKillSwitchAsync(principal, ct));
-            var stored = GuardrailStore.Config;
-            var shown = _config.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
-            var storedActive = stored.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
-            if (storedActive is not null && shown is not null) shown.Policy.ReadOnlyMode = storedActive.Policy.ReadOnlyMode;
-            _config.KillSwitchVersion = stored.KillSwitchVersion;
+            SyncKillSwitch(GuardrailStore.Config);
             Snackbar.Add(L["GuardrailsView_KillSwitch_Enabled_Snackbar"].Value, Severity.Warning);
         }
         catch (MutationRefusedException ex)

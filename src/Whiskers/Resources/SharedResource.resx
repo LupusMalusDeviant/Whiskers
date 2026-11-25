@@ -3341,6 +3341,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_KillSwitch_Enabled_Snackbar" xml:space="preserve">
     <value>Kill switch is on: every mutation is refused until it is switched off again.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_Kept_Snackbar" xml:space="preserve">
+    <value>Saved, but the kill switch was changed meanwhile: it keeps its current state. Check it above.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Enable_Hint" xml:space="preserve">
     <value>Switches the kill switch on at once, without saving the other edits on this page.</value>
   </data>

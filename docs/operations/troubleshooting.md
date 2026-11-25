@@ -68,7 +68,9 @@ Both are anonymous and answer only a status word.
   terminal opens. An Admin switches it on and off on the *Guardrails* page ("Switch kill switch on now" changes only
   the switch, `guardrails.kill_switch_on`; both audited). A guardrails save that started before the last switch — one
   that ran past its deadline and ended late, or an edit of an older copy of the page — keeps the stored switch: it
-  never releases the brake (contract 0023). The exceptions are listed there
+  never releases the brake, and the page then says so (contract 0023). Switching on takes effect at once even while
+  such a save still holds the guardrails; it is written to `guardrails.json` as soon as that save ends. The
+  exceptions are listed there
   (contract 0009): switching it off, the first-run setup and the host CLIs always; the own password change, the
   recovery page and binding a Google/OIDC identity at a first sign-in unless an Admin blocked them beforehand. A
   blocked one says "Blocked while the kill switch is on". With the guardrails fail-closed (next item) these three are

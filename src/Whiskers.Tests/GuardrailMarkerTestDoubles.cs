@@ -27,16 +27,26 @@ public sealed class InMemoryGuardrailPolicyMarker : IGuardrailPolicyMarker
         return Task.FromResult(Snapshots);
     }
 
-    public Task EnsureAsync(string source, CancellationToken ct = default)
+    /// <summary>While set, a write waits for it (a slow database under the store's lock).</summary>
+    public TaskCompletionSource? HoldWrites { get; set; }
+
+    /// <summary>Completed when a write starts waiting for <see cref="HoldWrites"/>.</summary>
+    public TaskCompletionSource WriteHeld { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task EnsureAsync(string source, CancellationToken ct = default)
     {
         Writes++;
+        if (HoldWrites is { } hold)
+        {
+            WriteHeld.TrySetResult();
+            await hold.Task;
+        }
         if (WriteFails is not null) throw WriteFails;
         if (RecordedAt is null)
         {
             RecordedAt = DateTime.UtcNow;
             Source = source;
         }
-        return Task.CompletedTask;
     }
 }
 

@@ -125,7 +125,10 @@ public sealed class MutationGateway : IMutationGateway
     /// <summary>Contract 0023 (4b): the two capabilities the target guard never refuses — the brake must always be
     /// reachable, also while a <c>guardrails.save</c> is abandoned.</summary>
     internal static readonly IReadOnlySet<string> KillSwitchToggles =
-        new HashSet<string>(StringComparer.Ordinal) { "guardrails.kill_switch_on", "guardrails.kill_switch_off" };
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            GuardrailMutationPolicy.KillSwitchOn, GuardrailMutationPolicy.KillSwitchOff,
+        };
 
     /// <summary>Contract 0023 (point 6): the reason of a top-level mutation asked for once Whiskers has begun to stop.</summary>
     public const string ShuttingDownRefusal = "Whiskers is stopping; the change was not made. Retry after the restart.";

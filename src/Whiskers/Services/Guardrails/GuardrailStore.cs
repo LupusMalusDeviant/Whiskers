@@ -36,12 +36,39 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     private readonly SemaphoreSlim _lock = new(1, 1);
     private volatile State _state = new(GuardrailConfig.SafeDefault(), null);
 
-    /// <summary>Contract 0023 (D8): counts the kill-switch toggles (on, off, a reset on the host). A save keeps the
-    /// stored <c>ReadOnlyMode</c> unless it started after the last one (a version compare-and-set).</summary>
+    /// <summary>Contract 0023 (D8): counts every change of the kill switch (on, off, a save that changed it, a reset on
+    /// the host). A save keeps the stored <c>ReadOnlyMode</c> unless it started after the last one (a version
+    /// compare-and-set). Guarded by <see cref="_publish"/>.</summary>
     private long _killSwitchVersion;
 
+    /// <summary>D8: the version of a switch-on that is enforced but not written yet (it waits for the store lock an
+    /// earlier save holds), or <c>null</c>. While set, the active policy reads <c>ReadOnlyMode = true</c>. Guarded by
+    /// <see cref="_publish"/>.</summary>
+    private long? _pendingOn;
+
+    /// <summary>A short lock over <see cref="_state"/>, <see cref="_killSwitchVersion"/> and <see cref="_pendingOn"/>
+    /// together; never held across I/O. Switching on takes only this one, so it never waits for an abandoned save.</summary>
+    private readonly object _publish = new();
+
+    /// <summary>D8: a write under the store lock is about to release the brake (switch-off, or a save that turns it
+    /// off). A switch-on meanwhile is then a change of its own, not "already on". Guarded by <see cref="_publish"/>.</summary>
+    private bool _releaseInFlight;
+
     /// <summary>The current kill-switch version (contract 0023, D8).</summary>
-    public long KillSwitchVersion => Interlocked.Read(ref _killSwitchVersion);
+    public long KillSwitchVersion
+    {
+        get { lock (_publish) return _killSwitchVersion; }
+    }
+
+    /// <summary>The state, the version and whether a switch-on is pending, read together.</summary>
+    private (State State, long Version, bool PendingOn) Snapshot()
+    {
+        lock (_publish) return (_state, _killSwitchVersion, _pendingOn is not null);
+    }
+
+    /// <summary>Whether the brake is on in <paramref name="state"/>, a pending switch-on included. Under <see cref="_publish"/>.</summary>
+    private bool EngagedLocked(State state) =>
+        state.LoadError is not null || _pendingOn is not null || state.Config.ActivePolicy().ReadOnlyMode;
 
     // Contract 0010: what phase 1 (the Order-80 load) found, for phase 2 (ReconcileMarkerAsync).
     private volatile bool _undecided;          // neither file: the record decides in phase 2
@@ -82,8 +109,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         get
         {
-            var state = _state;
-            return state.LoadError is null ? state.Config.ActivePolicy().Clone() : GuardrailPolicy.FailClosed();
+            var (state, _, pendingOn) = Snapshot();
+            if (state.LoadError is not null) return GuardrailPolicy.FailClosed();
+            var policy = state.Config.ActivePolicy().Clone();
+            if (pendingOn) policy.ReadOnlyMode = true;
+            return policy;
         }
     }
 
@@ -91,13 +121,12 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         get
         {
-            // The version first: a toggle writes the state, then counts up, so a copy is never stamped newer than the
-            // state it was taken from (a too-old stamp only keeps the stored kill switch: the safe side).
-            var version = Interlocked.Read(ref _killSwitchVersion);
-            var state = _state;
+            // State, version and a pending switch-on are read together, so the stamp belongs to the copy.
+            var (state, version, pendingOn) = Snapshot();
             if (state.LoadError is null)
             {
                 var copy = state.Config.Clone();
+                if (pendingOn) copy.ActivePolicy().ReadOnlyMode = true;
                 copy.KillSwitchVersion = version;
                 return copy;
             }
@@ -117,10 +146,11 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         get
         {
-            var state = _state;
-            return state.LoadError is null
-                ? (state.Config.ActivePreset, state.Config.ActivePolicy().Clone())
-                : (FailClosedPreset, GuardrailPolicy.FailClosed());
+            var (state, _, pendingOn) = Snapshot();
+            if (state.LoadError is not null) return (FailClosedPreset, GuardrailPolicy.FailClosed());
+            var policy = state.Config.ActivePolicy().Clone();
+            if (pendingOn) policy.ReadOnlyMode = true;
+            return (state.Config.ActivePreset, policy);
         }
     }
 
@@ -190,8 +220,12 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             var config = GuardrailConfig.SafeDefault();
             config.Presets.First(p => p.Name == config.ActivePreset).Policy.ReadOnlyMode = true;
             await _store.SaveAsync(config);
-            _state = new State(config.Clone(), null);
-            Interlocked.Increment(ref _killSwitchVersion);   // D8: the reset engages the kill switch
+            lock (_publish)
+            {
+                _state = new State(config.Clone(), null);
+                _pendingOn = null;
+                _killSwitchVersion++;   // D8: the reset engages the kill switch
+            }
             _undecided = false;
             _fileAtLoad = true;
             _loaded = true;
@@ -438,17 +472,16 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         var next = config.Clone();
         if (next.Problem() is { } problem)
             throw new GuardrailConfigException(problem);
-        // D8: the save started from the copy it edits; one without a stamp starts now.
-        var started = config.KillSwitchVersion ?? KillSwitchVersion;
+        // D8: the save started from the copy it edits; one without a stamp is treated as stale (it keeps the stored
+        // kill switch), never as started now.
+        var started = config.KillSwitchVersion ?? Unstamped;
 
         await _lock.WaitAsync(ct);
         try
         {
             var before = _state;
-            KeepKillSwitchIfStale(next, before, started, editor);
             await GuardTrustedScriptsAsync(next, editor, expectedTrustedAdditions);
-            await _store.SaveAsync(next);   // throws → the previous policy stays live
-            _state = new State(next, null);
+            await CommitSaveLockedAsync(next, started, editor);   // throws → the previous policy stays live
             await AfterSavedAsync();
             RecordChange(before, next);
             _logger?.LogWarning("Guardrails changed by {Editor} ({Count} presets, active={Active}).",
@@ -467,7 +500,6 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         // Back-compat: replace the active preset's policy — on a copy, made live only after it is persisted.
         RequireAdmin(editor);
         ArgumentNullException.ThrowIfNull(policy);
-        var started = KillSwitchVersion;
         await _lock.WaitAsync(ct);
         try
         {
@@ -482,10 +514,9 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             active.Policy = policy.Clone();
             if (next.Problem() is { } problem)
                 throw new GuardrailConfigException(problem);
-            KeepKillSwitchIfStale(next, state, started, editor);
             await GuardTrustedScriptsAsync(next, editor, null);
-            await _store.SaveAsync(next);
-            _state = new State(next, null);
+            // D8: a policy carries no stamp, so this save always keeps the stored kill switch.
+            await CommitSaveLockedAsync(next, Unstamped, editor);
             await AfterSavedAsync();
             RecordChange(state, next);
         }
@@ -532,28 +563,77 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     public Task EnableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
         SetKillSwitchAsync(on: true, editor, ct);
 
-    /// <summary>R1-11 and contract 0023 (D8): changes only <c>ReadOnlyMode</c> of the active preset and counts the
-    /// toggle, so a save that started before it keeps the value it set.</summary>
-    private async Task SetKillSwitchAsync(bool on, AgentPrincipal editor, CancellationToken ct)
+    private const string NotLoadedMessage =
+        "The guardrail configuration could not be loaded; fix it before changing it.";
+
+    /// <summary>D8: the start of a save without a stamp; never equal to a version, so such a save keeps the stored
+    /// kill switch.</summary>
+    private const long Unstamped = -1;
+
+    /// <summary>Contract 0023 (D8): switching on takes effect at once, under the short <see cref="_publish"/> lock only —
+    /// never behind the store lock an abandoned save may hold. It is then written to <c>guardrails.json</c>; when that
+    /// has to wait past the caller's token, the write continues in the background and the brake stays on meanwhile.</summary>
+    private async Task SwitchOnAsync(AgentPrincipal editor, CancellationToken ct)
     {
-        RequireAdmin(editor);
-        await _lock.WaitAsync(ct);
+        long version;
+        lock (_publish)
+        {
+            if (_state.LoadError is not null) throw new InvalidOperationException(NotLoadedMessage);
+            // Already on — unless a write that releases it is under way: then this switch-on is the later change.
+            if (EngagedLocked(_state) && !_releaseInFlight) return;
+            version = ++_killSwitchVersion;
+            _pendingOn = version;
+        }
+        _logger?.LogWarning("Kill switch switched on by {Editor}.", Whiskers.Utils.LogSafe.Value(editor.DisplayName));
+        Changed?.Invoke();
+
         try
         {
-            if (_state.LoadError is not null)
-                throw new InvalidOperationException("The guardrail configuration could not be loaded; fix it before changing it.");
-            var next = _state.Config.Clone();
-            var active = next.Presets.FirstOrDefault(p => p.Name == next.ActivePreset);
-            if (active is null || active.Policy.ReadOnlyMode == on) return;
-            active.Policy.ReadOnlyMode = on;
-            var before = _state;
-            await _store.SaveAsync(next);   // throws → the kill switch stays as it was
-            _state = new State(next, null);
-            Interlocked.Increment(ref _killSwitchVersion);   // after the state: a copy is never stamped too new
+            await WriteSwitchOnAsync(version, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger?.LogWarning("Kill switch is on; writing it to guardrails.json waits for an earlier guardrail save " +
+                                "and continues in the background.");
+            // Not part of the switch-on run: its mutation scope does not flow into the write.
+            using (ExecutionContext.SuppressFlow())
+                _ = Task.Run(async () =>
+                {
+                    try { await WriteSwitchOnAsync(version, CancellationToken.None); }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError(ex, "Kill switch is on in memory, but it could not be written to " +
+                                              "guardrails.json; the next guardrail save writes it.");
+                    }
+                });
+        }
+    }
+
+    /// <summary>Writes the pending switch-on <paramref name="version"/> under the store lock, unless a later save or a
+    /// switch-off already accounted for it.</summary>
+    private async Task WriteSwitchOnAsync(long version, CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+        State before;
+        GuardrailConfig next;
+        try
+        {
+            lock (_publish)
+            {
+                if (_pendingOn != version || _state.LoadError is not null) return;
+                before = _state;
+            }
+            next = before.Config.Clone();
+            next.ActivePolicy().ReadOnlyMode = true;
+            await _store.SaveAsync(next);   // throws → the brake stays on in memory; the next save writes it
+            lock (_publish)
+            {
+                // Only this path, a save and switch-off clear it, and they all hold the store lock.
+                _state = new State(next, null);
+                _pendingOn = null;
+            }
             await AfterSavedAsync();
             RecordChange(before, next);
-            _logger?.LogWarning("Kill switch switched {State} by {Editor} (preset {Preset}).", on ? "on" : "off",
-                Whiskers.Utils.LogSafe.Value(editor.DisplayName), active.Name);
         }
         finally
         {
@@ -563,18 +643,119 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         Changed?.Invoke();
     }
 
-    /// <summary>Contract 0023 (D8): a save that started before the last kill-switch toggle (an abandoned save ending
-    /// late, or an edit of an older copy) keeps the stored <c>ReadOnlyMode</c> — it never releases the brake a toggle
-    /// engaged after it, and never engages one a toggle released.</summary>
-    private void KeepKillSwitchIfStale(GuardrailConfig next, State stored, long started, AgentPrincipal editor)
+    /// <summary>R1-11 and contract 0023 (D8): switching on (<see cref="SwitchOnAsync"/>) or off changes only
+    /// <c>ReadOnlyMode</c> of the active preset and counts the change, so a save that started before it keeps the
+    /// value it set.</summary>
+    private async Task SetKillSwitchAsync(bool on, AgentPrincipal editor, CancellationToken ct)
     {
-        if (started == KillSwitchVersion) return;
-        var storedOn = stored.LoadError is not null || stored.Config.ActivePolicy().ReadOnlyMode;
-        var policy = next.ActivePolicy();
-        if (policy.ReadOnlyMode == storedOn) return;
-        policy.ReadOnlyMode = storedOn;
-        _logger?.LogWarning("Guardrails save by {Editor} started before the last kill-switch change: the kill switch " +
-                            "stays {State}.", Whiskers.Utils.LogSafe.Value(editor.DisplayName), storedOn ? "on" : "off");
+        RequireAdmin(editor);
+        if (on)
+        {
+            await SwitchOnAsync(editor, ct);
+            return;
+        }
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            State before;
+            long version;
+            lock (_publish)
+            {
+                if (_state.LoadError is not null) throw new InvalidOperationException(NotLoadedMessage);
+                before = _state;
+                version = _killSwitchVersion;
+                if (!EngagedLocked(before)) return;
+                _releaseInFlight = true;
+            }
+            var next = before.Config.Clone();
+            next.ActivePolicy().ReadOnlyMode = false;
+            try
+            {
+                if (before.Config.ActivePolicy().ReadOnlyMode)
+                    await _store.SaveAsync(next);   // throws → the kill switch stays as it was
+            }
+            catch
+            {
+                lock (_publish) _releaseInFlight = false;
+                throw;
+            }
+            lock (_publish)
+            {
+                _releaseInFlight = false;
+                _state = new State(next, null);
+                if (_killSwitchVersion != version)
+                {
+                    // Switched on again while this was written: that later switch-on stays pending and enforced, and
+                    // writes the file once the store lock is free.
+                    _logger?.LogWarning("Kill switch was switched on again while switching it off; it stays on.");
+                    return;
+                }
+                _pendingOn = null;
+                _killSwitchVersion++;
+            }
+            await AfterSavedAsync();
+            RecordChange(before, next);
+            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).",
+                Whiskers.Utils.LogSafe.Value(editor.DisplayName), next.ActivePreset);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Contract 0023 (D8), under the store lock: writes a save and makes it live. A save that started before the last
+    /// kill-switch change (an abandoned save ending late, an edit of an older copy, or one without a stamp) keeps the
+    /// stored <c>ReadOnlyMode</c> — it never releases the brake a toggle engaged after it, and never engages one a
+    /// toggle released. A save that changes the kill switch counts as a change itself.
+    /// </summary>
+    private async Task CommitSaveLockedAsync(GuardrailConfig next, long started, AgentPrincipal editor)
+    {
+        long decided;
+        lock (_publish)
+        {
+            // A store that could not load has no stored switch to keep (and no toggle runs while it is fail-closed).
+            if (started != _killSwitchVersion && _state.LoadError is null)
+            {
+                var storedOn = EngagedLocked(_state);
+                var policy = next.ActivePolicy();
+                // A save without a stamp may engage the brake (the safe side), never release it.
+                var keep = started == Unstamped ? storedOn && !policy.ReadOnlyMode : policy.ReadOnlyMode != storedOn;
+                if (keep)
+                {
+                    policy.ReadOnlyMode = storedOn;
+                    _logger?.LogWarning("Guardrails save by {Editor} started before the last kill-switch change: the " +
+                                        "kill switch stays {State}.", Whiskers.Utils.LogSafe.Value(editor.DisplayName),
+                        storedOn ? "on" : "off");
+                }
+            }
+            decided = _killSwitchVersion;
+            _releaseInFlight = EngagedLocked(_state) && !next.ActivePolicy().ReadOnlyMode;
+        }
+
+        try
+        {
+            await _store.SaveAsync(next);
+        }
+        catch
+        {
+            lock (_publish) _releaseInFlight = false;
+            throw;
+        }
+
+        lock (_publish)
+        {
+            _releaseInFlight = false;
+            var wasOn = EngagedLocked(_state);
+            _state = new State(next, null);
+            // A switch-on during the write stays pending (and enforced); one before it is part of this save.
+            if (_killSwitchVersion == decided) _pendingOn = null;
+            if (EngagedLocked(_state) != wasOn) _killSwitchVersion++;
+        }
     }
 
 

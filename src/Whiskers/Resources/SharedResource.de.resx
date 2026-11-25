@@ -3341,6 +3341,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_KillSwitch_Enabled_Snackbar" xml:space="preserve">
     <value>Kill-Switch ist an: jede Änderung wird abgelehnt, bis er wieder ausgeschaltet wird.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_Kept_Snackbar" xml:space="preserve">
+    <value>Gespeichert, aber der Kill-Switch wurde inzwischen geändert: er behält seinen aktuellen Zustand. Bitte oben prüfen.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Enable_Hint" xml:space="preserve">
     <value>Schaltet den Kill-Switch sofort ein, ohne die übrigen Änderungen auf dieser Seite zu speichern.</value>
   </data>

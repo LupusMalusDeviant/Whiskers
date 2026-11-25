@@ -161,6 +161,119 @@ public sealed class KillSwitchOnTests : IDisposable
         Assert.Equal("guardrails.kill_switch_on", GuardrailMutationPolicy.KillSwitchOn);
     }
 
+    [Fact]
+    public async Task A_save_without_a_stamp_keeps_the_stored_kill_switch()
+    {
+        var store = await StoreAsync();
+        await OnAsync(store);
+
+        var unstamped = store.Config;
+        unstamped.KillSwitchVersion = null;
+        unstamped.ActivePolicy().ReadOnlyMode = false;
+        unstamped.ActivePolicy().MaxActionsPerSession = 5;
+        await SaveAsync(store, unstamped);
+        Assert.True(store.Current.ReadOnlyMode);
+        Assert.Equal(5, store.Current.MaxActionsPerSession);
+
+        var policy = store.Current;
+        policy.ReadOnlyMode = false;
+        await GatewayArrange.RunAsync("guardrails.save", () => store.SaveAsync(policy, Admin));
+        Assert.True(store.Current.ReadOnlyMode);
+
+        await OffAsync(store);
+        policy.ReadOnlyMode = true;
+        await GatewayArrange.RunAsync("guardrails.save", () => store.SaveAsync(policy, Admin));
+        Assert.True(store.Current.ReadOnlyMode);    // engaging is the safe side and stays possible
+    }
+
+    [Fact]
+    public async Task A_save_that_engages_the_brake_counts_so_an_older_copy_cannot_release_it()
+    {
+        var store = await StoreAsync();
+        var first = store.Config;
+        var second = store.Config;                // both pages opened while the brake was off
+        var version = store.KillSwitchVersion;
+
+        first.ActivePolicy().ReadOnlyMode = true;
+        await SaveAsync(store, first);
+        Assert.Equal(version + 1, store.KillSwitchVersion);
+
+        second.ActivePolicy().MaxActionsPerSession = 4;
+        await SaveAsync(store, second);           // its copy still has the brake off
+
+        Assert.True(store.Current.ReadOnlyMode);
+        Assert.Equal(4, store.Current.MaxActionsPerSession);
+    }
+
+    [Fact]
+    public async Task Switching_on_takes_effect_while_a_save_holds_the_store_and_is_written_after_it()
+    {
+        var marker = new InMemoryGuardrailPolicyMarker { WriteFails = new InvalidOperationException("db down") };
+        var path = Path.Combine(_dir, "guardrails-held.json");
+        var store = await new GuardrailStore(filePath: path, marker: marker).StartAsync();
+        Assert.False(store.MarkerRecorded);       // so the next save writes the record, under the store's lock
+        marker.WriteFails = null;
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        marker.HoldWrites = hold;
+
+        var stale = store.Config;
+        stale.ActivePolicy().MaxActionsPerSession = 6;
+        var save = SaveAsync(store, stale);       // hangs on the database while holding the store lock
+        await marker.WriteHeld.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(300)))
+            await GatewayArrange.RunAsync("guardrails.kill_switch_on",
+                () => store.EnableKillSwitchAsync(Admin, deadline.Token));
+
+        Assert.True(store.Current.ReadOnlyMode);  // enforced at once, not after the save
+        Assert.True(store.Config.ActivePolicy().ReadOnlyMode);
+        Assert.False(save.IsCompleted);
+
+        marker.HoldWrites = null;
+        hold.SetResult();
+        await save;
+        Assert.True(store.Current.ReadOnlyMode);
+        Assert.Equal(6, store.Current.MaxActionsPerSession);
+
+        // The background write follows once the lock is free.
+        var deadlineAt = DateTime.UtcNow.AddSeconds(10);
+        bool written;
+        do
+        {
+            written = (await new GuardrailStore(filePath: path).StartAsync()).Current.ReadOnlyMode;
+            if (!written) await Task.Delay(50);
+        }
+        while (!written && DateTime.UtcNow < deadlineAt);
+        Assert.True(written);
+    }
+
+    [Fact]
+    public async Task Switching_off_while_a_switch_on_is_pending_releases_it_and_the_pending_write_does_not_return()
+    {
+        var marker = new InMemoryGuardrailPolicyMarker { WriteFails = new InvalidOperationException("db down") };
+        var path = Path.Combine(_dir, "guardrails-pending.json");
+        var store = await new GuardrailStore(filePath: path, marker: marker).StartAsync();
+        marker.WriteFails = null;
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        marker.HoldWrites = hold;
+        var save = SaveAsync(store, store.Config);
+        await marker.WriteHeld.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
+            await GatewayArrange.RunAsync("guardrails.kill_switch_on",
+                () => store.EnableKillSwitchAsync(Admin, deadline.Token));
+        Assert.True(store.Current.ReadOnlyMode);
+
+        var off = OffAsync(store);                // waits for the store lock like the pending write
+        marker.HoldWrites = null;
+        hold.SetResult();
+        await save;
+        await off;
+
+        await Task.Delay(200);                    // room for the background write, which must find nothing to do
+        Assert.False(store.Current.ReadOnlyMode);
+        Assert.False((await new GuardrailStore(filePath: path).StartAsync()).Current.ReadOnlyMode);
+    }
+
     private string StorePath(GuardrailStore _) =>
         Directory.GetFiles(_dir, "guardrails-*.json").Single();
 }

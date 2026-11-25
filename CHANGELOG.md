@@ -11,7 +11,8 @@ All notable changes to Whiskers are documented here. The format follows
 - **The kill switch has its own switch-on (contract 0023, INV-19).** On the *Guardrails* page "Switch kill switch on
   now" turns it on at once (`guardrails.kill_switch_on`, Admin, audited and read back) without saving the page's other
   edits, also while an earlier guardrails save is still running past its deadline. A guardrails save that started
-  before the last switch-on or -off keeps the stored switch: a late save never releases the brake.
+  before the last change of the switch (or one without a stamp) keeps the stored switch: a late save never releases
+  the brake, and the page warns when it kept it.
 - **Mutations past their deadline (contract 0023, INV-40).** The caller of a mutation is answered at most 5 s after
   the capability's deadline. An action still running then is reported as failed and "abandoned": the page shows that it
   ran past its deadline, an MCP client gets the failure. The action goes on in the background; until it ends, its

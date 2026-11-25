@@ -138,6 +138,26 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_save_from_a_copy_older_than_the_last_toggle_keeps_the_kill_switch_and_the_page_shows_it()
+    {
+        // Contract 0023 (D8): the page was opened before another Admin switched the brake on and off again.
+        var cut = Render<GuardrailsView>();
+        await GatewayArrange.RunAsync("guardrails.kill_switch_on", () => _store.EnableKillSwitchAsync(Admin));
+        await GatewayArrange.RunAsync("guardrails.kill_switch_off", () => _store.DisableKillSwitchAsync(Admin));
+        cut.Find("input[type=checkbox]").Change(true);
+
+        Save(cut);
+
+        cut.WaitForAssertion(() => Assert.Contains("complete:Executed", Events()));
+        Assert.False(_store.Current.ReadOnlyMode);
+        // The page shows the stored value and takes the new stamp, so its next save is not stale any more.
+        cut.WaitForAssertion(() => Assert.False(cut.Find("input[type=checkbox]").HasAttribute("checked")));
+        cut.Find("input[type=checkbox]").Change(true);
+        Save(cut);
+        cut.WaitForAssertion(() => Assert.True(_store.Current.ReadOnlyMode));
+    }
+
+    [Fact]
     public void An_operator_cannot_switch_the_kill_switch_on()
     {
         var cut = Render<GuardrailsView>();
