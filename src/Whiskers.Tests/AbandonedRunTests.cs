@@ -351,6 +351,71 @@ public sealed class AbandonedRunTests
     }
 
     [Fact]
+    public async Task An_outer_action_passing_on_its_nested_abandon_is_failed_with_nested_abandoned_never_as_a_cancellation()
+    {
+        var h = new Harness();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // As the compose gates do: the nested outcome's error is thrown on.
+        var outer = await h.Gateway.ExecuteAsync(Request("container.restart", operationId: "outer"), async (_, _) =>
+        {
+            var inner = await h.Gateway.ExecuteAsync(Request(operationId: "inner"), Stuck(release));
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner.Error!).Throw();
+            return 3;
+        });
+
+        Assert.Equal(MutationStatus.Failed, outer.Status);
+        Assert.Equal(MutationReasonCodes.NestedAbandoned, outer.ReasonCode);
+        Assert.Equal("inner", Assert.IsType<MutationAbandonedException>(outer.Error).NestedOperationId);
+        Assert.Contains(MutationGateway.NestedAbandonedReason, outer.Reason);
+        Assert.False(outer.Completion.IsCompleted);
+
+        release.SetResult();
+        await outer.Completion.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task The_outcome_row_names_the_abandon_by_its_reason_code()
+    {
+        var h = new Harness();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var outcome = await h.Gateway.ExecuteAsync(Request(), Stuck(release));
+
+        var reason = Assert.Single(h.Audit.ReasonLog);
+        Assert.EndsWith($"({MutationReasonCodes.Abandoned})", reason);
+        Assert.StartsWith(outcome.Reason!, reason);
+
+        release.SetResult();
+        await outcome.Completion.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task At_the_shutdown_cut_off_the_late_end_is_written_but_nothing_is_released_and_completion_stays_open()
+    {
+        var h = new Harness();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var outcome = await h.Gateway.ExecuteAsync(Request(operationId: "op-cut"), Stuck(release));
+        Assert.True(outcome.Abandoned);
+
+        // The drain budget (1 s here) runs out with the run still at work: Abort.
+        await h.Drain.DrainAsync(CancellationToken.None);
+        var clock = Stopwatch.StartNew();
+        while (!h.Audit.Events.Contains("late_end:cut off at shutdown") && clock.Elapsed < Wait)
+            await Task.Delay(20);
+        Assert.Contains("late_end:cut off at shutdown", h.Audit.Events);
+
+        // The action still runs: no caller may close its records as if it had ended (INV-39 reports it at the next
+        // start), and nothing it holds is released.
+        await Task.Delay(200);
+        Assert.False(outcome.Completion.IsCompleted);
+        Assert.False(h.Journal.Finished.ContainsKey("op-cut"));
+        Assert.Single(h.Abandoned.Running);
+        Assert.Single(h.Drain.InFlight);
+        Assert.False(await h.Maintenance.WaitForIdleAsync(TimeSpan.FromMilliseconds(100)));
+        release.SetResult();
+    }
+
+    [Fact]
     public async Task A_restore_waits_for_an_abandoned_run()
     {
         var h = new Harness();
@@ -497,6 +562,7 @@ public sealed class AbandonedRunTests
             get => [.. EventLog];
         }
         public void Clear() => EventLog.Clear();
+        public ConcurrentQueue<string?> ReasonLog { get; } = new();
         public ConcurrentQueue<PendingLateEnd> LateEndLog { get; } = new();
         public IReadOnlyList<PendingLateEnd> LateEnds => [.. LateEndLog];
 
@@ -511,6 +577,7 @@ public sealed class AbandonedRunTests
             string? reason, TimeSpan duration, CancellationToken ct)
         {
             EventLog.Enqueue($"complete:{status}");
+            ReasonLog.Enqueue(reason);
             return Task.CompletedTask;
         }
 

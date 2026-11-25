@@ -231,8 +231,12 @@ registrations are wrapped too.
    further chain version of the same audit row (`Phase = "late_end"`, `IMutationAuditSink.CompleteLateEndAsync`).
    A delegate that returned after its deadline but within G is verified with a token of its own, bounded by G. An
    outer run whose nested run is still abandoned G after its own action returned is **Failed** with `NestedAbandoned`
-   (value withheld) and keeps what it holds until the nested run ends. `MutationOutcome.Completion` completes once
-   the run and every nested run have really ended; callers that hold a lock, lease or drain entry await it.
+   (value withheld) and keeps what it holds until the nested run ends; so is an outer action that throws the nested
+   abandon on. `MutationOutcome.Completion` completes once the run and every nested run have really ended — never
+   while the action still runs, also not when the shutdown drain cuts it off (then nothing is released, the late end
+   says `cut off at shutdown` and the next start reports the operation as interrupted). Callers that hold a lock,
+   lease or drain entry await it, and so do nested calls of the compose gates and of the UI runner before they hand
+   back to the outer action.
    A top-level call takes a shutdown-drain entry before anything is decided; once Whiskers is stopping it is refused
    (`ShuttingDown`), on record, and no approval is used up.
 9. The capability's `IMutationVerifier`, if any → `Verified` / `Failed` / `NotVerifiable` + reason; otherwise `NotVerifiable` with the reason of its `VerificationContracts` row.
@@ -492,7 +496,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `MutationFailedException` with `Abandoned`, the MCP filter answers with the failure). Its target stays guarded and
   what it holds stays held until it really ends, and that end is audited. There is no hard abort; an abandoned run
   that never ends needs the host fixed or a restart (readiness turns `Degraded` after 15 min,
-  `MutationGatewayOptions.AbandonedLimit`).
+  `MutationGatewayOptions.AbandonedLimit`). The bound starts at the action's first `await`: an action that blocks its
+  thread synchronously before it (no awaited I/O) holds the caller until it yields. Gateway actions are asynchronous
+  service calls; the bound is not extended to blocking code.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.
 - `MutationPrincipal` maps onto `AgentPrincipal` for the policy; WP6 brings structured identity.
 

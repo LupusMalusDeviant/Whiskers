@@ -892,7 +892,22 @@ public sealed class MutationGateway : IMutationGateway
         // Closed before verification as always — unless a nested run still needs its scope chain.
         if (pendingNested.Count == 0) run.CloseScope();
 
-        if (thrown is not null)
+        if (pendingNested.Count > 0 || thrown is MutationAbandonedException)
+        {
+            // 4d: a nested run is still running (or was abandoned and the outer action passed that on, as the compose
+            // gates do): Failed with NestedAbandoned, the value withheld (as for R1-36), an error the UI runner and the
+            // MCP filter treat before a reported failure — never a half state read as the effect, whatever the outer
+            // action threw.
+            var reason = $"'{capability.Id}': {NestedAbandonedReason}";
+            var nestedId = pendingNested.Count > 0 ? pendingNested[0].OperationId
+                : (thrown as MutationAbandonedException)?.NestedOperationId;
+            outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default, reason, VerificationStatus.NotRun,
+                new MutationAbandonedException(reason, capability.Deadline, nestedId), approval?.ApprovalId)
+            {
+                ReasonCode = MutationReasonCodes.NestedAbandoned,
+            };
+        }
+        else if (thrown is not null)
         {
             outcome = thrown switch
             {
@@ -909,18 +924,6 @@ public sealed class MutationGateway : IMutationGateway
                         "before retrying.", VerificationStatus.NotRun, thrown, approval?.ApprovalId),
                 _ => new MutationOutcome<T>(operationId, MutationStatus.Failed, default, thrown.Message,
                     VerificationStatus.NotRun, thrown, approval?.ApprovalId),
-            };
-        }
-        else if (pendingNested.Count > 0)
-        {
-            // 4d: Failed with NestedAbandoned, the value withheld (as for R1-36), an error the UI runner and the MCP filter
-            // treat before a reported failure — never a half state read as the effect.
-            var reason = $"'{capability.Id}': {NestedAbandonedReason}";
-            outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default, reason, VerificationStatus.NotRun,
-                new MutationAbandonedException(reason, capability.Deadline, pendingNested[0].OperationId),
-                approval?.ApprovalId)
-            {
-                ReasonCode = MutationReasonCodes.NestedAbandoned,
             };
         }
         else if (reported is not null)
@@ -959,7 +962,8 @@ public sealed class MutationGateway : IMutationGateway
         // row stays as evidence that it ran, and the outcome is kept and written again (R1-19).
         // An executed call that could not be verified carries why (R1-37) in the reason of its outcome row.
         await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
-            outcome.Reason ?? (outcome.VerificationNote is { } note ? $"Not verifiable: {note}" : null),
+            MutationReasonCodes.IsAbandoned(outcome.ReasonCode) ? $"{outcome.Reason} ({outcome.ReasonCode})"
+                : outcome.Reason ?? (outcome.VerificationNote is { } note ? $"Not verifiable: {note}" : null),
             _time.GetElapsedTime(started), results), capability);
         // R1-53: how it ended, under the ids an operator follows it by. The reason stays in the audit row.
         _logger.Log(outcome.Status == MutationStatus.Executed ? LogLevel.Information : LogLevel.Warning,
@@ -1065,7 +1069,7 @@ public sealed class MutationGateway : IMutationGateway
         try
         {
             await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
-                reason, _time.GetElapsedTime(started), run.Results), capability);
+                $"{reason} ({MutationReasonCodes.Abandoned})", _time.GetElapsedTime(started), run.Results), capability);
             _logger.LogWarning(
                 "Operation {OperationId} ({Capability}) abandoned: it ran past its deadline of {Deadline} and did not stop; " +
                 "it goes on in the background, its target held (audit {AuditId}, request {HttpRequestId})",
@@ -1086,11 +1090,12 @@ public sealed class MutationGateway : IMutationGateway
     private async Task LateEndAsync(ActionRun run, Task action, Holdings held, string? claim, long auditId,
         string operationId, Capability capability, long started)
     {
+        var cutOff = false;
         try
         {
             var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var abort = _drain is null ? default : _drain.Abort.Register(() => stopped.TrySetResult());
-            var cutOff = await Task.WhenAny(action, stopped.Task) != action;
+            cutOff = await Task.WhenAny(action, stopped.Task) != action;
             if (!cutOff)
                 cutOff = await Task.WhenAny(WaitForNestedAsync(run), stopped.Task) == stopped.Task;
             var how = cutOff ? "cut off at shutdown"
@@ -1123,7 +1128,10 @@ public sealed class MutationGateway : IMutationGateway
         }
         finally
         {
-            held.Dispose();
+            // Cut off by the stop, the action is still running: nothing is released and Completion never completes —
+            // no caller may close its own records (a history, a lock) as if the run had ended. The process is ending;
+            // the next start reports the operation as interrupted (INV-39).
+            if (!cutOff) held.Dispose();
         }
     }
 

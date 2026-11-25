@@ -65,6 +65,27 @@ public sealed class AbandonedRunCallerTests
     {
         var root = Parse("Services", "AutoPatch", "AutoPatchService.cs");
         AwaitsCompletionAfter(root.Method("PatchGatedAsync"), "_automation.RunAsync");
+        AwaitsCompletionAfter(root.Method("RunNightlyAsync"), "_automation.RunAsync");
+    }
+
+    [Fact]
+    public void The_compose_gates_hand_back_to_the_deployment_only_once_their_nested_run_has_really_ended()
+    {
+        // A nested gate run that is abandoned must not let the deployment action (and with it the server lease it
+        // holds) end while the nested build or up still runs (review round 1, M1).
+        var root = Parse("Services", "Mutations", "ComposeImpact.cs");
+        AwaitsCompletionAfter(root.Method("Nested"), "runner.RunAsync");
+        AwaitsCompletionAfter(root.Method("NextAutomated"), "runner.RunAsync");
+    }
+
+    [Fact]
+    public void A_nested_ui_runner_call_hands_back_only_once_its_run_has_really_ended()
+    {
+        var attempt = Parse("Services", "Mutations", "UiMutationRunner.cs").Method("AttemptAsync");
+        AwaitsCompletionAfter(attempt, "_gateway.ExecuteAsync");
+        var text = attempt.ToFullString();
+        Assert.Contains("var nested = MutationScope.Current is not null;", text);
+        Assert.Contains("if (nested) await outcome.Completion;", text);
     }
 
     [Fact]

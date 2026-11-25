@@ -192,8 +192,13 @@ public sealed class UiMutationRunner : IUiMutationRunner
         }
 
         // A service that answers with a failure value instead of throwing is recorded as Failed (MutationResults).
+        var nested = MutationScope.Current is not null;
         var outcome = await _gateway.ExecuteAsync(request,
             async (context, token) => MutationResults.Report(await action(context, token)), ct);
+        // Contract 0023 (4c): a call nested in another run (a compose gate, one per container) hands back to the outer
+        // action only once its own run has really ended — the outer run keeps its lease and claim until then. A page's
+        // own top-level call is answered at once.
+        if (nested) await outcome.Completion;
         return (outcome, principal);
     }
 
