@@ -17,16 +17,17 @@ public sealed class NoopVolumeBackupService : IVolumeBackupService
     private const string Disabled =
         "The VolumeBackups module is disabled (set Features:volumebackups:Enabled=true to enable volume backups).";
 
-    public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
+    public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null,
+        CancellationToken ct = default)
         => throw new InvalidOperationException(Disabled);
 
-    public Task RestoreVolumeAsync(string backupId, string? targetVolume = null)
+    public Task RestoreVolumeAsync(string backupId, string? targetVolume = null, CancellationToken ct = default)
         => throw new InvalidOperationException(Disabled);
 
     public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default)
         => Task.FromResult(new List<VolumeBackupEntity>());
 
-    public Task DeleteBackupAsync(string backupId) => Task.CompletedTask;
+    public Task DeleteBackupAsync(string backupId, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => Task.FromResult(new List<string>());
 

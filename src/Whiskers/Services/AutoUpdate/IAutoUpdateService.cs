@@ -17,7 +17,9 @@ public interface IAutoUpdateService
     Task CaptureSnapshotAsync(ContainerInfo container);
     Task<List<UpdateRollbackEntity>> GetRollbacksAsync();
     [MutatingOperation("container.rollback")]
-    Task<string> RollbackAsync(long rollbackId);
+    // Contract 0023: the token is observed after the snapshot is read, before the container is recreated; the recreate
+    // itself runs to its end.
+    Task<string> RollbackAsync(long rollbackId, CancellationToken ct = default);
     // R1-36: consumes the snapshot (and marks the update history) once the gateway verified the rollback — called
     // after the gated rollback succeeded, so a rollback that did not come up keeps its way back.
     Task CompleteRollbackAsync(long rollbackId);

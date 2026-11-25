@@ -297,14 +297,15 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
             CancellationToken ct = default) =>
             Task.FromResult(new List<ColumnInfo>());
 
-        public Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+        public Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+            CancellationToken ct = default)
         {
             LastQuery = (containerId, query, serverId);
             return Task.FromResult(new QueryResult { Columns = ["count"], Rows = [["3"]], RowCount = 1 });
         }
 
         public Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database,
-            DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null) =>
+            DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null, CancellationToken ct = default) =>
             throw new InvalidOperationException("not expected");
     }
 

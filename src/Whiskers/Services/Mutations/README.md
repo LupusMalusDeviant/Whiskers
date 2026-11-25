@@ -509,7 +509,14 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   capability are in `src/Whiskers.Tests/Architecture/deadline-token-baseline.txt` — the places from before contract
   0023, which only shrinks. A log line, a comparison or a capture the closure never passes on is not passing it on;
   an action held in a field or handed in from elsewhere cannot be judged and fails the test too — load it as a lambda
-  or method group in the calling method.
+  or method group in the calling method. A token handed to a helper's own delegate parameter (a host-command callback)
+  is that helper's, not the next entry call's; a call the scan cannot resolve never counts as passing it on.
+- **Safe points (contract 0023, batches).** A service that takes the action's token observes it only before its first
+  change and between steps, never inside one: a container recreate, a volume wipe and extract, a dump with its copy
+  and clean-up, a command already sent to a host run to their end. `SafePoint.ThenRunToEnd(ct, step)` is that for one
+  step called from a page (the token is checked, then the step runs with `CancellationToken.None`); the
+  `IDockerService` token overloads of start, stop, restart, remove and the network create and remove do the same for
+  their one Docker call. Batch 1 (the container and stack pages) left 105 lines in the baseline.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.
 - `MutationPrincipal` maps onto `AgentPrincipal` for the policy; WP6 brings structured identity.
 

@@ -18,7 +18,7 @@ public sealed class NoopAutoUpdateService : IAutoUpdateService
     public Task CaptureSnapshotAsync(ContainerInfo container) => Task.CompletedTask;
     public Task<List<UpdateRollbackEntity>> GetRollbacksAsync() => Task.FromResult(new List<UpdateRollbackEntity>());
     // Unreachable in normal flow: GetRollbacksAsync returns none, so the UI never offers a rollback to invoke.
-    public Task<string> RollbackAsync(long rollbackId)
+    public Task<string> RollbackAsync(long rollbackId, CancellationToken ct = default)
         => throw new InvalidOperationException("The Image Updates module is disabled — rollback is not available.");
     public Task CompleteRollbackAsync(long rollbackId) => Task.CompletedTask;
 }

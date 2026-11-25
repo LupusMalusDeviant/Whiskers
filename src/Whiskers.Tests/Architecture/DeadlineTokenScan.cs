@@ -66,8 +66,9 @@ internal static class DeadlineTokenScan
 
     /// <summary>
     /// The sites of one body. Every action with a token parameter loaded since the previous entry call belongs to the
-    /// next one — a conditional (<c>fast ? a : b</c>) hands either, so each is judged. The capability is the last
-    /// catalog id loaded before the call and after the previous call that took a string (a helper that consumed it).
+    /// next one — a conditional (<c>fast ? a : b</c>) hands either, so each is judged — unless a call in between took
+    /// token delegates itself (it consumed the ones loaded last). The capability is the last catalog id loaded before
+    /// the call, unless a helper with a capability parameter consumed it.
     /// </summary>
     private static IEnumerable<Site> SitesIn(MethodBase body, MetadataReader? pdb)
     {
@@ -76,7 +77,9 @@ internal static class DeadlineTokenScan
         var module = body.Module;
         var (typeArgs, methodArgs) = GenericContext(body);
         string? capability = null;
-        var lastLiteralIsCapability = false;
+        // A catalog id loaded and not yet consumed by a helper. Another string loaded after it (a reason, a label) does
+        // not clear it: the helper still takes the id (batch 1, ratchet review LOW 1).
+        var capabilityPending = false;
         var actions = new List<MethodBase>();
         foreach (var (op, operand) in instructions)
         {
@@ -84,8 +87,11 @@ internal static class DeadlineTokenScan
             {
                 string? text = null;
                 try { text = module.ResolveString(operand); } catch { }
-                lastLiteralIsCapability = text is not null && Catalog.Find(text) is not null;
-                if (lastLiteralIsCapability) capability = text;
+                if (text is not null && Catalog.Find(text) is not null)
+                {
+                    capability = text;
+                    capabilityPending = true;
+                }
             }
             else if (op == OpCodes.Ldftn || op == OpCodes.Ldvirtftn)
             {
@@ -103,8 +109,15 @@ internal static class DeadlineTokenScan
                 {
                     // A helper that takes a capability id consumed the literal before it (RequireAsync("x", …),
                     // RefusedAsync(task, "x", …)); a call that only takes some other string (Path.GetFileName) does not.
-                    if (lastLiteralIsCapability && TakesCapabilityId(called))
+                    if (capabilityPending && TakesCapabilityId(called))
+                    {
                         capability = null;
+                        capabilityPending = false;
+                    }
+                    // A helper that takes token actions of its own (a host-command callback, Task.Run) consumed the
+                    // ones loaded last: they are not the next entry call's (batch 1, ratchet review LOW 2).
+                    for (var n = TokenDelegateParameters(called); n > 0 && actions.Count > 0; n--)
+                        actions.RemoveAt(actions.Count - 1);
                     continue;
                 }
                 var file = FileOf(body, pdb);
@@ -114,6 +127,7 @@ internal static class DeadlineTokenScan
                 foreach (var action in actions)
                     yield return new Site(file, method, capability ?? "*", action, PassesToken(action), called, body);
                 capability = null;
+                capabilityPending = false;
                 actions.Clear();
             }
         }
@@ -218,7 +232,7 @@ internal static class DeadlineTokenScan
     /// <summary>From <paramref name="from"/> on, only further argument loads (and getters that produce one) come before
     /// a call or newobj that takes a <see cref="CancellationToken"/> — a box (a log line), a comparison
     /// (<c>ct == CancellationToken.None</c>), a branch or a pop in between is not passing the token on.</summary>
-    private static bool ReachesCall(List<(OpCode Op, int Operand)> instructions, int from, Module module,
+    internal static bool ReachesCall(List<(OpCode Op, int Operand)> instructions, int from, Module module,
         Type[]? typeArgs, Type[]? methodArgs)
     {
         for (var j = from; j < instructions.Count && j < from + 24; j++)
@@ -226,9 +240,10 @@ internal static class DeadlineTokenScan
             var (op, operand) = instructions[j];
             if (op == OpCodes.Call || op == OpCodes.Callvirt || op == OpCodes.Newobj)
             {
-                MethodBase? called = null;
-                try { called = module.ResolveMethod(operand, typeArgs, methodArgs); } catch { }
-                if (called is null) return true;   // unresolvable in this context: counted as the accepted limit
+                var called = ResolveCall(module, operand, typeArgs, methodArgs);
+                // Unresolvable (batch 1, ratchet review LOW 3): never counted as passing the token on — the ratchet
+                // then names the site instead of trusting a call it cannot read.
+                if (called is null) return false;
                 if (called.Name is "op_Equality" or "op_Inequality" or nameof(Equals)) return false;
                 if (Takes(called, typeof(CancellationToken))) return true;
                 // A call producing a further argument (c.Id, a callback delegate, CancellationToken.None for a
@@ -238,6 +253,28 @@ internal static class DeadlineTokenScan
             if (!IsArgumentLoad(op)) return false;
         }
         return false;
+    }
+
+    /// <summary>The call's method, read in the body's generic context and, failing that, without one (an open generic
+    /// reference); null when neither reads it.</summary>
+    private static MethodBase? ResolveCall(Module module, int token, Type[]? typeArgs, Type[]? methodArgs)
+    {
+        try { return module.ResolveMethod(token, typeArgs, methodArgs); } catch { }
+        try { return module.ResolveMethod(token); } catch { }
+        return null;
+    }
+
+    /// <summary>How many parameters of <paramref name="method"/> are delegates that take a
+    /// <see cref="CancellationToken"/> (0 when its signature cannot be read).</summary>
+    private static int TokenDelegateParameters(MethodBase method)
+    {
+        try
+        {
+            return method.GetParameters().Count(p => typeof(Delegate).IsAssignableFrom(p.ParameterType)
+                && p.ParameterType.GetMethod("Invoke") is { } invoke
+                && invoke.GetParameters().Any(q => q.ParameterType == typeof(CancellationToken)));
+        }
+        catch { return 0; }
     }
 
     /// <summary>The method has a string parameter named for a capability (<c>capabilityId</c>, <c>capability</c>).</summary>

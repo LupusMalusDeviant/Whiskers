@@ -136,6 +136,30 @@ public sealed class DeadlineTokenRatchetTests
     }
 
     [Fact]
+    public void A_capability_consumed_by_a_helper_with_a_trailing_string_does_not_name_a_later_call()
+    {
+        var site = Assert.Single(FixtureSites(nameof(DeadlineTokenFixtures.AfterHelperWithTrailingString)));
+        Assert.Equal("*", site.Capability);
+    }
+
+    [Fact]
+    public void A_token_lambda_handed_to_a_helper_is_not_the_next_runner_calls_action()
+    {
+        var site = Assert.Single(FixtureSites(nameof(DeadlineTokenFixtures.HelperLambdaFirst)));
+        Assert.True(site.PassesToken);
+    }
+
+    [Fact]
+    public void A_call_the_scan_cannot_resolve_never_counts_as_passing_the_token_on()
+    {
+        // A method token that names no method in this module: the token is loaded, then the unreadable call.
+        var module = typeof(DeadlineTokenRatchetTests).Module;
+        List<(System.Reflection.Emit.OpCode, int)> instructions =
+            [(System.Reflection.Emit.OpCodes.Ldarg_1, 0), (System.Reflection.Emit.OpCodes.Call, 0x0A00FFFF)];
+        Assert.False(DeadlineTokenScan.ReachesCall(instructions, 1, module, null, null));
+    }
+
+    [Fact]
     public void A_site_is_keyed_by_file_enclosing_method_and_capability_never_by_a_generated_name()
     {
         var site = Assert.Single(FixtureSites(nameof(DeadlineTokenFixtures.Discards)));

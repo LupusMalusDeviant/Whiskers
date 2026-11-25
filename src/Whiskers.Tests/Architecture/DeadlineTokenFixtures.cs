@@ -113,7 +113,25 @@ internal class DeadlineTokenFixtures(IUiMutationRunner runner, IMutationGateway 
         return Runner.RunAsync(capabilityId, new { }, (ResolvedContainer c, CancellationToken _) => Task.CompletedTask);
     }
 
+    /// <summary>The literal goes to a helper with a further string after it; the runner's capability is a variable.</summary>
+    public Task AfterHelperWithTrailingString(string capabilityId)
+    {
+        ConsumeWithReason("container.restart", "a reason");
+        return Runner.RunAsync(capabilityId, new { }, (ResolvedContainer c, CancellationToken _) => Task.CompletedTask);
+    }
+
+    /// <summary>A token lambda handed to a helper before the runner's own (passing) action: not the runner's.</summary>
+    public Task HelperLambdaFirst()
+    {
+        Callback((c, ct) => Task.CompletedTask);
+        return Runner.RunAsync("container.restart", new { }, (ResolvedContainer c, CancellationToken ct) => Task.Delay(1, ct));
+    }
+
     private static void Consume(string capabilityId) => GC.KeepAlive(capabilityId);
+
+    private static void ConsumeWithReason(string capabilityId, string reason) => GC.KeepAlive(capabilityId + reason);
+
+    private static void Callback(Func<ResolvedContainer, CancellationToken, Task> action) => GC.KeepAlive(action);
 
     private static Task StaticAction(ResolvedContainer c, CancellationToken ct) => Task.CompletedTask;
 

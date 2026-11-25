@@ -752,12 +752,15 @@ else
         secrets ??= [];
         var r = await Mutations.RunAsync(capability,
             new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
-            async (ResolvedContainer c, CancellationToken _) =>
+            async (ResolvedContainer c, CancellationToken ct) =>
             {
                 // The database password never stands in the command (Fable review, as DatabaseService since CodeQL #23–#26):
                 // `docker exec -e NAME` takes it from the host shell's environment, which the executor fills beside the command.
                 using var delivered = Whiskers.Services.Server.HostCommandSecrets.Provide(secrets);
-                var result = await HostCommandExecutor.ExecuteMutationAsync(c.ServerId!, DockerExecCommand(cmd, c.Id, secrets.Select(s => s.Key)), timeout);
+                // Contract 0023: the token is observed before the command is sent (the safe point); a command already
+                // running in the container (a migration, an import) runs to its end.
+                var result = await Whiskers.Services.Mutations.SafePoint.ThenRunToEnd(ct, () => HostCommandExecutor.ExecuteMutationAsync(
+                    c.ServerId!, DockerExecCommand(cmd, c.Id, secrets.Select(s => s.Key)), timeout, CancellationToken.None));
                 if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
                 else if (failedWhen?.Invoke(result.Output ?? "") is { } failure) MutationScope.Fail(failure);
                 return result;
@@ -1008,7 +1011,7 @@ else
             // The SQL goes to the gateway, which checks it for protected resources (R1-16); the audit keeps only its
             // length, since it can carry credentials (ALTER ROLE … PASSWORD '…').
             State.DbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
-                (ResolvedContainer c, CancellationToken _) => DatabaseService.ExecuteQueryAsync(c.Id, query, dbType, creds, c.ServerId));
+                (ResolvedContainer c, CancellationToken ct) => DatabaseService.ExecuteQueryAsync(c.Id, query, dbType, creds, c.ServerId, ct));
         }
         catch (MutationRefusedException ex)
         {
@@ -1041,9 +1044,9 @@ else
             var creds = State.DbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
-                async (ResolvedContainer c, CancellationToken _) =>
+                async (ResolvedContainer c, CancellationToken ct) =>
                 {
-                    var backup = await DatabaseService.BackupDatabaseAsync(c.Id, db, dbType, creds, c.ServerId, c.Name ?? containerName);
+                    var backup = await DatabaseService.BackupDatabaseAsync(c.Id, db, dbType, creds, c.ServerId, c.Name ?? containerName, ct);
                     if (backup.Success) MutationScope.Note($"Backup file: {backup.FilePath} ({backup.SizeBytes} bytes)");
                     return backup;
                 });

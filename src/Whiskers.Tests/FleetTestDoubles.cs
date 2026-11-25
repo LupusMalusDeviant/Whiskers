@@ -437,9 +437,9 @@ internal sealed class StoredVolumeBackups(params VolumeBackupEntity[] backups) :
     public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default) =>
         Task.FromResult(Backups.Where(b => (serverId is null || b.ServerId == serverId) && (volumeName is null || b.VolumeName == volumeName)).ToList());
 
-    public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null) =>
+    public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null, CancellationToken ct = default) =>
         throw new NotSupportedException();
-    public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
-    public Task DeleteBackupAsync(string backupId) => throw new NotSupportedException();
+    public Task RestoreVolumeAsync(string backupId, string? targetVolume = null, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task DeleteBackupAsync(string backupId, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
 }

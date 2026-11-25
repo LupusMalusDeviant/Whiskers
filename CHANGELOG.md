@@ -8,6 +8,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ### Changed
 
+- **Container and stack pages pass their deadline on (contract 0023, batch 1, INV-40).** Start, stop, restart and
+  remove of a container (container page and dashboard), the dashboard's rollback, the database query, backup and
+  commands of the container's database panel, network create and remove, and volume backup, restore and delete now
+  hand the run's token to the service. A run stopped before a step starts changes nothing; a step already started
+  runs to its end (a container recreate, a volume wipe and extract, a dump with its copy, a command sent to the
+  host), so a stop never leaves a half-applied state. A restore stopped during its safety backup ends before the
+  volume is wiped. 17 places left the token ratchet's baseline, 105 remain.
 - **Approvals name a privileged compose hook (contract 0017, amendment 5, INV-62).** A `post_start` or `pre_stop`
   hook with `privileged: true` is decided at planning only; the check after the run cannot see it. Every approval of
   such a run now says so, whatever rule raised it: the card and the notification read "Includes a privileged compose
