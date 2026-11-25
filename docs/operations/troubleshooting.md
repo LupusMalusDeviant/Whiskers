@@ -65,7 +65,14 @@ Both are anonymous and answer only a status word.
 ## Actions are refused
 
 - **"read-only" / kill switch:** the guardrails' read-only kill switch is on; every mutation is refused and no
-  terminal opens. An Admin switches it off on the *Guardrails* page (audited). The exceptions are listed there
+  terminal opens. An Admin switches it on and off on the *Guardrails* page ("Switch kill switch on now" changes only
+  the switch, `guardrails.kill_switch_on`; both audited). A guardrails save that started before the last switch — one
+  that ran past its deadline and ended late, or an edit of an older copy of the page — keeps the stored switch: it
+  never releases the brake, and the page then says so (contract 0023). Switching on takes effect at once even while
+  such a save still holds the guardrails; it is written to `guardrails.json` as soon as that save ends. Until then
+  the page says "not written yet" and the run is not verified as stored: do **not** restart Whiskers before it is
+  written, a restart then switches the kill switch off again. The
+  exceptions are listed there
   (contract 0009): switching it off, the first-run setup and the host CLIs always; the own password change, the
   recovery page and binding a Google/OIDC identity at a first sign-in unless an Admin blocked them beforehand. A
   blocked one says "Blocked while the kill switch is on". With the guardrails fail-closed (next item) these three are
@@ -92,7 +99,8 @@ Both are anonymous and answer only a status word.
   `whiskers_mutations_abandoned_running` counts it.
 - **"an earlier run on this target ran past its deadline and is still running":** an abandoned run still holds this
   target (for a host-level run: every target on that server), and nothing else may act on it until it ends — under
-  the kill switch too, which itself stays reachable. Fix the host so the run can end, or restart Whiskers to clear it;
+  the kill switch too, which itself stays reachable (switching it on and off passes, a guardrails save does not). Fix
+  the host so the run can end, or restart Whiskers to clear it;
   the restart reports it as interrupted, and its effect stays unknown.
 - **"a nested run is still running past its deadline":** the outer action returned, but one of the operations it
   started is still running; treat it like the first item.

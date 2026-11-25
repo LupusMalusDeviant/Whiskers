@@ -18,6 +18,10 @@ public interface IGuardrailStore
     /// <summary>Why the stored configuration is not enforced and the fail-closed policy is, or <c>null</c>.</summary>
     string? LoadError => null;
 
+    /// <summary>Contract 0023 (D8): the kill switch is on and enforced, but not written to <c>guardrails.json</c> yet
+    /// (an earlier guardrail save still holds the store); a restart now would lose it.</summary>
+    bool KillSwitchNotWritten => false;
+
     /// <summary>Contract 0010: true once the database confirmed its record that a guardrail policy has existed. The
     /// default is for test doubles.</summary>
     bool MarkerRecorded => false;
@@ -50,6 +54,13 @@ public interface IGuardrailStore
     [Whiskers.Services.Mutations.MutatingOperation("guardrails.kill_switch_off")]
     Task DisableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
         throw new NotSupportedException("This guardrail store cannot switch the kill switch off.");
+
+    /// <summary>Contract 0023 (D8): switches the kill switch on — <c>ReadOnlyMode</c> of the active preset becomes
+    /// <c>true</c>, nothing else changes — and counts the toggle, so a <c>guardrails.save</c> that started before it
+    /// keeps the stored value. Exempt from the target guard of an abandoned run, like switching it off. Admin-only.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("guardrails.kill_switch_on")]
+    Task EnableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
+        throw new NotSupportedException("This guardrail store cannot switch the kill switch on.");
 
     /// <summary>Fires after a successful save so consumers re-read the active policy.</summary>
     event Action? Changed;

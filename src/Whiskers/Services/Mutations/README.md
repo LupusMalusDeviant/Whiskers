@@ -50,10 +50,14 @@ the agent or a key; a person's click is not sent for approval.
 Security configuration (R1-11) is Admin-only with target kind `config` (the `section` argument names it):
 `config.save`, `config.whitelist`, `config.roles`, `config.mcp_permissions`, `config.agent` (agent provider,
 key and system prompt), `mcp.key_create`, `mcp.key_delete`,
-`guardrails.save`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
+`guardrails.save`, `guardrails.kill_switch_on`, `guardrails.kill_switch_off`, `vault.secret_set`, `vault.secret_delete`, `registry.save`,
 `registry.delete`. `GuardrailMutationPolicy` makes one narrow exception, for a person in the UI only and after
 authorization: `guardrails.kill_switch_off` is evaluated with `ReadOnlyMode` off (every other rule applies). A
 fail-closed store (`LoadError`) has none: it is repaired on the host (put a valid `guardrails.json` back, or run `--reset-guardrails` when both it and `guardrails.json.bak` are missing; restart — contract 0010). `UiMutationGatewayCoverageTests` lists every configuration write.
+Contract 0023 (D8): `guardrails.kill_switch_on` changes only `ReadOnlyMode` (no exception: while the switch is on it is
+refused like any write, which changes nothing) and is read back (`KillSwitchOnVerifier`); both toggles pass the target
+guard of an abandoned run, `guardrails.save` does not. A save that started before the last toggle keeps the stored
+`ReadOnlyMode` (`GuardrailConfig.KillSwitchVersion`, a compare-and-set in `GuardrailStore`).
 
 ### Unattended automation (PC-D6)
 

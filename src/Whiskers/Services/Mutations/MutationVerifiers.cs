@@ -54,5 +54,7 @@ public static class MutationVerifiers
         sp => new HetznerFlagVerifier(sp, "hetzner.backups_enable"),
         sp => new HetznerFlagVerifier(sp, "hetzner.backups_disable"),
         sp => new HetznerSnapshotDeleteVerifier(sp),
+        // Guardrails (contract 0023, D8)
+        sp => new Whiskers.Services.Guardrails.KillSwitchOnVerifier(sp),
     ];
 }

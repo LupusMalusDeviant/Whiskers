@@ -192,7 +192,12 @@ else
             presets.Add(new GuardrailPreset { Name = name, Policy = AiOperationsPresets.PolicyFor(name) });
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("guardrails.save", new { section = "guardrails", preset = name },
-                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(new GuardrailConfig { ActivePreset = name, Presets = presets }, principal));
+                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(new GuardrailConfig
+                {
+                    ActivePreset = name,
+                    Presets = presets,
+                    KillSwitchVersion = cfg.KillSwitchVersion,   // contract 0023 (D8): the copy this save started from
+                }, principal));
             _activePreset = name;
             Snackbar.Add(L["AiOps_Preset_Activated", name].Value, Severity.Success);
         }

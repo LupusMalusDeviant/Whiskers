@@ -120,6 +120,58 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void Switching_the_kill_switch_on_uses_its_own_capability_and_leaves_the_other_edits_unsaved()
+    {
+        // Contract 0023 (D8): not a whole save — only ReadOnlyMode changes.
+        var before = _store.Current.MaxActionsPerSession;
+        var cut = Render<GuardrailsView>();
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("GuardrailsView_KillSwitch_Enable_Button")).Click();
+
+        cut.WaitForAssertion(() => Assert.True(_store.Current.ReadOnlyMode));
+        Assert.Equal(before, _store.Current.MaxActionsPerSession);
+        Assert.Contains("begin:guardrails.kill_switch_on:", Events());
+        Assert.DoesNotContain(Events(), e => e.StartsWith("begin:guardrails.save:", StringComparison.Ordinal));
+        // With the brake on, the page offers switching it off instead.
+        cut.WaitForAssertion(() =>
+            Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("GuardrailsView_KillSwitch_Disable_Button")));
+    }
+
+    [Fact]
+    public async Task A_save_from_a_copy_older_than_the_last_toggle_keeps_the_kill_switch_and_the_page_shows_it()
+    {
+        // Contract 0023 (D8): the page was opened before another Admin switched the brake on and off again.
+        var cut = Render<GuardrailsView>();
+        await GatewayArrange.RunAsync("guardrails.kill_switch_on", () => _store.EnableKillSwitchAsync(Admin));
+        await GatewayArrange.RunAsync("guardrails.kill_switch_off", () => _store.DisableKillSwitchAsync(Admin));
+        cut.Find("input[type=checkbox]").Change(true);
+
+        Save(cut);
+
+        cut.WaitForAssertion(() => Assert.Contains("complete:Executed", Events()));
+        Assert.False(_store.Current.ReadOnlyMode);
+        Assert.Contains(Services.GetRequiredService<ISnackbar>().ShownSnackbars,
+            s => s.Message.Contains("GuardrailsView_KillSwitch_Kept_Snackbar", StringComparison.Ordinal));
+        // The page shows the stored value and takes the new stamp, so its next save is not stale any more.
+        cut.WaitForAssertion(() => Assert.False(cut.Find("input[type=checkbox]").HasAttribute("checked")));
+        cut.Find("input[type=checkbox]").Change(true);
+        Save(cut);
+        cut.WaitForAssertion(() => Assert.True(_store.Current.ReadOnlyMode));
+    }
+
+    [Fact]
+    public void An_operator_cannot_switch_the_kill_switch_on()
+    {
+        var cut = Render<GuardrailsView>();
+        _user.Role = AppRole.Operator;
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("GuardrailsView_KillSwitch_Enable_Button")).Click();
+
+        cut.WaitForAssertion(() => Assert.Contains("denied:Denied", Events()));
+        Assert.False(_store.Current.ReadOnlyMode);
+    }
+
+    [Fact]
     public async Task An_operator_cannot_switch_the_kill_switch_off()
     {
         var config = _store.Config;

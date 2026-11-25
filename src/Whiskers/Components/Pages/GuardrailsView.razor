@@ -93,11 +93,27 @@
                    the one action it lets through (R1-11). *@
                 <MudAlert Severity="Severity.Warning" Class="mt-3" Dense="true">
                     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <span style="flex:1;">@L["GuardrailsView_KillSwitch_ActiveHint"]</span>
+                        <span style="flex:1;">
+                            @L["GuardrailsView_KillSwitch_ActiveHint"]
+                            @if (GuardrailStore.KillSwitchNotWritten)
+                            {
+                                @* Contract 0023 (D8): enforced, but an earlier save still holds the store. *@
+                                <br /><strong>@L["GuardrailsView_KillSwitch_NotWritten"]</strong>
+                            }
+                        </span>
                         <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
                                    StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="DisableKillSwitch">@L["GuardrailsView_KillSwitch_Disable_Button"]</MudButton>
                     </div>
                 </MudAlert>
+            }
+            else if (GuardrailStore.LoadError is null)
+            {
+                @* Contract 0023 (D8): switching on changes only ReadOnlyMode, at once — also while a save is abandoned. *@
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mt-3">
+                    <MudText Typo="Typo.caption" Style="flex:1; color: var(--sw-text-secondary);">@L["GuardrailsView_KillSwitch_Enable_Hint"]</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                               StartIcon="@Icons.Material.Filled.Block" OnClick="EnableKillSwitch">@L["GuardrailsView_KillSwitch_Enable_Button"]</MudButton>
+                </div>
             }
         </MudPaper>
 
@@ -458,8 +474,15 @@
             if (added.Length > 0) arguments[TrustedScripts.AdditionsArgument] = added;
             await Mutations.RunAsync("guardrails.save", arguments,
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal, added));
-            _loaded = Clone(GuardrailStore.Config);
+            // Contract 0023 (D8): a save that started before the last kill-switch change keeps the stored kill switch.
+            // The page shows what was stored and takes the new stamp from the same copy.
+            var requested = _config.ActivePolicy().ReadOnlyMode;
+            var stored = GuardrailStore.Config;
+            _loaded = Clone(stored);
+            SyncKillSwitch(stored);
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
+            if (stored.ActivePreset == _config.ActivePreset && stored.ActivePolicy().ReadOnlyMode != requested)
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Kept_Snackbar"].Value, Severity.Warning);
         }
         catch (MutationRefusedException ex) when (ex.Status == MutationStatus.PendingApproval
                                                  && ex.MatchedRules.Contains(TrustedScriptApprovalRule.RuleId))
@@ -489,10 +512,45 @@
             await Mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.DisableKillSwitchAsync(principal));
             // Only ReadOnlyMode of the stored active preset changed; unsaved edits of other fields stay on screen.
-            var stored = GuardrailStore.Config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
-            var shown = _config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
-            if (stored is not null && shown is not null) shown.Policy.ReadOnlyMode = stored.Policy.ReadOnlyMode;
-            Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
+            var stored = GuardrailStore.Config;
+            SyncKillSwitch(stored);
+            // Contract 0023 (D8): another Admin may have switched it on again meanwhile; that later switch-on stays.
+            if (stored.ActivePolicy().ReadOnlyMode)
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Kept_Snackbar"].Value, Severity.Warning);
+            else
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    /// <summary>Contract 0023 (D8): shows the stored kill switch of <paramref name="stored"/> and takes its stamp — one
+    /// copy, so the stamp belongs to the value shown.</summary>
+    private void SyncKillSwitch(GuardrailConfig stored)
+    {
+        var storedActive = stored.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
+        var shown = _config.Presets.FirstOrDefault(p => p.Name == stored.ActivePreset);
+        if (storedActive is not null && shown is not null) shown.Policy.ReadOnlyMode = storedActive.Policy.ReadOnlyMode;
+        _config.KillSwitchVersion = stored.KillSwitchVersion;
+    }
+
+    /// <summary>Contract 0023 (D8): switches the kill switch on through its own capability — only ReadOnlyMode changes,
+    /// the other edits on the page stay unsaved on screen.</summary>
+    private async Task EnableKillSwitch()
+    {
+        try
+        {
+            var principal = await BuildPrincipalAsync();
+            await Mutations.RunAsync("guardrails.kill_switch_on", new { section = "guardrails" },
+                (ResolvedRecord rt, CancellationToken ct) => GuardrailStore.EnableKillSwitchAsync(principal, ct));
+            SyncKillSwitch(GuardrailStore.Config);
+            Snackbar.Add(L["GuardrailsView_KillSwitch_Enabled_Snackbar"].Value, Severity.Warning);
         }
         catch (MutationRefusedException ex)
         {
@@ -518,6 +576,8 @@
     private static GuardrailConfig Clone(GuardrailConfig s) => new()
     {
         ActivePreset = s.ActivePreset,
+        // Contract 0023 (D8): the save keeps the stored kill switch when a toggle came after this copy was read.
+        KillSwitchVersion = s.KillSwitchVersion,
         Presets = s.Presets.Select(p => new GuardrailPreset { Name = p.Name, Policy = ClonePolicy(p.Policy) }).ToList(),
     };
 

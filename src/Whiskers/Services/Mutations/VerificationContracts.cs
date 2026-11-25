@@ -189,6 +189,7 @@ public static class VerificationContracts
             ["mcp.key_create"] = VerificationContract.None(OwnRecord),
             ["mcp.key_delete"] = VerificationContract.None(OwnRecord),
             ["guardrails.save"] = VerificationContract.None(OwnRecord),
+            ["guardrails.kill_switch_on"] = VerificationContract.ReadBack("the active preset's ReadOnlyMode is on."),
             ["guardrails.kill_switch_off"] = VerificationContract.None(OwnRecord),
             ["vault.secret_set"] = VerificationContract.None(OwnRecord),
             ["vault.secret_delete"] = VerificationContract.None(OwnRecord),

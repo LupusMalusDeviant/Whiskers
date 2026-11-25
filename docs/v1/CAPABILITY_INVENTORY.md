@@ -8,7 +8,7 @@ its compositions (`MutationCompositions`) and the rows of [`PRODUCT_CONTRACT.md`
 that name it (M rows through their tool, the others through [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)).
 Contract 0008, D7: §7 stays hand-written; this file is generated and the release gate joins the two (R12–R15).
 
-120 capabilities, 49 of them with an MCP tool; by level: admin 91, read 2, write 27.
+121 capabilities, 49 of them with an MCP tool; by level: admin 92, read 2, write 27.
 
 The column *Resolution* is how the target resolves and the object the execution receives (contract 0012, D2).
 
@@ -69,6 +69,7 @@ The column *Resolution* is how the target resolves and the object the execution 
 | `gitdeploy.save` | admin | git-deploy-app | Creates `ResolvedTarget` | RootEquivalent | `create_git_deploy_app` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete`, `vault.secret_set` | `gitdeploy.set_token` | M-42, U-29 |
 | `gitdeploy.set_token` | admin | git-deploy-app | Object `ResolvedGitApp` | RootEquivalent | `set_git_deploy_token` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `gitdeploy.save` | — | M-43 |
 | `guardrails.kill_switch_off` | admin | config | Singleton `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-32 |
+| `guardrails.kill_switch_on` | admin | config | Singleton `ResolvedRecord` | RootEquivalent | — | read back: the active preset's ReadOnlyMode is on. | — | — | — | U-32 |
 | `guardrails.save` | admin | config | Object `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-32 |
 | `hetzner.backups_disable` | admin | cloud-server | Object `ResolvedCloudServer` | Destructive | `hetzner_disable_backups` | read back: Hetzner reports no backup window. | — | — | — | M-34 |
 | `hetzner.backups_enable` | admin | cloud-server | Object `ResolvedCloudServer` | Reversible | `hetzner_enable_backups` | read back: Hetzner reports a backup window. | — | — | — | M-33 |
