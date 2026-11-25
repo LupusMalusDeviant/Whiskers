@@ -93,7 +93,14 @@
                    the one action it lets through (R1-11). *@
                 <MudAlert Severity="Severity.Warning" Class="mt-3" Dense="true">
                     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <span style="flex:1;">@L["GuardrailsView_KillSwitch_ActiveHint"]</span>
+                        <span style="flex:1;">
+                            @L["GuardrailsView_KillSwitch_ActiveHint"]
+                            @if (GuardrailStore.KillSwitchNotWritten)
+                            {
+                                @* Contract 0023 (D8): enforced, but an earlier save still holds the store. *@
+                                <br /><strong>@L["GuardrailsView_KillSwitch_NotWritten"]</strong>
+                            }
+                        </span>
                         <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
                                    StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="DisableKillSwitch">@L["GuardrailsView_KillSwitch_Disable_Button"]</MudButton>
                     </div>
@@ -505,8 +512,13 @@
             await Mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
                 (ResolvedRecord rt, CancellationToken _) => GuardrailStore.DisableKillSwitchAsync(principal));
             // Only ReadOnlyMode of the stored active preset changed; unsaved edits of other fields stay on screen.
-            SyncKillSwitch(GuardrailStore.Config);
-            Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
+            var stored = GuardrailStore.Config;
+            SyncKillSwitch(stored);
+            // Contract 0023 (D8): another Admin may have switched it on again meanwhile; that later switch-on stays.
+            if (stored.ActivePolicy().ReadOnlyMode)
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Kept_Snackbar"].Value, Severity.Warning);
+            else
+                Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
         {

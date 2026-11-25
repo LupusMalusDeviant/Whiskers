@@ -150,6 +150,8 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
 
         cut.WaitForAssertion(() => Assert.Contains("complete:Executed", Events()));
         Assert.False(_store.Current.ReadOnlyMode);
+        Assert.Contains(Services.GetRequiredService<ISnackbar>().ShownSnackbars,
+            s => s.Message.Contains("GuardrailsView_KillSwitch_Kept_Snackbar", StringComparison.Ordinal));
         // The page shows the stored value and takes the new stamp, so its next save is not stale any more.
         cut.WaitForAssertion(() => Assert.False(cut.Find("input[type=checkbox]").HasAttribute("checked")));
         cut.Find("input[type=checkbox]").Change(true);

@@ -69,7 +69,9 @@ Both are anonymous and answer only a status word.
   the switch, `guardrails.kill_switch_on`; both audited). A guardrails save that started before the last switch — one
   that ran past its deadline and ended late, or an edit of an older copy of the page — keeps the stored switch: it
   never releases the brake, and the page then says so (contract 0023). Switching on takes effect at once even while
-  such a save still holds the guardrails; it is written to `guardrails.json` as soon as that save ends. The
+  such a save still holds the guardrails; it is written to `guardrails.json` as soon as that save ends. Until then
+  the page says "not written yet" and the run is not verified as stored: do **not** restart Whiskers before it is
+  written, a restart then switches the kill switch off again. The
   exceptions are listed there
   (contract 0009): switching it off, the first-run setup and the host CLIs always; the own password change, the
   recovery page and binding a Google/OIDC identity at a first sign-in unless an Admin blocked them beforehand. A

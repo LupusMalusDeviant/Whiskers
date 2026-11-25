@@ -228,6 +228,11 @@ public sealed class KillSwitchOnTests : IDisposable
         Assert.True(store.Current.ReadOnlyMode);  // enforced at once, not after the save
         Assert.True(store.Config.ActivePolicy().ReadOnlyMode);
         Assert.False(save.IsCompleted);
+        // …but not stored yet: said so, and not verified as stored (a restart now would lose it).
+        Assert.True(store.KillSwitchNotWritten);
+        var services = new ServiceCollection().AddSingleton<IGuardrailStore>(store).BuildServiceProvider();
+        await Assert.ThrowsAsync<MutationNotVerifiableException>(() =>
+            new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
 
         marker.HoldWrites = null;
         hold.SetResult();
@@ -245,6 +250,8 @@ public sealed class KillSwitchOnTests : IDisposable
         }
         while (!written && DateTime.UtcNow < deadlineAt);
         Assert.True(written);
+        Assert.False(store.KillSwitchNotWritten);
+        Assert.Equal(VerificationStatus.Verified, await new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
     }
 
     [Fact]

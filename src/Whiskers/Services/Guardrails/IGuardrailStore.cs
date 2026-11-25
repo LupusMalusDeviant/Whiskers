@@ -18,6 +18,10 @@ public interface IGuardrailStore
     /// <summary>Why the stored configuration is not enforced and the fail-closed policy is, or <c>null</c>.</summary>
     string? LoadError => null;
 
+    /// <summary>Contract 0023 (D8): the kill switch is on and enforced, but not written to <c>guardrails.json</c> yet
+    /// (an earlier guardrail save still holds the store); a restart now would lose it.</summary>
+    bool KillSwitchNotWritten => false;
+
     /// <summary>Contract 0010: true once the database confirmed its record that a guardrail policy has existed. The
     /// default is for test doubles.</summary>
     bool MarkerRecorded => false;

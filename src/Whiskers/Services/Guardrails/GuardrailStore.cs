@@ -587,33 +587,54 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         _logger?.LogWarning("Kill switch switched on by {Editor}.", Whiskers.Utils.LogSafe.Value(editor.DisplayName));
         Changed?.Invoke();
 
+        // The brake is enforced already; the caller waits a short while for the write, not the whole deadline.
+        bool held;
         try
         {
-            await WriteSwitchOnAsync(version, ct);
+            held = await _lock.WaitAsync(SwitchOnWriteWait, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _logger?.LogWarning("Kill switch is on; writing it to guardrails.json waits for an earlier guardrail save " +
-                                "and continues in the background.");
-            // Not part of the switch-on run: its mutation scope does not flow into the write.
-            using (ExecutionContext.SuppressFlow())
-                _ = Task.Run(async () =>
-                {
-                    try { await WriteSwitchOnAsync(version, CancellationToken.None); }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogError(ex, "Kill switch is on in memory, but it could not be written to " +
-                                              "guardrails.json; the next guardrail save writes it.");
-                    }
-                });
+            held = false;
         }
+        if (held)
+        {
+            await WriteSwitchOnHeldAsync(version);
+            return;
+        }
+
+        _logger?.LogWarning("Kill switch is on, but writing it to guardrails.json waits for an earlier guardrail save; " +
+                            "it continues in the background. A restart before it is written switches the kill switch off.");
+        // Not part of the switch-on run: its mutation scope does not flow into the write.
+        using (ExecutionContext.SuppressFlow())
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _lock.WaitAsync();
+                    await WriteSwitchOnHeldAsync(version);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Kill switch is on in memory, but it could not be written to " +
+                                          "guardrails.json; the next guardrail save writes it.");
+                }
+            });
     }
 
-    /// <summary>Writes the pending switch-on <paramref name="version"/> under the store lock, unless a later save or a
-    /// switch-off already accounted for it.</summary>
-    private async Task WriteSwitchOnAsync(long version, CancellationToken ct)
+    /// <summary>How long a switch-on waits for the store lock before its write continues in the background.</summary>
+    internal static TimeSpan SwitchOnWriteWait { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <inheritdoc />
+    public bool KillSwitchNotWritten
     {
-        await _lock.WaitAsync(ct);
+        get { lock (_publish) return _pendingOn is not null && _state.LoadError is null; }
+    }
+
+    /// <summary>Writes the pending switch-on <paramref name="version"/>, unless a later save or a switch-off already
+    /// accounted for it. The caller holds the store lock; it is released here.</summary>
+    private async Task WriteSwitchOnHeldAsync(long version)
+    {
         State before;
         GuardrailConfig next;
         try
@@ -680,24 +701,28 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 lock (_publish) _releaseInFlight = false;
                 throw;
             }
+            bool overtaken;
             lock (_publish)
             {
                 _releaseInFlight = false;
                 _state = new State(next, null);
-                if (_killSwitchVersion != version)
+                // Switched on again while this was written: that later switch-on stays pending and enforced, and
+                // writes the file once the store lock is free.
+                overtaken = _killSwitchVersion != version;
+                if (!overtaken)
                 {
-                    // Switched on again while this was written: that later switch-on stays pending and enforced, and
-                    // writes the file once the store lock is free.
-                    _logger?.LogWarning("Kill switch was switched on again while switching it off; it stays on.");
-                    return;
+                    _pendingOn = null;
+                    _killSwitchVersion++;
                 }
-                _pendingOn = null;
-                _killSwitchVersion++;
             }
             await AfterSavedAsync();
-            RecordChange(before, next);
-            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).",
-                Whiskers.Utils.LogSafe.Value(editor.DisplayName), next.ActivePreset);
+            RecordChange(before, next);   // what this call wrote, also when a later switch-on overtook it
+            if (overtaken)
+                _logger?.LogWarning("Kill switch was switched on again while {Editor} switched it off; it stays on.",
+                    Whiskers.Utils.LogSafe.Value(editor.DisplayName));
+            else
+                _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).",
+                    Whiskers.Utils.LogSafe.Value(editor.DisplayName), next.ActivePreset);
         }
         finally
         {
