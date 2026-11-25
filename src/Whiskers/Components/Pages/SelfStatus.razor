@@ -18,6 +18,7 @@
 @inject Whiskers.Services.Observability.Outcomes.IActionOutcomeService Outcomes
 @using Whiskers.Services.Observability.Outcomes
 @inject IStringLocalizer<SharedResource> L
+@inject Whiskers.Services.Mutations.IAbandonedRuns AbandonedRuns
 @implements IDisposable
 
 @* "Is Whiskers still working?" — Plan-0003 WP4.
@@ -127,6 +128,25 @@ else
         </MudTd>
     </RowTemplate>
 </MudTable>
+
+@* Contract 0023 (point 5): mutations still running past their deadline. One line each, with no arguments and no
+   target text: the capability, the operation id, when it started and how long it has run. *@
+@{ var abandonedRuns = AbandonedRuns.Running; }
+@if (abandonedRuns.Count > 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mt-4" Dense="true">
+        <MudText Typo="Typo.body2" Class="mb-1"><b>@L["SelfStatus_Abandoned_Heading", abandonedRuns.Count]</b></MudText>
+        @foreach (var run in abandonedRuns)
+        {
+            <MudText Typo="Typo.caption" Class="d-block">
+                @L["SelfStatus_Abandoned_Line", run.CapabilityId, run.OperationId,
+                    run.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                    SelfStatusPresenter.Age(DateTimeOffset.UtcNow - run.StartedAt)]
+            </MudText>
+        }
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@L["SelfStatus_Abandoned_Remedy"]</MudText>
+    </MudAlert>
+}
 
 @* Plan-0002 WP5 and Plan-0007 WP2.1 — the two ways a container can be missing from the log scan. They look
    the same from outside (no findings) and mean completely different things, so they are named apart here:

@@ -25,11 +25,15 @@ public interface IUiMutationRunner
     /// <exception cref="MutationRefusedException">The gateway refused the call (level, tool switch, kill switch,
     /// protected resource, unknown target, audit not writable). Nothing ran.</exception>
     /// <exception cref="MutationFailedException">The capability's deadline cancelled the token passed to
-    /// <paramref name="action"/> and the action stopped on it; its effect is unknown.</exception>
+    /// <paramref name="action"/> and the action stopped on it; its effect is unknown. Also (contract 0023) when the
+    /// action went on past its deadline and the grace period (<see cref="MutationFailedException.Abandoned"/>), or a run
+    /// nested in it did (<see cref="MutationReasonCodes.NestedAbandoned"/>).</exception>
     /// <remarks>An exception thrown by <paramref name="action"/> itself is rethrown unchanged, so a page's existing
     /// error handling keeps working.
     /// <para>The deadline is cooperative (INV-40): every execution has one, and it cancels the action's token. An
-    /// action that ignores the token runs to its end — this call waits for it, and its slot stays held until then.</para></remarks>
+    /// action that ignores the token is waited for at most its deadline plus the grace period (contract 0023); then
+    /// this call throws <see cref="MutationFailedException"/> with <see cref="MutationFailedException.Abandoned"/>, while
+    /// the action runs on in the background, its target held until it ends, and its late end is audited.</para></remarks>
     [MutationEntryPoint]
     Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task<T>> action,
         CancellationToken ct = default) where TTarget : ResolvedTarget =>
@@ -66,9 +70,18 @@ public sealed class MutationRefusedException(string message, MutationStatus stat
     public string? ApprovalId { get; init; }
 }
 
-/// <summary>A UI mutation did not finish in time (the capability's deadline).</summary>
+/// <summary>A UI mutation did not finish in time (the capability's deadline), or went on past it (contract 0023).</summary>
 public sealed class MutationFailedException(string message, Exception? inner)
-    : InvalidOperationException(message, inner);
+    : InvalidOperationException(message, inner)
+{
+    /// <summary>Contract 0023: the action was abandoned after its deadline and the grace period and is still running
+    /// (<see cref="MutationReasonCodes.Abandoned"/>). False for a run whose nested run is still running
+    /// (<see cref="MutationReasonCodes.NestedAbandoned"/>), as on the outcome.</summary>
+    public bool Abandoned { get; init; }
+
+    /// <summary>The outcome's reason code, when it had one (contract 0023: <c>Abandoned</c> or <c>NestedAbandoned</c>).</summary>
+    public string? ReasonCode { get; init; }
+}
 
 public sealed class UiMutationRunner : IUiMutationRunner
 {
@@ -179,8 +192,13 @@ public sealed class UiMutationRunner : IUiMutationRunner
         }
 
         // A service that answers with a failure value instead of throwing is recorded as Failed (MutationResults).
+        var nested = MutationScope.Current is not null;
         var outcome = await _gateway.ExecuteAsync(request,
             async (context, token) => MutationResults.Report(await action(context, token)), ct);
+        // Contract 0023 (4c): a call nested in another run (a compose gate, one per container) hands back to the outer
+        // action only once its own run has really ended — the outer run keeps its lease and claim until then. A page's
+        // own top-level call is answered at once.
+        if (nested) await outcome.Completion;
         return (outcome, principal);
     }
 
@@ -337,6 +355,15 @@ public sealed class UiMutationRunner : IUiMutationRunner
     {
         switch (outcome.Status)
         {
+            // Contract 0023: a run that went on past its deadline (or whose nested run did) is never read as the
+            // action's answer, nor as the page's own cancellation — before every other failed branch.
+            case MutationStatus.Failed when MutationReasonCodes.IsAbandoned(outcome.ReasonCode):
+                throw new MutationFailedException(LocalizedReason(outcome) ?? outcome.Reason ?? "The action ran past its deadline.",
+                    outcome.Error)
+                {
+                    Abandoned = outcome.Abandoned,
+                    ReasonCode = outcome.ReasonCode,
+                };
             case MutationStatus.Executed:
                 return outcome.Value!;
             case MutationStatus.Failed when outcome.Error is null:

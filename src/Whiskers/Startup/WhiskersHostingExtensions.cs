@@ -361,6 +361,8 @@ public static class WhiskersHostingExtensions
             .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" })
             // R1-19: Degraded (still ready) while an audit event is incomplete.
             .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" })
+            // Contract 0023 (D5): Degraded (still ready) once a mutation has run past its deadline for over L.
+            .AddCheck<AbandonedRunsCheck>("mutations", tags: new[] { "ready" })
             // R1-27: Degraded (still ready) while the identity bindings cannot be read.
             .AddCheck<Whiskers.HealthChecks.IdentityBindingsReadyCheck>("identity-bindings", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));

@@ -273,6 +273,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
                 MutationResults.Report(cycleClaimed
                     ? await RunCycleCoreAsync(_settings.CurrentValue.DryRun, actor, token)
                     : await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
+        // Contract 0023 (4c): the cycle is over only once it has really ended, nested patches included.
+        await outcome.Completion;
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
         {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
@@ -358,6 +360,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
                 if (result.Failed) MutationScope.Fail($"Auto-patch ended as {result.Kind}.");
                 return result;
             }, ct);
+        // Contract 0023 (4c): the container's drain entry is kept until the patch — and every run nested in it — has
+        // really ended, also when the gateway answered without it.
+        await gated.Completion;
         return gated.Status switch
         {
             MutationStatus.Executed => gated.Value!,

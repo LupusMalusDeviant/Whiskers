@@ -9,6 +9,11 @@ public sealed record PendingAuditOutcome(long AuditId, string OperationId, Mutat
     VerificationStatus Verification, string? Reason, TimeSpan Duration,
     IReadOnlyList<MutationDomainResult>? Results = null);
 
+/// <summary>Contract 0023 (point 3): the late end of an abandoned run the gateway could not write; kept and written
+/// again, after the event's outcome.</summary>
+public sealed record PendingLateEnd(long AuditId, string OperationId, string How, TimeSpan Duration,
+    IReadOnlyList<MutationDomainResult>? Results = null);
+
 /// <summary>Whether the audit trail is complete right now (R1-19, INV-45).</summary>
 /// <param name="PendingEvents">Outcomes of this process and refusals in the outbox still waiting to be written, and
 /// events lost altogether (neither written nor kept).</param>
@@ -32,6 +37,11 @@ public sealed record AuditHealth(int PendingEvents, int UnsettledIntents, bool L
 public interface IAuditRecovery
 {
     void OutcomeNotWritten(PendingAuditOutcome outcome);
+
+    /// <summary>Contract 0023: an abandoned run's late end that could not be written. Kept in memory like an outcome and
+    /// written again after it; the <c>audit</c> health check counts it as pending. Lost at a restart: then the outcome row
+    /// (with <c>Abandoned</c>) and the journal tell what is known.</summary>
+    void LateEndNotWritten(PendingLateEnd lateEnd) { }
 
     /// <summary>The older audit (<c>AuditLogService</c>, written after the fact) lost a row.</summary>
     void LegacyWriteFailed();
@@ -85,10 +95,20 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
         _outcomes[outcome.AuditId] = outcome;
     }
 
+    public void LateEndNotWritten(PendingLateEnd lateEnd)
+    {
+        ArgumentNullException.ThrowIfNull(lateEnd);
+        // Beyond the cap it is not kept: the outcome row and the journal still say what is known.
+        if (_lateEnds.Count >= MaxKept) return;
+        _lateEnds[lateEnd.AuditId] = lateEnd;
+    }
+
+    private readonly ConcurrentDictionary<long, PendingLateEnd> _lateEnds = new();
+
     public void LegacyWriteFailed() => Interlocked.Exchange(ref _legacyFailedAt, _time.GetUtcNow().UtcTicks);
 
     public AuditHealth Health => new(
-        _outcomes.Count + (_outbox?.Count ?? 0) + (_outbox?.Lost ?? 0),
+        _outcomes.Count + _lateEnds.Count + (_outbox?.Count ?? 0) + (_outbox?.Lost ?? 0),
         Volatile.Read(ref _unsettled),
         Interlocked.Read(ref _legacyFailedAt) is var failed and not 0
             && _time.GetUtcNow().UtcTicks - failed < TimeSpan.TicksPerHour);
@@ -130,6 +150,21 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning(ex, "Audit outcome of operation {OperationId} still not written", outcome.OperationId);
+                }
+            }
+            // Contract 0023: a late end follows its outcome in the chain, so it waits while that outcome is still kept.
+            foreach (var (id, lateEnd) in _lateEnds)
+            {
+                if (_outcomes.ContainsKey(id)) continue;
+                try
+                {
+                    await _sink.CompleteLateEndAsync(lateEnd.AuditId, lateEnd.OperationId, lateEnd.How, lateEnd.Duration,
+                        lateEnd.Results, ct);
+                    _lateEnds.TryRemove(id, out _);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "Late end of operation {OperationId} still not written", lateEnd.OperationId);
                 }
             }
             await DrainOutboxAsync(ct);

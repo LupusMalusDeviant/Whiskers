@@ -7043,4 +7043,25 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Mutation_Refused_AutomationHeld" xml:space="preserve">
     <value>Die Automatisierung wurde übergeben oder angehalten und wartet darauf, dass ein Admin sie fortsetzt; nichts lief.</value>
   </data>
+  <data name="Mutation_Refused_Abandoned" xml:space="preserve">
+    <value>„{0}“ lief über seine Frist von {1} hinaus und hielt nicht an; es läuft noch, seine Wirkung ist unbekannt. Vor einem neuen Versuch den aktuellen Zustand prüfen.</value>
+  </data>
+  <data name="Mutation_Refused_NestedAbandoned" xml:space="preserve">
+    <value>Ein verschachtelter Lauf läuft noch über seine Frist hinaus; die Wirkung ist unbekannt. Vor einem neuen Versuch den aktuellen Zustand prüfen.</value>
+  </data>
+  <data name="Mutation_Refused_TargetBusy" xml:space="preserve">
+    <value>Ein früherer Lauf auf diesem Ziel lief über seine Frist hinaus und läuft noch; nichts lief. Den Host reparieren oder Whiskers neu starten, um die Sperre aufzuheben.</value>
+  </data>
+  <data name="Mutation_Refused_ShuttingDown" xml:space="preserve">
+    <value>Whiskers fährt herunter; die Änderung wurde nicht gemacht. Nach dem Neustart erneut versuchen.</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Heading" xml:space="preserve">
+    <value>{0} Änderung(en) laufen noch über ihre Frist hinaus</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Line" xml:space="preserve">
+    <value>{0} · Operation {1} · gestartet {2} · läuft seit {3}</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Remedy" xml:space="preserve">
+    <value>Änderungen an ihren Zielen werden abgelehnt, bis sie enden. Den Host reparieren oder Whiskers neu starten, um sie aufzuheben; der Neustart meldet sie als unterbrochen.</value>
+  </data>
 </root>

@@ -17,7 +17,7 @@ Both are anonymous and answer only a status word.
 | Endpoint | Means | `Healthy` | Otherwise |
 |---|---|---|---|
 | `/healthz` | liveness: the process is up | the web host runs | no answer: the process is not running or still starting (an upgrade's pre-upgrade backup and migration run before it answers) |
-| `/readyz` | readiness: Whiskers can do its work | database reachable, server configuration loaded, no restore in progress, audit trail complete, sign-in bindings readable | `Unhealthy`: the database is unreachable, the server configuration is still loading, or a restore is staged and the app is about to restart (maintenance). `Degraded`: Whiskers keeps serving, but an audit outcome waits to be written (see *Audit failure* in [observability.md](observability.md#signals-to-alert-on)) or `identity-bindings.json` cannot be read (Google/OIDC sign-in refused, local sign-in works) |
+| `/readyz` | readiness: Whiskers can do its work | database reachable, server configuration loaded, no restore in progress, audit trail complete, sign-in bindings readable | `Unhealthy`: the database is unreachable, the server configuration is still loading, or a restore is staged and the app is about to restart (maintenance). `Degraded`: Whiskers keeps serving, but an audit outcome waits to be written (see *Audit failure* in [observability.md](observability.md#signals-to-alert-on)), `identity-bindings.json` cannot be read (Google/OIDC sign-in refused, local sign-in works), or a mutation has been running past its deadline for over 15 minutes (`mutations`; fix the host or restart Whiskers) |
 
 ## Whiskers does not start
 
@@ -85,6 +85,19 @@ Both are anonymous and answer only a status word.
   space and the database connection; Whiskers refuses every mutation until it can record it.
 - **A webhook refuses every delivery:** its secret cannot be read (vault locked or key changed). Regenerate the secret
   with a usable vault.
+- **"ran past its deadline and did not stop; it is still running":** the action ignored its deadline (a hung host, a
+  call without a timeout), and Whiskers answered without it after the deadline plus 5 s (contract 0023). It goes on in
+  the background; its effect is unknown until it ends, and the audit row gets its late end then. Read the target's
+  current state before retrying. *Whiskers itself* (`/self-status`) lists what is still running, and the gauge
+  `whiskers_mutations_abandoned_running` counts it.
+- **"an earlier run on this target ran past its deadline and is still running":** an abandoned run still holds this
+  target (for a host-level run: every target on that server), and nothing else may act on it until it ends — under
+  the kill switch too, which itself stays reachable. Fix the host so the run can end, or restart Whiskers to clear it;
+  the restart reports it as interrupted, and its effect stays unknown.
+- **"a nested run is still running past its deadline":** the outer action returned, but one of the operations it
+  started is still running; treat it like the first item.
+- **"Whiskers is stopping; the change was not made":** the request came in while Whiskers was shutting down. Retry
+  after the restart; nothing ran and no approval was used.
 
 ## Backups
 

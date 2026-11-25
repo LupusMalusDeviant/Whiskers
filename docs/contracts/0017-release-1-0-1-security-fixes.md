@@ -157,6 +157,8 @@ removed. The tool description keeps the promise "sensitive values are masked", a
 - INV-40 is qualified the same way. The review counted 122 call sites that discard the token; the INV-40 row names this
   limit.
 - A hard abort is not part of 1.0.1.
+- Since 1.1.0, [contract 0023](0023-deadline-abandoned-runs.md) bounds how long the caller waits (deadline + G), marks
+  a run past its deadline as abandoned and audits its late end; the deadline itself stays cooperative.
 
 ## Tests (acceptance)
 

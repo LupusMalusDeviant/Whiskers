@@ -218,6 +218,8 @@ public static class ComposeImpact
         Func<Task> inner)
     {
         var outcome = await runner.RunAsync(actor, MountsCapability, arguments, (ResolvedHostObject _, CancellationToken _) => inner());
+        // Contract 0023 (4c): the deployment (and its server lease) goes on only once the nested run has really ended.
+        await outcome.Completion;
         if (outcome.Error is { } error)
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         if (outcome.Status != MutationStatus.Executed)
@@ -236,6 +238,8 @@ public static class ComposeImpact
         var outcome = await runner.RunAsync(actor, capabilityId,
             new { containerId = container.Id, name = container.Name, serverId = plan.ServerId },
             (ResolvedTarget _, CancellationToken _) => NextAutomated(runner, actor, capabilityId, plan, proceed, index + 1));
+        // Contract 0023 (4c): the deployment (and its server lease) goes on only once the nested run has really ended.
+        await outcome.Completion;
         // A container that was not allowed — by policy, by its owner's authority, or because its audit intent could not
         // be written — is a refusal, whatever error the gateway kept; only an error of the deployment itself (thrown
         // further in) is passed on as it is.

@@ -166,6 +166,17 @@ public static class McpGuardrailFilter
         };
         tool.Report(result, verdict, outcome.OperationId, result == McpCallResult.Executed ? null : outcome.Reason);
 
+        // Contract 0023: a run that went on past its deadline (or whose nested run did) is answered as the failure it is,
+        // before the "tool answered" and "tool threw" branches — never the tool's answer, never a rethrown cancellation.
+        if (outcome.Status == MutationStatus.Failed && MutationReasonCodes.IsAbandoned(outcome.ReasonCode))
+        {
+            var text = Whiskers.Utils.SecretRedactor.Redact(outcome.Reason ?? "The call ran past its deadline.");
+            return McpErrorEnvelope.Tools.Contains(call.Name)
+                ? McpErrorEnvelope.Result(McpErrorEnvelope.CodeOf(outcome.Status, outcome.ReasonCode),
+                    $"{text} ({outcome.ReasonCode})", outcome.OperationId)
+                : Refuse($"{text} ({outcome.ReasonCode})");
+        }
+
         // Contract 0001: these tools answer every error as a coded envelope — also what the gateway refused or held for
         // approval before they ran, with the operation (and approval) a client repeats the identical call for.
         // The tool's own answer is already an envelope; a tool exception becomes one too (redacted), except the caller's

@@ -238,6 +238,10 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         recreateReturned = true;
                         return recreated;
                     }, ct);
+                // Contract 0023 (4c): the drain entry, history.CompletedAt and the interruption guard are kept until the
+                // update — and every run nested in it — has really ended, also when the gateway answered without it.
+                // Only then do recreateReturned and the snapshot say what happened.
+                await outcome.Completion;
                 if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval
                     && _automation.LostAuthority(actor, "container.update") is { } lost)
                 {
@@ -281,10 +285,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 _updateStore.Remove(container.Id, container.ServerId);
                 _logger.LogInformation("Auto-update succeeded for {Container}", container.Name);
             }
+            // Contract 0023: an abandoned run was never verified, also when its recreate returned late — never this branch.
             // R1-41 follow-up: Whiskers stopped after the gateway executed and verified the recreate, while waiting for or
             // reading the health check. The container was replaced; only the extra health check is missing. Recorded as
             // the update it was, with that gap named — not as a failed update, and nothing to notify.
-            catch (OperationCanceledException) when (recreateReturned && ct.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (recreateReturned && ct.IsCancellationRequested
+                                                      && ex is not MutationAbandonedException)
             {
                 history.Success = true;
                 history.CompletedAt = DateTime.UtcNow;

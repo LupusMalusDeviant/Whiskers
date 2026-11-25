@@ -91,6 +91,7 @@ and are still served when the fleet does not answer.
 | **Loop stall** | A background loop has not completed a cycle for a server | `whiskers_self_loop_last_success_age_seconds` well above the loop's interval (`-1`: never completed since the start); notification `monitoring_stalled` (after three intervals); the **Self status** page | Open **Self status**: a skipped server says why. A circuit that is open (`whiskers_self_circuit_open`) or a paused server (`whiskers_loops_paused`) explains it; otherwise read the loop's warnings in the log |
 | **Operation incomplete** | An operation's outcome is not on record: it was running when Whiskers stopped, or its outcome could not be written | `whiskers_self_audit_intents_unsettled` above 0 for more than a few minutes; at start the warning `Whiskers stopped while N operation(s) ran; marked as interrupted` and the notification `operations_interrupted`; a `Failed` outcome line whose audit reason says *its effect is unknown* | Check the named targets by hand before retrying: Whiskers never replays an interrupted operation, and a retry under the same operation id is refused |
 | **Audit failure** | An audit event could not be written | `whiskers_self_audit_events_pending` above 0 for more than a few minutes, `whiskers_self_audit_legacy_write_failed` = 1; `/readyz` answers `Degraded`; error lines `Audit intent for ... could not be written; operation ... refused` | Check the database (disk space, the PostgreSQL connection). While no intent can be written every mutation is refused; kept outcomes are written again once a minute and the gauges fall back to 0 |
+| **Mutation past its deadline** | A mutation ignored its deadline and still runs after the deadline plus 5 s; Whiskers answered without it (contract 0023), its target is refused until it ends | `whiskers_mutations_abandoned_running` above 0; the warning `Operation ... abandoned: it ran past its deadline`; the **Self status** page lists capability, operation id, start and running time; after 15 minutes `/readyz` answers `Degraded` (`mutations`); its end is the `Information` line `Abandoned operation ... ended` and the audit row's `late_end` phase | Fix the host the run waits on, or restart Whiskers (the restart reports the run as interrupted). Read the target's state before retrying |
 | Budget saturation | Docker calls wait for a slot | `whiskers_self_call_wait_seconds_max` rising, `whiskers_self_calls_in_flight` at the lane limit | Usually a slow host; see the loop's timeouts |
 | Notification delivery | A channel fails critical notifications | `whiskers_self_notification_outbox_pending` staying up, `whiskers_self_notification_outbox_total{result="exhausted"}` or `{result="dropped"}` growing | Check the channel's settings and its warnings in the log |
 
@@ -111,6 +112,9 @@ groups:
         for: 5m
       - alert: WhiskersCircuitOpen
         expr: whiskers_self_circuit_open == 1
+        for: 15m
+      - alert: WhiskersMutationPastDeadline
+        expr: whiskers_mutations_abandoned_running > 0
         for: 15m
 ```
 
