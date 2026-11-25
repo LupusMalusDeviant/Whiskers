@@ -498,7 +498,14 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   that never ends needs the host fixed or a restart (readiness turns `Degraded` after 15 min,
   `MutationGatewayOptions.AbandonedLimit`). The bound starts at the action's first `await`: an action that blocks its
   thread synchronously before it (no awaited I/O) holds the caller until it yields. Gateway actions are asynchronous
-  service calls; the bound is not extended to blocking code.
+  service calls; the bound is not extended to blocking code. **A new action must pass its token on** to the service
+  call: `DeadlineTokenRatchetTests` scans the compiled IL (pages included) for every action handed to
+  `IMutationGateway.ExecuteAsync` or a `[MutationEntryPoint]` runner, and fails on one that discards it (`CancellationToken
+  _`, `_ = ct`, `ThrowIfCancellationRequested` alone, `CancellationToken.None`) unless its file, enclosing method and
+  capability are in `src/Whiskers.Tests/Architecture/deadline-token-baseline.txt` — the places from before contract
+  0023, which only shrinks. A log line, a comparison or a capture the closure never passes on is not passing it on;
+  an action held in a field or handed in from elsewhere cannot be judged and fails the test too — load it as a lambda
+  or method group in the calling method.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.
 - `MutationPrincipal` maps onto `AgentPrincipal` for the policy; WP6 brings structured identity.
 
