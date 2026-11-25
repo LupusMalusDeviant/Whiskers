@@ -151,6 +151,105 @@ public sealed class VolumeBackupServiceTests : IDisposable
         Assert.Empty(await service.ListBackupsAsync("local", "pgdata"));
     }
 
+    // Contract 0023 (batch 1, safe points): the token is observed before each step, never inside one.
+
+    [Fact]
+    public async Task A_backup_stopped_before_it_starts_sends_nothing_and_records_nothing()
+    {
+        var host = new ScriptedHost(c => c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok());
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.BackupVolumeAsync("pgdata", "db", "local", ct: new CancellationToken(canceled: true)));
+
+        Assert.Empty(host.Commands);
+        Assert.Empty(await service.ListBackupsAsync("local", "pgdata"));
+    }
+
+    [Fact]
+    public async Task A_backup_stopped_while_its_archive_is_written_runs_to_its_end_and_is_recorded()
+    {
+        using var stop = new CancellationTokenSource();
+        var host = new ScriptedHost(c =>
+        {
+            if (c.StartsWith("docker run", StringComparison.Ordinal)) stop.Cancel();
+            return c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok();
+        });
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+
+        var backup = await service.BackupVolumeAsync("pgdata", "db", "local", ct: stop.Token);
+
+        Assert.True(stop.IsCancellationRequested);
+        Assert.DoesNotContain(host.Commands, c => c.StartsWith("rm -f", StringComparison.Ordinal));
+        Assert.Equal(backup.BackupId, Assert.Single(await service.ListBackupsAsync("local", "pgdata")).BackupId);
+    }
+
+    [Fact]
+    public async Task A_restore_stopped_during_its_safety_backup_ends_before_the_wipe_and_leaves_the_volume_untouched()
+    {
+        var host = new ScriptedHost(c => c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok());
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+        var backup = await service.BackupVolumeAsync("pgdata", "db", "local");
+        host.Commands.Clear();
+
+        using var stop = new CancellationTokenSource();
+        var stopping = new ScriptedHost(c =>
+        {
+            if (c.Contains("tar czf", StringComparison.Ordinal)) stop.Cancel();   // the safety backup's archive
+            return c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok();
+        });
+        var restoring = new VolumeBackupService(stopping, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => restoring.RestoreVolumeAsync(backup.BackupId, ct: stop.Token));
+
+        Assert.Contains(stopping.Commands, c => c.Contains("tar czf", StringComparison.Ordinal));
+        Assert.DoesNotContain(stopping.Commands, c => c.Contains("find /data", StringComparison.Ordinal));
+        // The safety backup ran to its end and is on record: the volume can still be brought back.
+        Assert.Equal(2, (await service.ListBackupsAsync("local", "pgdata")).Count);
+    }
+
+    [Fact]
+    public async Task A_restore_stopped_during_the_wipe_and_extract_runs_to_its_end()
+    {
+        using var stop = new CancellationTokenSource();
+        var host = new ScriptedHost(c =>
+        {
+            if (c.Contains("find /data", StringComparison.Ordinal)) stop.Cancel();
+            return c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok();
+        });
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+        var backup = await service.BackupVolumeAsync("pgdata", "db", "local");
+
+        await service.RestoreVolumeAsync(backup.BackupId, ct: stop.Token);
+
+        Assert.True(stop.IsCancellationRequested);
+        Assert.Contains(host.Commands, c => c.Contains("find /data", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_delete_stopped_before_the_rm_keeps_file_and_record_and_one_stopped_after_it_removes_both()
+    {
+        var host = new ScriptedHost(c => c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok());
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+        var backup = await service.BackupVolumeAsync("pgdata", "db", "local");
+        host.Commands.Clear();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.DeleteBackupAsync(backup.BackupId, new CancellationToken(canceled: true)));
+        Assert.Empty(host.Commands);
+        Assert.Single(await service.ListBackupsAsync("local", "pgdata"));
+
+        using var stop = new CancellationTokenSource();
+        var stopping = new ScriptedHost(c =>
+        {
+            if (c.StartsWith("rm -f", StringComparison.Ordinal)) stop.Cancel();
+            return Ok();
+        });
+        var deleting = new VolumeBackupService(stopping, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+        await deleting.DeleteBackupAsync(backup.BackupId, stop.Token);
+        Assert.Empty(await service.ListBackupsAsync("local", "pgdata"));
+    }
+
     [Fact]
     public void Archive_names_stay_valid_and_differ_within_one_second()
     {

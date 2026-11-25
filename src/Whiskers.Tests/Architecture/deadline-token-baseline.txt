@@ -10,18 +10,6 @@ Components/Pages/CloudView.razor|Act|cloud.power_on|1
 Components/Pages/CloudView.razor|Act|cloud.reboot|1
 Components/Pages/CloudView.razor|Act|cloud.shutdown|1
 Components/Pages/CloudView.razor|Act|cloud.snapshot_create|1
-Components/Pages/ContainerDatabasePanel.razor|BackupDatabase|db.backup|1
-Components/Pages/ContainerDatabasePanel.razor|ExecInContainerViaHost|*|1
-Components/Pages/ContainerDatabasePanel.razor|ExecuteQuery|db.query|1
-Components/Pages/ContainerDetail.razor|Remove|container.remove|1
-Components/Pages/ContainerDetail.razor|Restart|container.restart|1
-Components/Pages/ContainerDetail.razor|Start|container.start|1
-Components/Pages/ContainerDetail.razor|Stop|container.stop|1
-Components/Pages/Dashboard.razor|RemoveContainer|container.remove|1
-Components/Pages/Dashboard.razor|RestartContainer|container.restart|1
-Components/Pages/Dashboard.razor|RollbackContainer|container.rollback|1
-Components/Pages/Dashboard.razor|StartContainer|container.start|1
-Components/Pages/Dashboard.razor|StopContainer|container.stop|1
 Components/Pages/Firewall.razor|DeleteRule|firewall.rule_remove|1
 Components/Pages/Firewall.razor|ToggleFirewall|firewall.set_status|1
 Components/Pages/GitDeployView.razor|AdoptApp|gitdeploy.save|1
@@ -33,8 +21,6 @@ Components/Pages/GuardrailsView.razor|SaveAll|guardrails.save|1
 Components/Pages/LogSearchView.razor|CreateRule|logalert.create|1
 Components/Pages/LogSearchView.razor|DeleteRule|logalert.delete|1
 Components/Pages/LogSearchView.razor|ToggleRule|logalert.toggle|1
-Components/Pages/Networks.razor|CreateNetwork|network.create|1
-Components/Pages/Networks.razor|DeleteNetwork|network.remove|1
 Components/Pages/NginxManager.razor|ReloadNginx|nginx.reload|1
 Components/Pages/NginxManager.razor|SaveConfig|nginx.update|1
 Components/Pages/NginxManager.razor|ToggleSite|nginx.site_disable|1
@@ -82,9 +68,6 @@ Components/Pages/Settings.razor|SaveWhitelist|config.whitelist|1
 Components/Pages/SslCerts.razor|RenewAll|ssl.renew|1
 Components/Pages/SslCerts.razor|RenewCert|ssl.renew|1
 Components/Pages/SystemdManager.razor|ManageService|systemd.manage|3
-Components/Pages/VolumeBackupsView.razor|CreateBackup|volume.backup|1
-Components/Pages/VolumeBackupsView.razor|DeleteBackup|volume.backup_delete|1
-Components/Pages/VolumeBackupsView.razor|RestoreBackup|volume.restore|1
 Components/Pages/WebhooksView.razor|AdoptWebhook|webhook.save|1
 Components/Pages/WebhooksView.razor|CreateWebhook|webhook.save|1
 Components/Pages/WebhooksView.razor|DeleteWebhook|webhook.delete|1

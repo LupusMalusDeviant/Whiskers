@@ -183,10 +183,10 @@ else
             var driver = LanDrivers.Normalize(_newNetworkDriver);
             string? decidedServer = null;
             var id = await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
-                async (ResolvedNew n, CancellationToken _) =>
+                async (ResolvedNew n, CancellationToken ct) =>
                 {
                     decidedServer = n.ServerId;
-                    var created = await DockerService.CreateNetworkAsync(name, driver, n.ServerId);
+                    var created = await DockerService.CreateNetworkAsync(name, driver, n.ServerId, ct);
                     // The created network is part of the gateway's event (R1-21).
                     MutationScope.Note($"Network {created}");
                     return created;
@@ -222,7 +222,7 @@ else
         try
         {
             await Mutations.RunAsync("network.remove", new { networkId = network.Id, name = network.Name, serverId = sid },
-                (ResolvedNetwork n, CancellationToken _) => DockerService.RemoveNetworkAsync(n.Id, n.ServerId));
+                (ResolvedNetwork n, CancellationToken ct) => DockerService.RemoveNetworkAsync(n.Id, n.ServerId, ct));
             Snackbar.Add(L["Networks_Snackbar_Deleted", network.Name].Value, Severity.Success);
             await LoadNetworks();
         }

@@ -59,7 +59,8 @@ public class DatabaseService : IDatabaseService
         _ => null,
     };
 
-    public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default)
     {
         Withhold(creds);
         var sw = Stopwatch.StartNew();
@@ -77,6 +78,9 @@ public class DatabaseService : IDatabaseService
         if (dbType == DatabaseType.Neo4j && (query ?? "").TrimStart().StartsWith('-'))
             return new QueryResult { Error = "A Cypher statement cannot start with '-'.", DurationMs = sw.Elapsed.TotalMilliseconds };
         var cmd = redisArgs != null ? new[] { "redis-cli" }.Concat(redisArgs).ToArray() : BuildQueryCommand(dbType, creds, query);
+        // Contract 0023, the safe point: nothing has run yet. The statement, once sent, runs to its end (a query cancelled
+        // half-way leaves the database in whatever state the client left it).
+        ct.ThrowIfCancellationRequested();
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30), dbType, creds);
         sw.Stop();
 
@@ -227,7 +231,8 @@ public class DatabaseService : IDatabaseService
         return columns;
     }
 
-    public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null)
+    public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null,
+        CancellationToken ct = default)
     {
         Withhold(creds);
         // INV-19: the name is an operand of pg_dump / mysqldump / mongodump (a leading '-' would be an option such as
@@ -252,6 +257,9 @@ public class DatabaseService : IDatabaseService
         if (cmd.Length == 0)
             return (false, "", 0, $"Backup is not supported for {dbType}.");
 
+        // Contract 0023, the safe point: nothing has been written yet. Dump, copy to the host and the clean-up of the
+        // in-container file are one step: a dump cut off after the dump would leave its file in the container.
+        ct.ThrowIfCancellationRequested();
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromMinutes(5), dbType, creds);
 
         if (exitCode != 0)

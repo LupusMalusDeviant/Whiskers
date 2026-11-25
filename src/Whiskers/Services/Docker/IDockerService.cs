@@ -44,12 +44,30 @@ public interface IDockerService
     [MutatingOperation("container.restart")]
     Task RestartContainerAsync([MutationTarget] string containerId, string? serverId = null);
 
+    // Contract 0023 (batches): the gateway action's token. Each of these is one Docker API call, so the token is
+    // observed once before it (the safe point) and the call then runs to its end: a start, stop or restart cancelled
+    // half-way leaves the container in a state nobody chose.
+    [MutatingOperation("container.start")]
+    Task StartContainerAsync([MutationTarget] string containerId, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return StartContainerAsync(containerId, serverId); }
+    [MutatingOperation("container.stop")]
+    Task StopContainerAsync([MutationTarget] string containerId, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return StopContainerAsync(containerId, serverId); }
+    [MutatingOperation("container.restart")]
+    Task RestartContainerAsync([MutationTarget] string containerId, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return RestartContainerAsync(containerId, serverId); }
+
     /// <summary>Contract 0006: <c>docker update --restart=no</c> — the first half of stopping a container whose exposure
     /// was not decided; composed only by the compose paths that may stop what their run created.</summary>
     [MutatingOperation("container.disable_restart")]
     Task DisableRestartAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.remove")]
     Task RemoveContainerAsync([MutationTarget] string containerId, bool force = false, string? serverId = null);
+    /// <summary>Contract 0023: the remove with the action's token, observed once before the call (one Docker API call,
+    /// run to its end).</summary>
+    [MutatingOperation("container.remove")]
+    Task RemoveContainerAsync([MutationTarget] string containerId, bool force, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return RemoveContainerAsync(containerId, force, serverId); }
     Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default);
 
     /// <summary>R1-41: the log read with a server <paramref name="deadline"/> (bounds the request and the waits for a client
@@ -138,6 +156,14 @@ public interface IDockerService
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);
     [MutatingOperation("network.remove")]
     Task RemoveNetworkAsync([MutationTarget] string networkId, string? serverId = null);
+    // Contract 0023: the network create and remove with the action's token, observed once before the one Docker API
+    // call, which then runs to its end.
+    [MutatingOperation("network.create")]
+    Task<string> CreateNetworkAsync(string name, string driver, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return CreateNetworkAsync(name, driver, serverId); }
+    [MutatingOperation("network.remove")]
+    Task RemoveNetworkAsync([MutationTarget] string networkId, string? serverId, CancellationToken ct)
+    { ct.ThrowIfCancellationRequested(); return RemoveNetworkAsync(networkId, serverId); }
     [MutatingOperation("network.connect")]
     Task ConnectContainerToNetworkAsync([MutationTarget] string networkId, string containerId, string? serverId = null);
     [MutatingOperation("network.disconnect")]

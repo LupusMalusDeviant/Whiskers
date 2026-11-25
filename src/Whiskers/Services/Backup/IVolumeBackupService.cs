@@ -9,13 +9,14 @@ namespace Whiskers.Services.Backup;
 public interface IVolumeBackupService
 {
     [MutatingOperation("volume.backup")]
-    Task<VolumeBackupEntity> BackupVolumeAsync([MutationTarget] string volumeName, string containerName, string? serverId = null, string? notes = null);
+    Task<VolumeBackupEntity> BackupVolumeAsync([MutationTarget] string volumeName, string containerName, string? serverId = null, string? notes = null,
+        CancellationToken ct = default);
     [MutatingOperation("volume.restore")]
-    Task RestoreVolumeAsync([MutationTarget] string backupId, string? targetVolume = null);
+    Task RestoreVolumeAsync([MutationTarget] string backupId, string? targetVolume = null, CancellationToken ct = default);
     [Whiskers.Services.Mutations.InventoryLookup]
     Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default);
     [MutatingOperation("volume.backup_delete")]
-    Task DeleteBackupAsync([MutationTarget] string backupId);
+    Task DeleteBackupAsync([MutationTarget] string backupId, CancellationToken ct = default);
     /// <summary>INV-40: the caller's token (a read tool's) reaches the <c>docker volume ls</c> on the host.</summary>
     Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default);
 

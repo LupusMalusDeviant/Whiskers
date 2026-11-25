@@ -43,7 +43,8 @@ public class VolumeBackupService : IVolumeBackupService
         _backupDir = (dataPaths ?? DataPathOptions.Default).BackupsDir;
     }
 
-    public async Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
+    public async Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null,
+        CancellationToken ct = default)
     {
         var sid = OmittedServer.For<IVolumeBackupService>(serverId);   // the declared fallback the scope guard resolves too
         ValidateName(volumeName, "volume name");
@@ -51,8 +52,12 @@ public class VolumeBackupService : IVolumeBackupService
         // overwrite the first's archive and the deletion of either remove the other's file.
         var fileName = NewFileName(volumeName, DateTime.UtcNow);
 
+        // Contract 0023, the safe points: before the directory and before the archive. Once the archive is being written,
+        // archive, size and record are one step (an archive without its record is removed below), so it runs to its end.
+        ct.ThrowIfCancellationRequested();
         // Ensure backup directory exists
         await _executor.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_backupDir)}", TimeSpan.FromSeconds(5));
+        ct.ThrowIfCancellationRequested();
 
         VolumeBackupEntity entity;
         try
@@ -119,13 +124,16 @@ public class VolumeBackupService : IVolumeBackupService
     internal static string NewFileName(string volumeName, DateTime utcNow)
         => $"{volumeName}_{utcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..8]}.tar.gz";
 
-    public async Task RestoreVolumeAsync(string backupId, string? targetVolume = null)
+    public async Task RestoreVolumeAsync(string backupId, string? targetVolume = null, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var backup = await db.VolumeBackups.FirstOrDefaultAsync(b => b.BackupId == backupId)
+        var backup = await db.VolumeBackups.FirstOrDefaultAsync(b => b.BackupId == backupId, ct)
             ?? throw new Exception($"Backup '{backupId}' not found.");
 
+        // Contract 0023, the safe points: before the check of the archive (a read, which the token may also stop), before
+        // the safety backup (which has safe points of its own) and before the wipe. Wipe and extract are one step that
+        // must not be cut in half, so it runs to its end.
         var volume = targetVolume ?? backup.VolumeName;
         ValidateName(volume, "volume name");
         ValidateName(backup.FileName, "backup file name");
@@ -138,14 +146,19 @@ public class VolumeBackupService : IVolumeBackupService
         //    destroy the volume with nothing to restore.
         var verify = await _executor.ExecuteAsync(backup.ServerId,
             $"docker run --rm -v {quotedBackupRo}:ro {BackupImage} tar tzf {quotedFile} > /dev/null 2>&1",
-            TimeSpan.FromMinutes(5));
+            TimeSpan.FromMinutes(5), ct);
+        ct.ThrowIfCancellationRequested();
         if (!verify.Success)
             throw new Exception($"Restore aborted: backup archive '{backup.FileName}' is missing or unreadable — the target volume was left untouched.");
 
         // 2. Take an automatic safety backup of the current volume state so the wipe is reversible.
         try
         {
-            await BackupVolumeAsync(volume, "", backup.ServerId, $"pre-restore safety ({backup.FileName})");
+            await BackupVolumeAsync(volume, "", backup.ServerId, $"pre-restore safety ({backup.FileName})", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;   // stopped at one of the safety backup's safe points: the target volume was left untouched
         }
         catch (Exception ex)
         {
@@ -155,6 +168,7 @@ public class VolumeBackupService : IVolumeBackupService
         // 3. Clear the volume (including dotfiles, which `rm -rf /data/*` would leave behind) and extract.
         //    The inner `sh -c` script is single-quoted for the host shell; the file name is validated above.
         var innerScript = $"find /data -mindepth 1 -delete && tar xzf {quotedFile} -C /data";
+        ct.ThrowIfCancellationRequested();
         var result = await _executor.ExecuteAsync(backup.ServerId,
             $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {quotedBackupRo} {BackupImage} sh -c {ShellUtils.Quote(innerScript)} 2>&1",
             TimeSpan.FromMinutes(10));
@@ -180,15 +194,18 @@ public class VolumeBackupService : IVolumeBackupService
         return await query.OrderByDescending(b => b.CreatedAt).ToListAsync(ct);
     }
 
-    public async Task DeleteBackupAsync(string backupId)
+    public async Task DeleteBackupAsync(string backupId, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        var backup = await db.VolumeBackups.FirstOrDefaultAsync(b => b.BackupId == backupId)
+        var backup = await db.VolumeBackups.FirstOrDefaultAsync(b => b.BackupId == backupId, ct)
             ?? throw new Exception($"Backup '{backupId}' not found.");
 
         // Delete file
         ValidateName(backup.FileName, "backup file name");
+        // Contract 0023, the safe point: nothing removed yet. File and record go together, so once the rm is sent the
+        // deletion runs to its end.
+        ct.ThrowIfCancellationRequested();
         var removed = await _executor.ExecuteAsync(backup.ServerId,
             $"rm -f {ShellUtils.Quote(_backupDir + "/" + backup.FileName)}",
             TimeSpan.FromSeconds(5));

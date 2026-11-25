@@ -512,13 +512,16 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         return await db.UpdateRollbacks.OrderByDescending(r => r.CapturedAt).ToListAsync();
     }
 
-    public async Task<string> RollbackAsync(long rollbackId)
+    public async Task<string> RollbackAsync(long rollbackId, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
-        var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId)
+        var snap = await db.UpdateRollbacks.FirstOrDefaultAsync(r => r.Id == rollbackId, ct)
                    ?? throw new InvalidOperationException("No rollback snapshot found.");
+        // Contract 0023, the safe point: nothing has changed yet. The recreate below (stop, rename, create, start) is one
+        // step that must not be cut in half, so it runs to its end whatever happens to the token.
+        ct.ThrowIfCancellationRequested();
         await _docker.RollbackContainerAsync(snap.ContainerName, snap.OldImageRef, SnapshotConfig(snap), snap.ServerId,
             RollbackProgress(snap));
         // R1-36: the snapshot stays until the gateway verified the rollback (CompleteRollbackAsync).

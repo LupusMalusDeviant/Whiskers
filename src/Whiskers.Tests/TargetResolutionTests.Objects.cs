@@ -398,9 +398,9 @@ public sealed partial class TargetResolutionTests
             });
 
         public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null,
-            string? notes = null) => throw new NotSupportedException();
-        public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
-        public Task DeleteBackupAsync(string backupId) => throw new NotSupportedException();
+            string? notes = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task RestoreVolumeAsync(string backupId, string? targetVolume = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteBackupAsync(string backupId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     }
 

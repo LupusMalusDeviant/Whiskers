@@ -368,6 +368,27 @@ public sealed class AutoRollbackTests : IDisposable
     }
 
     [Fact]
+    public async Task A_manual_rollback_stopped_before_the_recreate_does_not_touch_the_container_and_one_stopped_during_it_runs_to_its_end()
+    {
+        // Contract 0023 (batch 1, safe point): the token is observed once the snapshot is read, never inside the recreate.
+        using var stop = new CancellationTokenSource();
+        _docker.On[nameof(IDockerService.RollbackContainerAsync)] = _ => { stop.Cancel(); return RolledId; };
+        var service = await ServiceAsync(autoRollback: false);
+        await service.CaptureSnapshotAsync(new ContainerInfo { Id = OldId, Name = "web", ServerId = "local" });
+        var snapshot = Assert.Single(await service.GetRollbacksAsync());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.RollbackAsync(snapshot.Id, new CancellationToken(canceled: true)));
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+
+        var message = await service.RollbackAsync(snapshot.Id, stop.Token);
+        Assert.True(stop.IsCancellationRequested);
+        Assert.Contains(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        Assert.Contains("rolled back", message, StringComparison.Ordinal);
+        Assert.Single(await service.GetRollbacksAsync());   // still the way back until the gateway verified it
+    }
+
+    [Fact]
     public async Task An_image_that_was_rolled_back_is_not_tried_again()
     {
         FailingUpdate();
