@@ -451,13 +451,12 @@ public sealed class TrustedScriptTests
     {
         var dir = Path.Combine(Path.GetTempPath(), "ts-store-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
-        var defaults = new GuardrailStore();
         var store = new GuardrailStore(filePath: Path.Combine(dir, "guardrails.json"),
             marker: new InMemoryGuardrailPolicyMarker(), services: audit is null ? null : new TestServices(audit))
         {
             // Per store, so a test widens its own margins without touching the others running in parallel.
-            SwitchOnWriteWait = switchOnWait ?? defaults.SwitchOnWriteWait,
-            AuditWriteWait = auditWait ?? defaults.AuditWriteWait,
+            SwitchOnWriteWait = switchOnWait ?? GuardrailStore.DefaultSwitchOnWriteWait,
+            AuditWriteWait = auditWait ?? GuardrailStore.DefaultAuditWriteWait,
         };
         await store.StartAsync();
         var config = store.Config;

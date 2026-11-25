@@ -544,9 +544,10 @@
         {
             await InvokeAsync(StateHasChanged);
         }
-        catch (ObjectDisposedException)
+        catch (Exception)
         {
-            // The circuit ended while the store changed: nothing to show.
+            // Raised from a store thread (e.g. a background switch-on write): a failed re-render — the circuit ended,
+            // or a render error the circuit reports itself — must never escape an async void handler and end Whiskers.
         }
     }
 

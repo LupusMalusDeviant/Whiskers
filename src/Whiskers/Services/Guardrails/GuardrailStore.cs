@@ -314,7 +314,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         try
         {
             using (var bound = new CancellationTokenSource(MarkerWriteWait))
-                await _marker.EnsureAsync(source, bound.Token).WaitAsync(MarkerWriteWait);
+                await _marker.EnsureAsync(source, bound.Token).WaitAsync(bound.Token);   // one timer: the wait ends and the write is cancelled together
             _markerRecorded = true;
             _markerProblem = null;
         }
@@ -646,14 +646,20 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     }
 
     /// <summary>How long a switch-on waits for the store lock before its write continues in the background.</summary>
-    internal TimeSpan SwitchOnWriteWait { get; init; } = TimeSpan.FromSeconds(2);
+    internal TimeSpan SwitchOnWriteWait { get; init; } = DefaultSwitchOnWriteWait;
+
+    internal static readonly TimeSpan DefaultSwitchOnWriteWait = TimeSpan.FromSeconds(2);
 
     /// <summary>How long a save waits for the audit row of a trusted-script change under the store lock.</summary>
-    internal TimeSpan AuditWriteWait { get; init; } = TimeSpan.FromSeconds(5);
+    internal TimeSpan AuditWriteWait { get; init; } = DefaultAuditWriteWait;
+
+    internal static readonly TimeSpan DefaultAuditWriteWait = TimeSpan.FromSeconds(5);
 
     /// <summary>How long the record of contract 0010 may take before it counts as not written (retried at the next
     /// save or start).</summary>
-    internal TimeSpan MarkerWriteWait { get; init; } = TimeSpan.FromSeconds(30);
+    internal TimeSpan MarkerWriteWait { get; init; } = DefaultMarkerWriteWait;
+
+    internal static readonly TimeSpan DefaultMarkerWriteWait = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
     public bool KillSwitchNotWritten
