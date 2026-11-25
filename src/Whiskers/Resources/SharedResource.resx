@@ -3347,6 +3347,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="GuardrailsView_KillSwitch_NotWritten" xml:space="preserve">
     <value>It is enforced, but not written to guardrails.json yet: an earlier guardrail save still holds the guardrails. A restart now would switch it off.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_OnAgain_Snackbar" xml:space="preserve">
+    <value>Another Admin switched the kill switch on again meanwhile; it stays on.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Enable_Hint" xml:space="preserve">
     <value>Switches the kill switch on at once, without saving the other edits on this page.</value>
   </data>

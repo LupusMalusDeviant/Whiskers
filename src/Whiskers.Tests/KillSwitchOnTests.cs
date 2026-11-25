@@ -206,79 +206,54 @@ public sealed class KillSwitchOnTests : IDisposable
     }
 
     [Fact]
-    public async Task Switching_on_takes_effect_while_a_save_holds_the_store_and_is_written_after_it()
+    public async Task A_slow_record_write_after_a_save_does_not_hold_the_store()
     {
+        // The record (contract 0010) is written after the store lock is released: switching on is written at once.
         var marker = new InMemoryGuardrailPolicyMarker { WriteFails = new InvalidOperationException("db down") };
         var path = Path.Combine(_dir, "guardrails-held.json");
         var store = await new GuardrailStore(filePath: path, marker: marker).StartAsync();
-        Assert.False(store.MarkerRecorded);       // so the next save writes the record, under the store's lock
+        Assert.False(store.MarkerRecorded);       // so the next save writes the record
         marker.WriteFails = null;
         var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         marker.HoldWrites = hold;
 
-        var stale = store.Config;
-        stale.ActivePolicy().MaxActionsPerSession = 6;
-        var save = SaveAsync(store, stale);       // hangs on the database while holding the store lock
+        var config = store.Config;
+        config.ActivePolicy().MaxActionsPerSession = 6;
+        var save = SaveAsync(store, config);      // hangs on the database, after the store lock
         await marker.WriteHeld.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        using (var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(300)))
-            await GatewayArrange.RunAsync("guardrails.kill_switch_on",
-                () => store.EnableKillSwitchAsync(Admin, deadline.Token));
+        await OnAsync(store).WaitAsync(TimeSpan.FromSeconds(10));
 
-        Assert.True(store.Current.ReadOnlyMode);  // enforced at once, not after the save
-        Assert.True(store.Config.ActivePolicy().ReadOnlyMode);
         Assert.False(save.IsCompleted);
-        // …but not stored yet: said so, and not verified as stored (a restart now would lose it).
-        Assert.True(store.KillSwitchNotWritten);
+        Assert.True(store.Current.ReadOnlyMode);
+        Assert.False(store.KillSwitchNotWritten);
+        Assert.Equal(6, store.Current.MaxActionsPerSession);
+        Assert.True((await new GuardrailStore(filePath: path).StartAsync()).Current.ReadOnlyMode);
         var services = new ServiceCollection().AddSingleton<IGuardrailStore>(store).BuildServiceProvider();
-        await Assert.ThrowsAsync<MutationNotVerifiableException>(() =>
-            new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
+        Assert.Equal(VerificationStatus.Verified, await new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
 
         marker.HoldWrites = null;
         hold.SetResult();
         await save;
-        Assert.True(store.Current.ReadOnlyMode);
-        Assert.Equal(6, store.Current.MaxActionsPerSession);
-
-        // The background write follows once the lock is free.
-        var deadlineAt = DateTime.UtcNow.AddSeconds(10);
-        bool written;
-        do
-        {
-            written = (await new GuardrailStore(filePath: path).StartAsync()).Current.ReadOnlyMode;
-            if (!written) await Task.Delay(50);
-        }
-        while (!written && DateTime.UtcNow < deadlineAt);
-        Assert.True(written);
-        Assert.False(store.KillSwitchNotWritten);
-        Assert.Equal(VerificationStatus.Verified, await new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
+        Assert.True(store.MarkerRecorded);
     }
 
     [Fact]
-    public async Task Switching_off_while_a_switch_on_is_pending_releases_it_and_the_pending_write_does_not_return()
+    public async Task A_switch_on_that_cannot_be_written_fails_and_stays_enforced_and_reported()
     {
-        var marker = new InMemoryGuardrailPolicyMarker { WriteFails = new InvalidOperationException("db down") };
-        var path = Path.Combine(_dir, "guardrails-pending.json");
-        var store = await new GuardrailStore(filePath: path, marker: marker).StartAsync();
-        marker.WriteFails = null;
-        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        marker.HoldWrites = hold;
-        var save = SaveAsync(store, store.Config);
-        await marker.WriteHeld.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        using (var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
-            await GatewayArrange.RunAsync("guardrails.kill_switch_on",
-                () => store.EnableKillSwitchAsync(Admin, deadline.Token));
-        Assert.True(store.Current.ReadOnlyMode);
+        var path = Path.Combine(_dir, "guardrails-io.json");
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(path).StartAsync();
+        // The file cannot be written: a directory sits where it belongs (on every platform).
+        File.Delete(path);
+        Directory.CreateDirectory(path);
 
-        var off = OffAsync(store);                // waits for the store lock like the pending write
-        marker.HoldWrites = null;
-        hold.SetResult();
-        await save;
-        await off;
+        await Assert.ThrowsAnyAsync<Exception>(() => OnAsync(store));
 
-        await Task.Delay(200);                    // room for the background write, which must find nothing to do
-        Assert.False(store.Current.ReadOnlyMode);
-        Assert.False((await new GuardrailStore(filePath: path).StartAsync()).Current.ReadOnlyMode);
+        Assert.True(store.Current.ReadOnlyMode);  // the brake is on in memory: the safe side
+        Assert.True(store.KillSwitchNotWritten);  // and said so
+        var services = new ServiceCollection().AddSingleton<IGuardrailStore>(store).BuildServiceProvider();
+        await Assert.ThrowsAsync<MutationNotVerifiableException>(() =>
+            new KillSwitchOnVerifier(services).VerifyAsync(null!, null, default));
     }
 
     private string StorePath(GuardrailStore _) =>

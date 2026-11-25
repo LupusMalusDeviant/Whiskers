@@ -418,9 +418,19 @@ public sealed class TrustedScriptTests
             return Task.CompletedTask;
         }
 
+        /// <summary>While set, a write waits for it (a slow database under the store's lock).</summary>
+        public TaskCompletionSource? Hold { get; set; }
+
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType,
             string targetId, string targetName, string? details = null, string? serverId = null, bool success = true)
         {
+            if (Hold is { } hold)
+            {
+                Entered.TrySetResult();
+                await hold.Task;
+            }
             if (!works) return false;
             await LogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
             return true;
@@ -436,12 +446,18 @@ public sealed class TrustedScriptTests
         Whiskers.Models.Agent.AgentPrincipalKind.WebUser, "admin@x", Whiskers.Models.McpPermissionLevels.Admin, null,
         UserEmail: "admin@x");
 
-    private static async Task<(GuardrailStore Store, string Dir)> StoreAsync(RecordingAudit? audit, bool secondApprover)
+    private static async Task<(GuardrailStore Store, string Dir)> StoreAsync(RecordingAudit? audit, bool secondApprover,
+        TimeSpan? switchOnWait = null, TimeSpan? auditWait = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), "ts-store-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
-        var store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(dir, "guardrails.json"),
-            audit is null ? null : new TestServices(audit));
+        var store = new GuardrailStore(filePath: Path.Combine(dir, "guardrails.json"),
+            marker: new InMemoryGuardrailPolicyMarker(), services: audit is null ? null : new TestServices(audit))
+        {
+            // Per store, so a test widens its own margins without touching the others running in parallel.
+            SwitchOnWriteWait = switchOnWait ?? GuardrailStore.DefaultSwitchOnWriteWait,
+            AuditWriteWait = auditWait ?? GuardrailStore.DefaultAuditWriteWait,
+        };
         await store.StartAsync();
         var config = store.Config;
         config.Presets[0].Policy.RequireSecondApprover = secondApprover;
@@ -478,6 +494,99 @@ public sealed class TrustedScriptTests
             Assert.Contains(audit.Entries, e => e.Details == $"removed Standard | local | {Dump} |  | {Approved}");
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task An_audit_row_that_takes_too_long_saves_nothing_and_frees_the_store()
+    {
+        // Contract 0023 (D8): the audit write under the store lock is bounded.
+        var audit = new RecordingAudit { Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var (store, dir) = await StoreAsync(audit, secondApprover: false, auditWait: TimeSpan.FromMilliseconds(200));
+        try
+        {
+            var next = Adding(store);
+            var started = DateTime.UtcNow;
+            var ex = await Assert.ThrowsAsync<GuardrailConfigException>(() =>
+                store.SaveConfigAsync(next, StoreAdmin, TrustedScripts.Additions(store.Config, next)));
+            Assert.Equal(GuardrailConfigProblemKind.TrustedScriptsAuditFailed, ex.Problem.Kind);
+            Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(30));
+            Assert.Null(store.Current.TrustedScripts);
+            audit.Hold.SetResult();
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task A_switch_on_while_an_audit_row_holds_the_store_is_enforced_at_once_and_written_after_it()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: false,
+            switchOnWait: TimeSpan.FromMilliseconds(50), auditWait: TimeSpan.FromMinutes(2));
+        try
+        {
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            audit.Hold = hold;
+            var next = Adding(store);
+            var save = store.SaveConfigAsync(next, StoreAdmin, TrustedScripts.Additions(store.Config, next));
+            await audit.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Waits briefly for the store, then continues the write in the background.
+            await GatewayArrange.RunAsync("guardrails.kill_switch_on", () => store.EnableKillSwitchAsync(StoreAdmin))
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(store.Current.ReadOnlyMode);
+            Assert.True(store.KillSwitchNotWritten);
+            Assert.False(save.IsCompleted);
+
+            audit.Hold = null;
+            hold.SetResult();
+            await save;
+            await WaitUntilAsync(() => !store.KillSwitchNotWritten);
+            Assert.True(store.Current.ReadOnlyMode);
+            Assert.NotNull(store.Current.TrustedScripts);
+            var reloaded = new GuardrailStore(filePath: Path.Combine(dir, "guardrails.json"));
+            await reloaded.InitializeAsync();
+            Assert.True(reloaded.Current.ReadOnlyMode);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task Switching_off_while_a_switch_on_waits_for_the_store_releases_it_for_good()
+    {
+        var audit = new RecordingAudit();
+        var (store, dir) = await StoreAsync(audit, secondApprover: false,
+            switchOnWait: TimeSpan.FromMilliseconds(50), auditWait: TimeSpan.FromMinutes(2));
+        try
+        {
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            audit.Hold = hold;
+            var next = Adding(store);
+            var save = store.SaveConfigAsync(next, StoreAdmin, TrustedScripts.Additions(store.Config, next));
+            await audit.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await GatewayArrange.RunAsync("guardrails.kill_switch_on", () => store.EnableKillSwitchAsync(StoreAdmin));
+            Assert.True(store.KillSwitchNotWritten);
+
+            // Waits for the store like the pending write; whichever runs first, off is the later change.
+            var off = GatewayArrange.RunAsync("guardrails.kill_switch_off", () => store.DisableKillSwitchAsync(StoreAdmin));
+            audit.Hold = null;
+            hold.SetResult();
+            await save;
+            await off;
+            await WaitUntilAsync(() => !store.KillSwitchNotWritten);
+
+            Assert.False(store.Current.ReadOnlyMode);
+            var reloaded = new GuardrailStore(filePath: Path.Combine(dir, "guardrails.json"));
+            await reloaded.InitializeAsync();
+            Assert.False(reloaded.Current.ReadOnlyMode);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (!condition() && DateTime.UtcNow < until) await Task.Delay(25);
+        Assert.True(condition());
     }
 
     [Fact]

@@ -3347,6 +3347,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="GuardrailsView_KillSwitch_NotWritten" xml:space="preserve">
     <value>Er wirkt, ist aber noch nicht in guardrails.json geschrieben: ein früheres Speichern der Guardrails hält sie noch fest. Ein Neustart jetzt würde ihn ausschalten.</value>
   </data>
+  <data name="GuardrailsView_KillSwitch_OnAgain_Snackbar" xml:space="preserve">
+    <value>Ein anderer Admin hat den Kill-Switch inzwischen wieder eingeschaltet; er bleibt an.</value>
+  </data>
   <data name="GuardrailsView_KillSwitch_Enable_Hint" xml:space="preserve">
     <value>Schaltet den Kill-Switch sofort ein, ohne die übrigen Änderungen auf dieser Seite zu speichern.</value>
   </data>

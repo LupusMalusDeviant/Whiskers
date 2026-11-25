@@ -313,7 +313,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
         try
         {
-            await _marker.EnsureAsync(source, CancellationToken.None);
+            using (var bound = new CancellationTokenSource(MarkerWriteWait))
+                await _marker.EnsureAsync(source, bound.Token).WaitAsync(bound.Token);   // one timer: the wait ends and the write is cancelled together
             _markerRecorded = true;
             _markerProblem = null;
         }
@@ -482,7 +483,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             var before = _state;
             await GuardTrustedScriptsAsync(next, editor, expectedTrustedAdditions);
             await CommitSaveLockedAsync(next, started, editor);   // throws → the previous policy stays live
-            await AfterSavedAsync();
+            AfterSavedLocked();
             RecordChange(before, next);
             _logger?.LogWarning("Guardrails changed by {Editor} ({Count} presets, active={Active}).",
                 Whiskers.Utils.LogSafe.Value(editor.DisplayName), next.Presets.Count, next.ActivePreset);
@@ -493,6 +494,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
 
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     public async Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default)
@@ -517,7 +519,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             await GuardTrustedScriptsAsync(next, editor, null);
             // D8: a policy carries no stamp, so this save always keeps the stored kill switch.
             await CommitSaveLockedAsync(next, Unstamped, editor);
-            await AfterSavedAsync();
+            AfterSavedLocked();
             RecordChange(state, next);
         }
         finally
@@ -526,15 +528,36 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
 
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
-    /// <summary>A successful save wrote a policy file: the record is ensured if it is not confirmed yet (D3 c).</summary>
-    private async Task AfterSavedAsync()
+    /// <summary>A successful save wrote a policy file (under the store lock).</summary>
+    private void AfterSavedLocked()
     {
         _undecided = false;
         _fileAtLoad = true;
-        if (!_markerRecorded) await TryEnsureMarkerAsync(GuardrailPolicyMarkerSources.Backfill);
     }
+
+    /// <summary>Contract 0010 D3 c: after a successful save the record is ensured if it is not confirmed yet — after the
+    /// store lock is released, so a slow database never holds the store (contract 0023 D8: switching on must not wait
+    /// behind it). The record write is idempotent; a concurrent duplicate counts as success.</summary>
+    private async Task EnsureMarkerAfterSaveAsync()
+    {
+        if (_markerRecorded) return;
+        // One record write at a time: while one is under way (possibly stuck on the database), a later save does not
+        // wait for it nor start another — the next save or start retries if it fails.
+        if (Interlocked.CompareExchange(ref _markerWriting, 1, 0) != 0) return;
+        try
+        {
+            if (!_markerRecorded) await TryEnsureMarkerAsync(GuardrailPolicyMarkerSources.Backfill);
+        }
+        finally
+        {
+            Volatile.Write(ref _markerWriting, 0);
+        }
+    }
+
+    private int _markerWriting;
 
     /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until a valid <c>guardrails.json</c> is put back on the
     /// host (repaired, or restored from a backup) or <c>--reset-guardrails</c> is run there, and Whiskers restarted
@@ -623,7 +646,20 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     }
 
     /// <summary>How long a switch-on waits for the store lock before its write continues in the background.</summary>
-    internal static TimeSpan SwitchOnWriteWait { get; set; } = TimeSpan.FromSeconds(2);
+    internal TimeSpan SwitchOnWriteWait { get; init; } = DefaultSwitchOnWriteWait;
+
+    internal static readonly TimeSpan DefaultSwitchOnWriteWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a save waits for the audit row of a trusted-script change under the store lock.</summary>
+    internal TimeSpan AuditWriteWait { get; init; } = DefaultAuditWriteWait;
+
+    internal static readonly TimeSpan DefaultAuditWriteWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long the record of contract 0010 may take before it counts as not written (retried at the next
+    /// save or start).</summary>
+    internal TimeSpan MarkerWriteWait { get; init; } = DefaultMarkerWriteWait;
+
+    internal static readonly TimeSpan DefaultMarkerWriteWait = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
     public bool KillSwitchNotWritten
@@ -653,7 +689,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 _state = new State(next, null);
                 _pendingOn = null;
             }
-            await AfterSavedAsync();
+            AfterSavedLocked();
             RecordChange(before, next);
         }
         finally
@@ -662,6 +698,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
 
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     /// <summary>R1-11 and contract 0023 (D8): switching on (<see cref="SwitchOnAsync"/>) or off changes only
@@ -715,7 +752,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                     _killSwitchVersion++;
                 }
             }
-            await AfterSavedAsync();
+            AfterSavedLocked();
             RecordChange(before, next);   // what this call wrote, also when a later switch-on overtook it
             if (overtaken)
                 _logger?.LogWarning("Kill switch was switched on again while {Editor} switched it off; it stays on.",
@@ -730,6 +767,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
 
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     /// <summary>
@@ -821,9 +859,18 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         {
             try
             {
+                // Under the store lock: bounded, so a slow database holds the store for seconds, not for the save's
+                // deadline (contract 0023 D8). Too slow counts as not written and nothing is saved (0022 A5); the
+                // row may still land later — an audit row for a change that was refused, the safe side.
                 written = await audit.TryLogAsync(
                     Whiskers.Services.AuditLog.AuditPrincipals.Person(editor.UserEmail, editor.DisplayName),
-                    TrustedScriptsAuditAction, "guardrails", "trusted-scripts", "trusted scripts", details);
+                    TrustedScriptsAuditAction, "guardrails", "trusted-scripts", "trusted scripts", details)
+                    .WaitAsync(AuditWriteWait);
+            }
+            catch (TimeoutException)
+            {
+                _logger?.LogWarning("The audit row of a trusted-script change was not written within {Seconds} s; " +
+                                    "nothing is saved.", AuditWriteWait.TotalSeconds);
             }
             catch (Exception ex)
             {
