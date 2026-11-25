@@ -116,6 +116,24 @@ public sealed class MutationGateway : IMutationGateway
     // A restore is staged (F3): no operation is admitted, and the ones running are counted so the restore waits for
     // them before its safety backup.
     private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
+    // Contract 0023: the shutdown drain a top-level run takes an entry of (point 6), the abandoned runs and their target
+    // guard (4b), and the grace period G after the deadline.
+    private readonly IShutdownDrain? _drain;
+    private readonly IAbandonedRuns? _abandoned;
+    private readonly TimeSpan _grace;
+
+    /// <summary>Contract 0023 (4b): the two capabilities the target guard never refuses — the brake must always be
+    /// reachable, also while a <c>guardrails.save</c> is abandoned.</summary>
+    internal static readonly IReadOnlySet<string> KillSwitchToggles =
+        new HashSet<string>(StringComparer.Ordinal) { "guardrails.kill_switch_on", "guardrails.kill_switch_off" };
+
+    /// <summary>Contract 0023 (point 6): the reason of a top-level mutation asked for once Whiskers has begun to stop.</summary>
+    public const string ShuttingDownRefusal = "Whiskers is stopping; the change was not made. Retry after the restart.";
+
+    /// <summary>Contract 0023 (4b): the reason of a mutation whose target an abandoned run still holds.</summary>
+    public const string TargetBusyRefusal =
+        "An earlier run on this target ran past its deadline and is still running; nothing ran. Fix the host, or " +
+        "restart Whiskers to clear it.";
 
     /// <summary>The reason of every mutation refused while a restore is staged. Not written to the audit trail: the
     /// database it would land in is replaced at the restart, after the pre-restore safety backup; it is logged.</summary>
@@ -151,9 +169,16 @@ public sealed class MutationGateway : IMutationGateway
         ITriggerAuthority? triggers = null,
         IOperationJournal? journal = null,
         IAuditRecovery? recovery = null,
-        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null)
+        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null,
+        IShutdownDrain? drain = null,
+        IAbandonedRuns? abandoned = null,
+        Microsoft.Extensions.Options.IOptions<MutationGatewayOptions>? options = null)
     {
         _maintenance = maintenance;
+        _drain = drain;
+        _abandoned = abandoned;
+        _grace = options?.Value.AbandonGrace ?? new MutationGatewayOptions().AbandonGrace;
+        if (_grace < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(options), "The grace period cannot be negative.");
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
@@ -178,9 +203,8 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentNullException.ThrowIfNull(request.Principal);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         var operationId = string.IsNullOrWhiteSpace(request.OperationId) ? Guid.NewGuid().ToString("N") : request.OperationId;
-        request = request with { OperationId = operationId };
-        if (MutationScope.Current is { } enclosing)
-            request = request with { ParentOperationId = enclosing.OperationId };
+        // The parent link comes from the enclosing scope only; a caller's own is never kept (contract 0023, 4b).
+        request = request with { OperationId = operationId, ParentOperationId = MutationScope.Current?.OperationId };
         var capability = _catalog.Find(request.CapabilityId);
         // The refusal names the same canonical target as the action's other outcomes would (INV-57); when the target
         // cannot be resolved the refusal stands with the target as named.
@@ -275,10 +299,10 @@ public sealed class MutationGateway : IMutationGateway
         // A call without an operation id of its own gets a fresh one — or, retrying an approval, the one that raised it.
         var callerOperationId = string.IsNullOrWhiteSpace(request.OperationId) ? null : request.OperationId;
         var operationId = callerOperationId ?? Guid.NewGuid().ToString("N");
-        request = request with { OperationId = operationId };
-        // R1-18: a mutation nested in another one's execution keeps the link to it; its own id stays its own.
-        if (MutationScope.Current is { } enclosing)
-            request = request with { ParentOperationId = enclosing.OperationId };
+        // R1-18: a mutation nested in another one's execution keeps the link to it; its own id stays its own. Contract
+        // 0023 (4b): the link comes from the enclosing open scope only — a ParentOperationId the caller supplied is
+        // cleared, so no caller can claim to be nested in a run it is not part of.
+        request = request with { OperationId = operationId, ParentOperationId = MutationScope.Current?.OperationId };
         // INV-23: a mutation nested in a pinned run's mutation (a scheduled task an AI trigger runs) is decided
         // against the run's preset too; the global kill switch still reaches it (EffectivePolicy).
         if (request.PinnedPolicy is null && MutationScope.Current?.PinnedPolicy is { } inherited)
@@ -395,6 +419,33 @@ public sealed class MutationGateway : IMutationGateway
             request = request with { Target = resolution.Target };
             resolvedObject = resolution.Object;
             progress.Request = request;
+        }
+
+        // Contract 0023 (4b): while an abandoned run still holds an overlapping target, nothing else acts on it — for
+        // every principal, under the emergency stop too, whatever its operation id. Only the run's own nested calls (in
+        // its open scope chain, never a ParentOperationId a caller supplied) and the two kill-switch toggles pass.
+        if (_abandoned is not null && !KillSwitchToggles.Contains(capability.Id))
+        {
+            AbandonedRun? busy;
+            try
+            {
+                busy = _abandoned.Overlapping(request.Target, MutationScope.OpenOperationIds());
+            }
+            catch (Exception ex)
+            {
+                // Not knowing is refused, like any other step that cannot answer.
+                _logger.LogWarning(ex, "Abandoned runs could not be checked for {Capability} (operation {OperationId})",
+                    capability.Id, operationId);
+                busy = new AbandonedRun("?", "?", request.Target, _time.GetUtcNow(), _time.GetUtcNow());
+            }
+            if (busy is not null)
+            {
+                _logger.LogWarning("{Capability} refused: operation {Abandoned} ({AbandonedCapability}) still runs past its " +
+                                   "deadline on an overlapping target (operation {OperationId})",
+                    capability.Id, busy.OperationId, busy.CapabilityId, operationId);
+                return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
+                    TargetBusyRefusal, ct) with { ReasonCode = MutationReasonCodes.TargetBusy });
+            }
         }
 
         // PC-D6 / PC-D7 (R1-13): an AI trigger writes only what an Admin granted it (capability and every resource it
@@ -562,10 +613,11 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
         ArgumentNullException.ThrowIfNull(execute);
 
+        var enclosing = MutationScope.Current;
         // A restore is staged: nothing is decided, run or written — its audit events would land in the database the
         // restore replaces, after the safety backup. A nested operation runs inside an admitted one and is counted by it.
         IDisposable? admitted = null;
-        if (_maintenance is not null && MutationScope.Current is null)
+        if (_maintenance is not null && enclosing is null)
         {
             admitted = _maintenance.TryEnter($"operation {request.CapabilityId}");
             if (admitted is null)
@@ -577,8 +629,38 @@ public sealed class MutationGateway : IMutationGateway
                     VerificationStatus.NotRun);
             }
         }
-        using var admittedHandle = admitted;
+        var held = new Holdings(admitted);
+        try
+        {
+            // Contract 0023 (point 6): a top-level run takes a shutdown-drain entry here, before anything is decided,
+            // claimed or used; a nested call counts under the outer run's entry. Once stopping has begun the call is
+            // refused, on record (the database is not being replaced), and no approval is used up.
+            if (_drain is not null && enclosing is null)
+            {
+                var entry = _drain.TryEnter($"operation {request.CapabilityId}");
+                if (entry is null)
+                {
+                    _logger.LogWarning("{Capability} refused: Whiskers is stopping", request.CapabilityId);
+                    var refused = await RefuseAsync(request, ShuttingDownRefusal, CancellationToken.None);
+                    return Cast<T>(refused) with { ReasonCode = MutationReasonCodes.ShuttingDown };
+                }
+                held.Add(entry);
+            }
+            return await ExecuteAdmittedAsync(request, execute, enclosing, held, ct);
+        }
+        finally
+        {
+            // Released here unless an abandoned run (or one with an abandoned nested run) took them along to its real
+            // end (contract 0023, 4a and 4d).
+            if (!held.HandedOff) held.Dispose();
+        }
+    }
 
+    /// <summary>The pipeline after the maintenance admission and the drain entry (<paramref name="held"/>).</summary>
+    private async Task<MutationOutcome<T>> ExecuteAdmittedAsync<T>(MutationRequest request,
+        Func<MutationContext, CancellationToken, Task<T>> execute, MutationScope? enclosing, Holdings held,
+        CancellationToken ct)
+    {
         var prepared = await PrepareAsync(request, ct);
         if (prepared.Refusal is { } refusal) return Cast<T>(refusal);
         request = prepared.Request!;
@@ -754,103 +836,123 @@ public sealed class MutationGateway : IMutationGateway
                 ApprovalId: approvalId) { MatchedRules = decision.MatchedRules, DecisionId = request.DecisionId };
         }
 
-        // 6–7: execute inside the scope and under the deadline, then verify.
+        // 6–7: execute inside the scope and under the deadline, then verify. Contract 0023: the caller waits at most the
+        // deadline plus the grace period G; an action still running then is abandoned and goes on in the background,
+        // keeping what protects its target until it really ends.
         var context = new MutationContext(operationId, request, capability) { Target = prepared.Resolved };
         var started = _time.GetTimestamp();
+        var startedAt = _time.GetUtcNow();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        held.CompleteOnRelease(completion);
+        // 4d: the enclosing run keeps what it holds until this one has really ended too.
+        enclosing?.AddNested(operationId, completion.Task);
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        held.Add(deadline);
+        deadline.CancelAfter(capability.Deadline);
+        var run = new ActionRun();
+        held.Add(run);
+        var action = RunActionAsync(run, execute, context, decision, approval, deadline.Token);
+
+        if (!action.IsCompleted)
+        {
+            using var limit = new CancellationTokenSource(capability.Deadline + _grace, _time);
+            try
+            {
+                await action.WaitAsync(limit.Token);
+            }
+            catch
+            {
+                // The wait ran out, or the action failed: both are read below.
+            }
+            // Exactly one ending (point 1): the abandon wins only while the action has not marked its own end.
+            if (!action.IsCompleted && run.TryAbandon())
+                return await AbandonAsync(run, action, held, completion.Task, claim, auditId, request, capability, approval,
+                    started, startedAt);
+        }
+
         MutationOutcome<T> outcome;
-        IReadOnlyList<MutationDomainResult> results = [];
-        using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        T? value = default;
+        Exception? thrown = null;
+        try
         {
-            deadline.CancelAfter(capability.Deadline);
-            try
-            {
-                T value;
-                string? reported;
-                IReadOnlyDictionary<string, string> facts;
-                using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
-                {
-                    // Contract 0006: which rule set decided, for the re-check after a compose run.
-                    scope.SetDecision(decision.AgentRuleSet, decision.ExposureConfirmClasses);
-                    scope.DecidedLevel = capability.RequiredLevel;
-                    // The person whose approval was used for this run (approvers are always people, by email).
-                    if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
-                        scope.ApprovedBy = PrincipalIds.User(approver);
-                    // Contract 0022, amendment 2 (B2): which rules of the decision that approval covered.
-                    if (approval is { Approved: true })
-                        scope.ApprovedRules = new HashSet<string>(decision.MatchedRules, StringComparer.Ordinal);
-                    try
-                    {
-                        value = await execute(context, deadline.Token);
-                    }
-                    finally
-                    {
-                        // What the tool reported belongs to the event also when it then threw.
-                        results = scope.Results;
-                    }
-                    reported = scope.FailureReason;
-                    facts = scope.ReadBackFacts;
-                }
+            value = await action;
+        }
+        catch (Exception ex)
+        {
+            thrown = ex;
+        }
+        // What the tool reported belongs to the event also when it then threw.
+        var results = run.Results;
+        var reported = run.FailureReason;
+        var facts = run.ReadBackFacts;
 
-                if (reported is not null)
-                {
-                    // The delegate returned but reported a failure (MutationScope.Fail): Failed, with its value kept so
-                    // the caller still gets the tool's own answer.
-                    outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, value, reported,
-                        VerificationStatus.NotRun, ApprovalId: approval?.ApprovalId);
-                }
-                else
-                {
-                    var (verification, problem, unknown) = await VerifyAsync(context with { ReadBackFacts = facts }, value, deadline.Token);
-                    var verificationNote = verification == VerificationStatus.NotVerifiable ? problem : null;
-                    // R1-36 (INV-43/44): the call completed, but its effect is not there — never a success. The status
-                    // says Failed, the verification says the call itself ran; the value is withheld so no caller can
-                    // read it as the effect's result.
-                    outcome = verification == VerificationStatus.Failed
-                        ? new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
-                            $"'{capability.Id}' ran, but its effect could not be verified: {problem}", verification,
-                            new MutationVerificationFailedException(
-                                $"'{capability.Id}' ran, but its effect could not be verified: {problem}", unknown),
-                            approval?.ApprovalId)
-                        : new MutationOutcome<T>(operationId, MutationStatus.Executed, value, null, verification,
-                            ApprovalId: approval?.ApprovalId) { VerificationNote = verificationNote };
-                }
-            }
-            // R1-38 (INV-40): a call stopped while it ran never reads as "nothing happened" — it may have changed
-            // something before the cancellation reached it, so the reason says the effect is unknown.
-            catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
+        // 4d: a run nested in this one that is still running gets at most G more; the outcome never claims an effect
+        // while one of them is still at work.
+        var pendingNested = await NestedAfterGraceAsync(run);
+        // Closed before verification as always — unless a nested run still needs its scope chain.
+        if (pendingNested.Count == 0) run.CloseScope();
+
+        if (thrown is not null)
+        {
+            outcome = thrown switch
             {
-                outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
-                    $"'{capability.Id}' exceeded its deadline of {capability.Deadline} and was cancelled; " +
-                    "its effect is unknown — read the current state before retrying.", VerificationStatus.NotRun, ex,
-                    approval?.ApprovalId);
-            }
-            catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+                // R1-38 (INV-40): a call stopped while it ran never reads as "nothing happened" — it may have changed
+                // something before the cancellation reached it, so the reason says the effect is unknown.
+                OperationCanceledException when deadline.IsCancellationRequested && !ct.IsCancellationRequested =>
+                    new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
+                        $"'{capability.Id}' exceeded its deadline of {capability.Deadline} and was cancelled; " +
+                        "its effect is unknown — read the current state before retrying.", VerificationStatus.NotRun, thrown,
+                        approval?.ApprovalId),
+                OperationCanceledException when ct.IsCancellationRequested =>
+                    new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
+                        $"'{capability.Id}' was cancelled while it ran; its effect is unknown — read the current state " +
+                        "before retrying.", VerificationStatus.NotRun, thrown, approval?.ApprovalId),
+                _ => new MutationOutcome<T>(operationId, MutationStatus.Failed, default, thrown.Message,
+                    VerificationStatus.NotRun, thrown, approval?.ApprovalId),
+            };
+        }
+        else if (pendingNested.Count > 0)
+        {
+            // 4d: Failed with NestedAbandoned, the value withheld (as for R1-36), an error the UI runner and the MCP filter
+            // treat before a reported failure — never a half state read as the effect.
+            var reason = $"'{capability.Id}': {NestedAbandonedReason}";
+            outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default, reason, VerificationStatus.NotRun,
+                new MutationAbandonedException(reason, capability.Deadline, pendingNested[0].OperationId),
+                approval?.ApprovalId)
             {
-                outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
-                    $"'{capability.Id}' was cancelled while it ran; its effect is unknown — read the current state " +
-                    "before retrying.", VerificationStatus.NotRun, ex, approval?.ApprovalId);
-            }
-            catch (Exception ex)
-            {
-                outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default, ex.Message,
-                    VerificationStatus.NotRun, ex, approval?.ApprovalId);
-            }
+                ReasonCode = MutationReasonCodes.NestedAbandoned,
+            };
+        }
+        else if (reported is not null)
+        {
+            // The delegate returned but reported a failure (MutationScope.Fail): Failed, with its value kept so the
+            // caller still gets the tool's own answer.
+            outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, value, reported,
+                VerificationStatus.NotRun, ApprovalId: approval?.ApprovalId);
+        }
+        else
+        {
+            // D6: an action that returned after its deadline (within G) is verified with a token of its own, bounded by
+            // G — never with the deadline's, which is already cancelled.
+            using var verifyTime = deadline.IsCancellationRequested ? new CancellationTokenSource(_grace, _time) : null;
+            var (verification, problem, unknown) = await VerifyAsync(context with { ReadBackFacts = facts }, value,
+                verifyTime?.Token ?? deadline.Token);
+            var verificationNote = verification == VerificationStatus.NotVerifiable ? problem : null;
+            // R1-36 (INV-43/44): the call completed, but its effect is not there — never a success. The status says
+            // Failed, the verification says the call itself ran; the value is withheld so no caller can read it as the
+            // effect's result.
+            outcome = verification == VerificationStatus.Failed
+                ? new MutationOutcome<T>(operationId, MutationStatus.Failed, default,
+                    $"'{capability.Id}' ran, but its effect could not be verified: {problem}", verification,
+                    new MutationVerificationFailedException(
+                        $"'{capability.Id}' ran, but its effect could not be verified: {problem}", unknown),
+                    approval?.ApprovalId)
+                : new MutationOutcome<T>(operationId, MutationStatus.Executed, value, null, verification,
+                    ApprovalId: approval?.ApprovalId) { VerificationNote = verificationNote };
         }
 
-        // The claim ends with the outcome. A failed write leaves it Running: after a restart a retry is refused as
-        // "outcome unknown", never run again.
-        if (_journal is not null && claim is not null)
-        {
-            try
-            {
-                await _journal.FinishAsync(operationId, claim, outcome.Status, outcome.Verification, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Operation journal for {Capability} (operation {OperationId}) could not be finished",
-                    capability.Id, operationId);
-            }
-        }
+        if (pendingNested.Count == 0)
+            await FinishJournalAsync(operationId, claim, capability, outcome.Status, outcome.Verification);
 
         // 8: the outcome is recorded even when the caller has gone away (CancellationToken.None). The mutation has
         // already happened at this point, so a failed write must not hide its result from the caller; the intent
@@ -864,7 +966,206 @@ public sealed class MutationGateway : IMutationGateway
             "Operation {OperationId} ({Capability}) {Status}: verification {Verification}, approval {ApprovalId}, audit {AuditId}, request {HttpRequestId}",
             operationId, capability.Id, outcome.Status, outcome.Verification, outcome.ApprovalId ?? "none", auditId,
             RequestCorrelation.CurrentOrNone);
-        return outcome with { DecisionId = request.DecisionId };
+
+        if (pendingNested.Count > 0)
+        {
+            // 4d: the release moves to the background and waits for every nested run — the scope (the inner action keeps
+            // its scope chain), the journal claim, the maintenance admission and the drain entry. The journal ends as
+            // Failed, as the outcome says.
+            held.HandedOff = true;
+            var finalStatus = outcome.Status;
+            var finalVerification = outcome.Verification;
+            // Off the caller's flow: the release writes the gateway's own journal and opens no decision.
+            using var suppressed = ExecutionContext.SuppressFlow();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await WaitForNestedAsync(run);
+                    await FinishJournalAsync(operationId, claim, capability, finalStatus, finalVerification);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Release of operation {OperationId} ({Capability}) after its nested runs failed",
+                        operationId, capability.Id);
+                }
+                finally
+                {
+                    held.Dispose();
+                }
+            });
+        }
+        return outcome with { DecisionId = request.DecisionId, Completion = completion.Task };
+    }
+
+    /// <summary>Contract 0023 (4d): the reason of a run whose nested run is still running past its deadline.</summary>
+    internal const string NestedAbandonedReason =
+        "a nested run is still running past its deadline; its effect is unknown — read the current state before retrying.";
+
+    /// <summary>Opens the run's scope on the action's own async flow (it never leaks into the gateway's) and runs the
+    /// action in it. The action marks its own end, so exactly one of "ended" and "abandoned" happens (point 1).</summary>
+    private static async Task<T> RunActionAsync<T>(ActionRun run, Func<MutationContext, CancellationToken, Task<T>> execute,
+        MutationContext context, MutationPolicyDecision decision, ApprovalGateResult? approval, CancellationToken token)
+    {
+        try
+        {
+            var scope = MutationScope.Begin(context.Capability.Id, context.OperationId, context.Request.Principal,
+                context.Request);
+            run.Scope = scope;
+            // Contract 0006: which rule set decided, for the re-check after a compose run.
+            scope.SetDecision(decision.AgentRuleSet, decision.ExposureConfirmClasses);
+            scope.DecidedLevel = context.Capability.RequiredLevel;
+            // The person whose approval was used for this run (approvers are always people, by email).
+            if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
+                scope.ApprovedBy = PrincipalIds.User(approver);
+            // Contract 0022, amendment 2 (B2): which rules of the decision that approval covered.
+            if (approval is { Approved: true })
+                scope.ApprovedRules = new HashSet<string>(decision.MatchedRules, StringComparer.Ordinal);
+            return await execute(context, token);
+        }
+        finally
+        {
+            run.Ended();
+        }
+    }
+
+    /// <summary>
+    /// Contract 0023 (points 2–4): answers the caller without the action. The outcome row is written now; the action
+    /// goes on in the background with its scope, journal claim, maintenance admission, drain entry and deadline, listed
+    /// in <see cref="IAbandonedRuns"/> (which guards its target), and its late end is audited when it ends.
+    /// </summary>
+    private async Task<MutationOutcome<T>> AbandonAsync<T>(ActionRun run, Task<T> action, Holdings held, Task completion,
+        string? claim, long auditId, MutationRequest request, Capability capability, ApprovalGateResult? approval,
+        long started, DateTimeOffset startedAt)
+    {
+        var operationId = request.OperationId!;
+        held.HandedOff = true;
+        try
+        {
+            held.Add(_abandoned?.Add(new AbandonedRun(capability.Id, operationId, request.Target, _time.GetUtcNow(),
+                startedAt)));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Abandoned operation {OperationId} ({Capability}) could not be listed", operationId,
+                capability.Id);
+        }
+
+        var reason = $"'{capability.Id}' ran past its deadline of {capability.Deadline} and did not stop; it is still " +
+                     "running and its effect is unknown — read the current state before retrying.";
+        var outcome = new MutationOutcome<T>(operationId, MutationStatus.Failed, default, reason, VerificationStatus.NotRun,
+            new MutationAbandonedException(reason, capability.Deadline), approval?.ApprovalId)
+        {
+            Abandoned = true,
+            ReasonCode = MutationReasonCodes.Abandoned,
+            ReasonArgs = [capability.Id, capability.Deadline.ToString()],
+            DecisionId = request.DecisionId,
+            Completion = completion,
+        };
+        try
+        {
+            await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
+                reason, _time.GetElapsedTime(started), run.Results), capability);
+            _logger.LogWarning(
+                "Operation {OperationId} ({Capability}) abandoned: it ran past its deadline of {Deadline} and did not stop; " +
+                "it goes on in the background, its target held (audit {AuditId}, request {HttpRequestId})",
+                operationId, capability.Id, capability.Deadline, auditId, RequestCorrelation.CurrentOrNone);
+        }
+        finally
+        {
+            // Off the caller's flow: the late end writes the gateway's own records and opens no decision.
+            using (ExecutionContext.SuppressFlow())
+                _ = Task.Run(() => LateEndAsync(run, action, held, claim, auditId, operationId, capability, started));
+        }
+        return outcome;
+    }
+
+    /// <summary>Contract 0023 (point 3): waits for the abandoned action's real end (or the end of the shutdown drain),
+    /// then for its nested runs, writes its late end as a further version of its audit row, finishes its journal claim
+    /// as <c>Failed</c> and releases what it held. Never throws.</summary>
+    private async Task LateEndAsync(ActionRun run, Task action, Holdings held, string? claim, long auditId,
+        string operationId, Capability capability, long started)
+    {
+        try
+        {
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var abort = _drain is null ? default : _drain.Abort.Register(() => stopped.TrySetResult());
+            var cutOff = await Task.WhenAny(action, stopped.Task) != action;
+            if (!cutOff)
+                cutOff = await Task.WhenAny(WaitForNestedAsync(run), stopped.Task) == stopped.Task;
+            var how = cutOff ? "cut off at shutdown"
+                : action.Status == TaskStatus.RanToCompletion ? "returned"
+                : $"threw {(action.IsCanceled ? nameof(OperationCanceledException) : action.Exception?.InnerException?.GetType().Name ?? "an exception")}";
+            var results = run.Results.ToList();
+            if (run.FailureReason is { } reported)
+                results.Add(new MutationDomainResult(capability.Id, "", "", "", reported, null, false));
+            var duration = _time.GetElapsedTime(started);
+            try
+            {
+                await _audit.CompleteLateEndAsync(auditId, operationId, how, duration, results, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Late end of {Capability} (operation {OperationId}) could not be written", capability.Id,
+                    operationId);
+                _recovery?.LateEndNotWritten(new PendingLateEnd(auditId, operationId, how, duration, results));
+            }
+            // Cut off by the stop: the claim stays Running, and the next start reports the operation as interrupted.
+            if (!cutOff)
+                await FinishJournalAsync(operationId, claim, capability, MutationStatus.Failed, VerificationStatus.NotRun);
+            _logger.LogInformation(
+                "Abandoned operation {OperationId} ({Capability}) ended: {How} after {Duration}", operationId, capability.Id,
+                how, duration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Late end of operation {OperationId} ({Capability}) failed", operationId, capability.Id);
+        }
+        finally
+        {
+            held.Dispose();
+        }
+    }
+
+    /// <summary>Contract 0023 (4d): the nested runs still running once G has passed after the action returned.</summary>
+    private async Task<IReadOnlyList<(string OperationId, Task Completion)>> NestedAfterGraceAsync(ActionRun run)
+    {
+        var pending = run.PendingNested();
+        if (pending.Count == 0) return pending;
+        using var grace = new CancellationTokenSource(_grace, _time);
+        try
+        {
+            await Task.WhenAll(pending.Select(p => p.Completion)).WaitAsync(grace.Token);
+        }
+        catch (OperationCanceledException) when (grace.IsCancellationRequested)
+        {
+            // Still running: answered as NestedAbandoned.
+        }
+        return run.PendingNested();
+    }
+
+    /// <summary>Waits until every run nested in <paramref name="run"/> has ended, also those started meanwhile.</summary>
+    private static async Task WaitForNestedAsync(ActionRun run)
+    {
+        while (run.PendingNested() is { Count: > 0 } pending)
+            await Task.WhenAll(pending.Select(p => p.Completion));
+    }
+
+    /// <summary>The claim ends with the outcome. A failed write leaves it Running: after a restart a retry is refused as
+    /// "outcome unknown", never run again.</summary>
+    private async Task FinishJournalAsync(string operationId, string? claim, Capability capability, MutationStatus status,
+        VerificationStatus verification)
+    {
+        if (_journal is null || claim is null) return;
+        try
+        {
+            await _journal.FinishAsync(operationId, claim, status, verification, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Operation journal for {Capability} (operation {OperationId}) could not be finished",
+                capability.Id, operationId);
+        }
     }
 
     /// <summary>Writes the outcome to its intent row. A failed write is handed to <see cref="IAuditRecovery"/>: the
@@ -1129,6 +1430,73 @@ public sealed class MutationGateway : IMutationGateway
     {
         public MutationRequest? Request { get; set; }
         public Capability? Capability { get; set; }
+    }
+
+    /// <summary>
+    /// Contract 0023 (4a): what a run holds until it really ends — the maintenance admission, the drain entry, the
+    /// deadline, its scope and its listing as abandoned — released once, in reverse order, and then its
+    /// <see cref="MutationOutcome{T}.Completion"/> completed. <see cref="HandedOff"/>: the release moved to the
+    /// background (an abandoned run, or one with an abandoned nested run).
+    /// </summary>
+    private sealed class Holdings(IDisposable? first) : IDisposable
+    {
+        private readonly List<IDisposable> _items = first is null ? [] : [first];
+        private TaskCompletionSource? _completion;
+        private int _disposed;
+
+        public bool HandedOff { get; set; }
+
+        public void Add(IDisposable? item)
+        {
+            if (item is null) return;
+            lock (_items) _items.Add(item);
+        }
+
+        public void CompleteOnRelease(TaskCompletionSource completion) => _completion = completion;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            IDisposable[] items;
+            lock (_items) items = [.. _items];
+            for (var i = items.Length - 1; i >= 0; i--)
+            {
+                try
+                {
+                    items[i].Dispose();
+                }
+                catch
+                {
+                    // One release that fails never keeps the others (or the completion) back.
+                }
+            }
+            _completion?.TrySetResult();
+        }
+    }
+
+    /// <summary>Contract 0023: the action of one run — its scope (opened on the action's own flow) and which of its two
+    /// endings happened: its own end, or the gateway's abandon.</summary>
+    private sealed class ActionRun : IDisposable
+    {
+        private const int Running = 0, EndedItself = 1, AbandonedByGateway = 2;
+        private int _state;
+
+        public MutationScope? Scope { get; set; }
+
+        /// <summary>The action marks its end; it no longer counts once the gateway has abandoned it.</summary>
+        public void Ended() => Interlocked.CompareExchange(ref _state, EndedItself, Running);
+
+        /// <summary>The gateway abandons the action: true only while the action has not marked its own end.</summary>
+        public bool TryAbandon() => Interlocked.CompareExchange(ref _state, AbandonedByGateway, Running) == Running;
+
+        public IReadOnlyList<MutationDomainResult> Results => Scope?.Results ?? [];
+        public string? FailureReason => Scope?.FailureReason;
+        public IReadOnlyDictionary<string, string> ReadBackFacts =>
+            Scope?.ReadBackFacts ?? new Dictionary<string, string>();
+        public IReadOnlyList<(string OperationId, Task Completion)> PendingNested() => Scope?.PendingNested() ?? [];
+
+        public void CloseScope() => Scope?.Dispose();
+        public void Dispose() => CloseScope();
     }
 
     /// <summary>One of the gateway's admission locks, held at most once and released at most once.</summary>

@@ -36,6 +36,16 @@ public interface IMutationAuditSink
     Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability, MutationStatus status,
         string reason, string? approvalId, CancellationToken ct) =>
         RecordDeniedAsync(operationId, request, capability, status, reason, ct);
+
+    /// <summary>
+    /// Contract 0023 (point 3): the late end of an abandoned run, as a further chain version of the event's row
+    /// (<c>Phase = "late_end"</c>) after its outcome — never a second row. <paramref name="how"/> is <c>returned</c>,
+    /// <c>threw &lt;type&gt;</c> or <c>cut off at shutdown</c>; <paramref name="results"/> what the tool reported. The
+    /// status stays as the outcome recorded it. Throws when it cannot be written; the gateway then hands it to
+    /// <see cref="IAuditRecovery.LateEndNotWritten"/>. A sink without a chain (a test double) writes nothing.
+    /// </summary>
+    Task CompleteLateEndAsync(long auditId, string operationId, string how, TimeSpan duration,
+        IReadOnlyList<MutationDomainResult>? results, CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -233,6 +243,83 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         entity.Details = TryFit(budget => Outcome(budget, intent))
                          ?? Fit(budget => Outcome(budget, Field(entity.Details, budget)));
     }
+
+    /// <summary>The phase of an abandoned run's row once its late end is written (contract 0023, point 3).</summary>
+    public const string LateEndPhase = "late_end";
+
+    public async Task CompleteLateEndAsync(long auditId, string operationId, string how, TimeSpan duration,
+        IReadOnlyList<MutationDomainResult>? results, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(how);
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        // The late end is the row's next version, after its outcome: a new link of the audit chain in the same
+        // transaction, never a second row (the unique event id would swallow one silently).
+        await Whiskers.Services.AuditLog.AuditChain.Of(scope.ServiceProvider).UpdateAsync(db, [auditId], async token =>
+        {
+            var entity = await db.AuditLog.FindAsync([auditId], token)
+                         ?? throw new InvalidOperationException($"Audit event {auditId} for operation {operationId} is missing.");
+            // Only after the outcome version: an outcome still waiting to be written is written first (AuditRecovery).
+            if (entity.Phase != "outcome")
+                throw new InvalidOperationException(
+                    $"Audit event {auditId} for operation {operationId} is in phase '{entity.Phase}', not 'outcome'.");
+            LateEnd(entity, how, (long)duration.TotalMilliseconds, results);
+            await db.SaveChangesAsync(token);
+            return (true, (IReadOnlyCollection<long>)[auditId]);
+        }, ct);
+    }
+
+    /// <summary>Adds the late end to an outcome row: the phase, and a <c>lateEnd</c> member in its details. The status,
+    /// verification and success stay as the outcome recorded them. The document stays valid JSON within its cap: the
+    /// late end's reported results shrink first, then the embedded intent is dropped.</summary>
+    internal static void LateEnd(AuditLogEntity entity, string how, long durationMs,
+        IReadOnlyList<MutationDomainResult>? results)
+    {
+        entity.Phase = LateEndPhase;
+        System.Text.Json.Nodes.JsonObject outcome;
+        try
+        {
+            outcome = System.Text.Json.Nodes.JsonNode.Parse(entity.Details ?? "{}") as System.Text.Json.Nodes.JsonObject
+                      ?? new System.Text.Json.Nodes.JsonObject();
+        }
+        catch (JsonException)
+        {
+            outcome = new System.Text.Json.Nodes.JsonObject { ["outcomeText"] = Field(entity.Details, MaxReasonChars) };
+        }
+        outcome["phase"] = LateEndPhase;
+        var safeHow = Field(Redact(how), MaxResultNameChars);
+
+        string Build(int budget, bool keepIntent)
+        {
+            var copy = (System.Text.Json.Nodes.JsonObject)outcome.DeepClone();
+            if (!keepIntent) copy.Remove("intent");
+            copy["lateEnd"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(new
+            {
+                how = safeHow,
+                durationMs,
+                results = results is { Count: > 0 } && budget > 0
+                    ? results.Take(MaxLateEndResults).Select(r => new
+                    {
+                        action = Field(r.Action, Math.Min(budget, MaxResultNameChars)),
+                        targetType = Field(r.TargetType, Math.Min(budget, MaxResultNameChars)),
+                        targetId = Field(Redact(r.TargetId), Math.Min(budget, MaxResultNameChars)),
+                        targetName = Field(Redact(r.TargetName), Math.Min(budget, MaxResultNameChars)),
+                        serverId = Field(r.ServerId, Math.Min(budget, MaxResultNameChars)),
+                        success = r.Success,
+                        details = Field(Redact(r.Details), Math.Min(budget, MaxResultDetailChars)),
+                    }).ToList()
+                    : null,
+            }, SinkRedaction.JsonOptions));
+            return copy.ToJsonString(SinkRedaction.JsonOptions);
+        }
+
+        entity.Details = TryFit(budget => Build(budget, keepIntent: true))
+                         ?? TryFit(budget => Build(budget, keepIntent: false))
+                         ?? Build(-1, keepIntent: false);
+    }
+
+    // Each entry costs ~130 characters even shrunk; more would not fit beside the outcome.
+    private const int MaxLateEndResults = 10;
 
     public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
         MutationStatus status, string reason, CancellationToken ct) =>

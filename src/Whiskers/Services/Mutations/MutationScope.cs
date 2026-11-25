@@ -239,6 +239,32 @@ public sealed class MutationScope : IDisposable
     /// <summary>True once the gateway closed this scope.</summary>
     public bool IsClosed => _disposed;
 
+    private readonly List<(string OperationId, Task Completion)> _nested = [];
+
+    /// <summary>Contract 0023 (4d): the gateway registers the <see cref="MutationOutcome{T}.Completion"/> of every run
+    /// nested in this scope's operation, so the operation keeps what it holds until they have ended too.</summary>
+    internal void AddNested(string operationId, Task completion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        ArgumentNullException.ThrowIfNull(completion);
+        lock (_nested) _nested.Add((operationId, completion));
+    }
+
+    /// <summary>Contract 0023 (4d): the nested runs that have not ended yet, oldest first.</summary>
+    internal IReadOnlyList<(string OperationId, Task Completion)> PendingNested()
+    {
+        lock (_nested) return _nested.Where(n => !n.Completion.IsCompleted).ToList();
+    }
+
+    /// <summary>Contract 0023 (4b): the operation ids of the open scopes this flow runs inside, innermost first; empty
+    /// outside the gateway or once one of them was closed.</summary>
+    internal static IReadOnlyList<string> OpenOperationIds()
+    {
+        var ids = new List<string>();
+        for (var s = Current; s is not null; s = s._parent) ids.Add(s.OperationId);
+        return ids;
+    }
+
     /// <summary>
     /// True when the open scope on this flow, or an open scope enclosing it, decided <paramref name="capabilityId"/> or
     /// a capability that composes it (<see cref="MutationCompositions"/>). Nested decisions (a deployment decided, then

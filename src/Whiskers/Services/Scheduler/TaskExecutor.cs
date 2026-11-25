@@ -158,7 +158,16 @@ public class TaskExecutor : ITaskExecutor
         // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return pending;
+        return UntilCompleteAsync(pending);
+    }
+
+    /// <summary>Contract 0023 (4c): the task's run — and with it the scheduler's drain entry and in-flight guard — ends
+    /// only once the action and every run nested in it have really ended, also when the gateway answered without it.</summary>
+    private static async Task<MutationOutcome<T>> UntilCompleteAsync<T>(Task<MutationOutcome<T>> pending)
+    {
+        var outcome = await pending;
+        await outcome.Completion;
+        return outcome;
     }
 
     /// <inheritdoc cref="RunGatedAsync{TTarget, T}"/>
@@ -171,7 +180,7 @@ public class TaskExecutor : ITaskExecutor
         // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return pending;
+        return UntilCompleteAsync(pending);
     }
 
     private async Task<(bool, string)> ExecuteContainerRestart(ScheduledTaskEntity task)

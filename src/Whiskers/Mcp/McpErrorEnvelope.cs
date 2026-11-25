@@ -55,7 +55,7 @@ public static class McpErrorEnvelope
             MutationReasonCodes.TargetChanged => Conflict,
             MutationReasonCodes.TargetAmbiguous or MutationReasonCodes.TargetNotResolved => InvalidArgument,
             MutationReasonCodes.OperationRunning or MutationReasonCodes.OperationAlreadyRun
-                or MutationReasonCodes.OperationIdReused => Conflict,
+                or MutationReasonCodes.OperationIdReused or MutationReasonCodes.TargetBusy => Conflict,
             _ => Denied,
         },
         _ => Failed,

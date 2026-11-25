@@ -7043,4 +7043,25 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Mutation_Refused_AutomationHeld" xml:space="preserve">
     <value>The automation was handed over or held and waits for an Admin to resume it; nothing ran.</value>
   </data>
+  <data name="Mutation_Refused_Abandoned" xml:space="preserve">
+    <value>'{0}' ran past its deadline of {1} and did not stop; it is still running and its effect is unknown. Read the current state before retrying.</value>
+  </data>
+  <data name="Mutation_Refused_NestedAbandoned" xml:space="preserve">
+    <value>A nested run is still running past its deadline; the effect is unknown. Read the current state before retrying.</value>
+  </data>
+  <data name="Mutation_Refused_TargetBusy" xml:space="preserve">
+    <value>An earlier run on this target ran past its deadline and is still running; nothing ran. Fix the host, or restart Whiskers to clear it.</value>
+  </data>
+  <data name="Mutation_Refused_ShuttingDown" xml:space="preserve">
+    <value>Whiskers is stopping; the change was not made. Retry after the restart.</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Heading" xml:space="preserve">
+    <value>{0} mutation(s) still running past their deadline</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Line" xml:space="preserve">
+    <value>{0} · operation {1} · started {2} · running for {3}</value>
+  </data>
+  <data name="SelfStatus_Abandoned_Remedy" xml:space="preserve">
+    <value>Changes to their targets are refused until they end. Fix the host, or restart Whiskers to clear them; the restart reports them as interrupted.</value>
+  </data>
 </root>

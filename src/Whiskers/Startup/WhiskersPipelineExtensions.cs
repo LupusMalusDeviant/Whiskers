@@ -781,6 +781,17 @@ public static class WhiskersPipelineExtensions
             sb.AppendLine($"whiskers_self_series_total {seriesCount}");
         }
 
+        var abandoned = services.GetService<Whiskers.Services.Mutations.IAbandonedRuns>();
+        if (abandoned is not null)
+        {
+            // Contract 0023 (point 5): mutations the gateway answered without because they ran past their deadline and
+            // the grace period. Their targets stay refused until they end; one that never ends needs the host fixed or
+            // a restart.
+            sb.AppendLine("# HELP whiskers_mutations_abandoned_running Mutations still running past their deadline; their targets are refused until they end.");
+            sb.AppendLine("# TYPE whiskers_mutations_abandoned_running gauge");
+            sb.AppendLine($"whiskers_mutations_abandoned_running {abandoned.Running.Count}");
+        }
+
         var hostLoad = services.GetService<Whiskers.Services.Metrics.HostLoad.HostLoadEvaluator>();
         if (hostLoad is not null)
         {

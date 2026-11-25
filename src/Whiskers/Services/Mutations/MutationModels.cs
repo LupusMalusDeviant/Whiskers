@@ -223,6 +223,31 @@ public sealed record MutationOutcome<T>(
     /// <summary>Why an executed call is <see cref="VerificationStatus.NotVerifiable"/> (R1-37): the capability's declared
     /// reason, or what its verifier could not read back. Recorded in the audit outcome; never a success claim.</summary>
     public string? VerificationNote { get; init; }
+
+    /// <summary>Contract 0023 (D2): the action was still running after its deadline and the grace period, and the
+    /// gateway answered without it. Always <see cref="MutationStatus.Failed"/> with
+    /// <see cref="MutationReasonCodes.Abandoned"/> and a <see cref="MutationAbandonedException"/>; the action goes on
+    /// in the background and its late end is audited. False for <see cref="MutationReasonCodes.NestedAbandoned"/>.</summary>
+    public bool Abandoned { get; init; }
+
+    /// <summary>Contract 0023 (4c): complete once the run and every run nested in it have really ended — at once for a
+    /// run that was neither abandoned nor had an abandoned nested run. Never faults and is never cancelled. A caller
+    /// that holds a lock, lease, drain entry or bookkeeping for the run awaits it before releasing.</summary>
+    public Task Completion { get; init; } = Task.CompletedTask;
+}
+
+/// <summary>Contract 0023: the run went on past its deadline and the grace period (<see cref="MutationReasonCodes.Abandoned"/>),
+/// or a run nested in it did (<see cref="MutationReasonCodes.NestedAbandoned"/>, with <see cref="NestedOperationId"/>).
+/// Its effect is unknown. An <see cref="OperationCanceledException"/>, so code that treats a cancelled run as
+/// "effect unknown" keeps doing so.</summary>
+public sealed class MutationAbandonedException(string message, TimeSpan deadline, string? nestedOperationId = null)
+    : OperationCanceledException(message)
+{
+    /// <summary>The capability's deadline the run went past.</summary>
+    public TimeSpan Deadline { get; } = deadline;
+
+    /// <summary>For <see cref="MutationReasonCodes.NestedAbandoned"/>: the nested operation that is still running.</summary>
+    public string? NestedOperationId { get; } = nestedOperationId;
 }
 
 /// <summary>Refusal codes with a localized text (<c>Mutation_Refused_&lt;code&gt;</c> in the shared resources).</summary>
@@ -279,11 +304,28 @@ public static class MutationReasonCodes
     /// ran.</summary>
     public const string AutomationHeld = "AutomationHeld";
 
+    /// <summary>Contract 0023: the action ran past its deadline and did not stop; it is still running and its effect is
+    /// unknown. {0} is the capability, {1} the deadline.</summary>
+    public const string Abandoned = "Abandoned";
+
+    /// <summary>Contract 0023 (4d): a run nested in this one is still running past its deadline; the effect is unknown.</summary>
+    public const string NestedAbandoned = "NestedAbandoned";
+
+    /// <summary>Contract 0023 (4b): an earlier run on this target ran past its deadline and is still running.</summary>
+    public const string TargetBusy = "TargetBusy";
+
+    /// <summary>Contract 0023 (point 6): Whiskers is stopping; nothing new is started.</summary>
+    public const string ShuttingDown = "ShuttingDown";
+
     public static readonly IReadOnlyList<string> All =
         [UnderlyingCapabilityDisabled, RequirementUnresolved, TargetUnknown, TargetAmbiguous, TargetNotResolved, TargetChanged,
             DecisionNotRecorded, TriggerNotAllowed, UnattendedConfirm, ProtectedNeedsAdminApproval,
             OperationAlreadyRun, OperationRunning, OperationOutcomeUnknown, OperationIdReused, OperationNotRegistered,
-            AutomationHeld];
+            AutomationHeld, Abandoned, NestedAbandoned, TargetBusy, ShuttingDown];
+
+    /// <summary>Contract 0023: the two codes that mark a run whose effect is unknown because it, or a run nested in it,
+    /// went on past its deadline. The UI runner and the MCP filter treat them before any other failed outcome.</summary>
+    public static bool IsAbandoned(string? code) => code is Abandoned or NestedAbandoned;
 
     /// <summary>The resource key of <paramref name="code"/>.</summary>
     public static string KeyOf(string code) => "Mutation_Refused_" + code;

@@ -85,6 +85,7 @@ public class AuditPagesAccessTests : BunitContext, IAsyncLifetime
         Services.AddSingleton((Whiskers.Services.Notifications.IInAppNotificationStore)(object)alerts);
         Services.AddSingleton((Whiskers.Services.Observability.Outcomes.IActionOutcomeService)(object)
             Recording<Whiskers.Services.Observability.Outcomes.IActionOutcomeService>.Create());
+        Services.AddSingleton<Whiskers.Services.Mutations.IAbandonedRuns>(new Whiskers.Services.Mutations.AbandonedRuns());
 
         var page = Render<SelfStatus>();
 

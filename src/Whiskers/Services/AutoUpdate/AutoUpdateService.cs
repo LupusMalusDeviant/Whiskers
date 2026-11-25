@@ -238,6 +238,10 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         recreateReturned = true;
                         return recreated;
                     }, ct);
+                // Contract 0023 (4c): the drain entry, history.CompletedAt and the interruption guard are kept until the
+                // update — and every run nested in it — has really ended, also when the gateway answered without it.
+                // Only then do recreateReturned and the snapshot say what happened.
+                await outcome.Completion;
                 if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval
                     && _automation.LostAuthority(actor, "container.update") is { } lost)
                 {

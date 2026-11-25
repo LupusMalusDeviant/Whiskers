@@ -111,14 +111,18 @@ public class MutationBypassArchitectureTests
             Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax>(),
                 a => a.Left.ToString() is "capabilityId" or "arguments" or "action" or "task");
             // Nothing else is called — the wrapper never runs the action itself — and the action is handed on once.
-            Assert.Equal(["ActorOf(task)", call.ToString()],
+            // Contract 0023 (4c): the runner's outcome is awaited to its Completion (UntilCompleteAsync).
+            Assert.Equal(["ActorOf(task)", "UntilCompleteAsync(pending)", call.ToString()],
                 wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
                     .Select(i => i.ToString()).Order(StringComparer.Ordinal));
             Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(),
                 n => n.Identifier.Text == "action");
-            // What it returns is exactly the runner's task.
+            // What it returns is exactly the runner's task, awaited to its Completion (contract 0023, 4c).
             var returned = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ReturnStatementSyntax>());
-            var local = Assert.IsType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(returned.Expression).Identifier.Text;
+            var awaited = Assert.IsType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>(returned.Expression);
+            Assert.Equal("UntilCompleteAsync", awaited.Expression.ToString());
+            var local = Assert.IsType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(
+                Assert.Single(awaited.ArgumentList.Arguments).Expression).Identifier.Text;
             var declared = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclaratorSyntax>(),
                 v => v.Identifier.Text == local);
             Assert.Same(call, declared.Initializer?.Value);

@@ -6,6 +6,19 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Mutations past their deadline (contract 0023, INV-40).** The caller of a mutation is answered at most 5 s after
+  the capability's deadline. An action still running then is reported as failed and "abandoned": the page shows that it
+  ran past its deadline, an MCP client gets the failure. The action goes on in the background; until it ends, its
+  target (for a host-level action, every target on that server) refuses other changes with "an earlier run on this
+  target … is still running", the kill-switch toggles excepted. Its end is added to the same audit event as a further
+  version (`late_end`). A run whose nested operation is still running is failed with `NestedAbandoned`. The page
+  *Whiskers itself* lists what still runs, `/metrics` has `whiskers_mutations_abandoned_running`, and `/readyz`
+  answers `Degraded` (`mutations`) once one has run past its deadline for over 15 minutes.
+- **Mutations are refused while Whiskers stops.** A UI, MCP or agent mutation asked for after the shutdown has begun
+  is refused and recorded (`ShuttingDown`); before, it could still start during the up to 45 s of the stop.
+
 ## [1.0.0] — 2026-11-20
 
 v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with this

@@ -1388,6 +1388,9 @@ public class WebhookService : IWebhookService
             }
         }
 
+        // Contract 0023 (4c): the run keeps its target's lock and its Holding until the action — and every run nested in
+        // it — has really ended, also when the gateway answered without it (abandoned, or a nested run abandoned).
+        await outcome.Completion;
         var refused = outcome.Error as MutationRefusedException;
         // The gateway reports a cancelled action (the run's deadline, shutdown) as failed with the cancellation: it is
         // the run's cancellation, not an action's message.
