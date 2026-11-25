@@ -49,6 +49,10 @@ public sealed record GuardrailDecision(
     /// <summary>What an approval notification names of the call's target (R1-15, <c>ApprovalDisplay.NotifiedTarget</c>):
     /// its kind, and its inventory id and server where the resolver took them from the inventory.</summary>
     public string? NotifiedTarget { get; init; }
+
+    /// <summary>Contract 0017 A5: the gateway's resolved target carries a privileged compose hook, so the approval and
+    /// its notification name the known limit.</summary>
+    public bool PrivilegedHook { get; init; }
 }
 
 public enum GuardrailVerdict { Allow, Confirm, Deny }

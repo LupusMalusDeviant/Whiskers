@@ -260,6 +260,24 @@ public sealed class DeployPageComposeTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Check_plan_notes_a_privileged_hook_beside_that_exposure_and_nowhere_else()
+    {
+        // Contract 0017 A5: a privileged hook is decided at planning only.
+        var page = ComposeTab("services:\n  api:\n    image: nginx\n    ports:\n      - \"8080:80\"\n" +
+                              "    post_start:\n      - command: [\"id\"]\n        privileged: true\n");
+
+        await Invoke(page, "CheckPlan");
+
+        Assert.Null(Field<string?>(page, "_planError"));
+        page.FindAll(".mud-tab").First(t => t.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
+        var items = page.FindAll(".deploy-plan-exposures li");
+        var hook = Assert.Single(items, li => li.TextContent.Contains("hook:post_start:0", StringComparison.Ordinal));
+        Assert.Single(hook.QuerySelectorAll(".deploy-plan-hook-note"));
+        Assert.Single(page.FindAll(".deploy-plan-hook-note"));   // the port carries no note
+        Assert.Contains(items, li => li.TextContent.Contains("8080", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Check_plan_shows_why_a_plan_is_refused()
     {
         _docker.Add(new ContainerInfo { Id = "legacy-id", Name = "api", ServerId = "local", State = "running" });

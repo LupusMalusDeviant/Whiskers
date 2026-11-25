@@ -249,6 +249,12 @@ public static class ComposeExposures
         return IsSocketPath(source) && service.Mounts.Any(m => m.ApiSocket);
     }
 
+    /// <summary>Contract 0017, amendment 5: whether an exposure identity is a privileged <c>post_start</c> or
+    /// <c>pre_stop</c> hook — decided on the parsed identity only, never on any text (a service name comes from the
+    /// compose file).</summary>
+    public static bool IsPrivilegedHook(string identity) =>
+        Parse(identity) is { Kind: ExposureKind.Privileged } p && IsHookKey(p.Key);
+
     /// <summary>A privileged hook's key (<see cref="HookKey"/>): <c>hook:&lt;kind&gt;:&lt;index&gt;</c>.</summary>
     public static bool IsHookKey(string key) =>
         key.StartsWith("hook:", StringComparison.Ordinal) && key.Split(':') is [_, var kind, _] && Hooks.Contains(kind);

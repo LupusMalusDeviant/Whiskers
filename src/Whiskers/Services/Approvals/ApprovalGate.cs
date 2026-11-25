@@ -30,6 +30,10 @@ public sealed record ApprovalSubject(
     /// <summary>The preset that decision was made under (a trigger's pinned one, or the active one).</summary>
     public string? Preset { get; init; }
 
+    /// <summary>Contract 0017 A5: the resolved target carries a privileged compose hook; the approval and its
+    /// notification name the known limit. Set by the gateway from the target's exposure identities.</summary>
+    public bool PrivilegedHook { get; init; }
+
     /// <summary>What the call is bound to (R1-14, <see cref="ApprovalBinding"/>): principal, credential, capability
     /// and level, normalized arguments, resolved target and policy version. An approval is usable only for a call
     /// with the same binding; a subject without one can never use an approval.</summary>
@@ -259,7 +263,9 @@ public sealed class ApprovalGate : IApprovalGate
             ParamsJson: Cap(SinkRedaction.Json(argsJson) ?? "", MaxParamChars),
             // A reason may quote what the caller sent: payload values never reach the stored card (R1-16), and the
             // rest is redacted like every sink (R1-24).
-            Reason: SinkRedaction.Text(SinkRedaction.WithoutPayloadValues(reason, subject.Arguments)) ?? "",
+            // Contract 0017 A5: the fixed hook sentence follows, after the redaction (it is no caller value).
+            Reason: ApprovalDisplay.ReasonWithHook(
+                SinkRedaction.Text(SinkRedaction.WithoutPayloadValues(reason, subject.Arguments)) ?? "", subject.PrivilegedHook),
             CorrelationId: subject.OperationId,
             RiskLevel: ApprovalDisplay.RiskOf(subject.Level),
             TargetServer: server,
@@ -283,7 +289,8 @@ public sealed class ApprovalGate : IApprovalGate
                 await _notify.SendAsync(new NotificationEvent
                 {
                     EventType = NotificationEventTypes.AgentApproval,
-                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.NotifiedTarget, _publicUrl),
+                    ImageInfo = ApprovalDisplay.NotificationText(approval, subject.NotifiedTarget, _publicUrl,
+                        subject.PrivilegedHook),
                     CorrelationId = subject.OperationId,
                     ApprovalId = approval.Id,
                 });

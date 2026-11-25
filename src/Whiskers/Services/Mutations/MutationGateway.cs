@@ -1305,7 +1305,7 @@ public sealed class MutationGateway : IMutationGateway
         }
     }
 
-    private static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? operationId,
+    internal static ApprovalSubject ApprovalSubjectOf(MutationRequest request, Capability capability, string? operationId,
         PolicySnapshot? policy, IReadOnlyList<string>? matchedRules = null)
     {
         var decisionPreset = policy?.Preset;
@@ -1344,6 +1344,7 @@ public sealed class MutationGateway : IMutationGateway
             TargetServer = ApprovalDisplay.NotifiableTarget(request.Target).Server,
             TargetWorkload = ApprovalDisplay.NotifiableTarget(request.Target).Resource,
             NotifiedTarget = ApprovalDisplay.NotifiedTarget(capability.TargetKind, request.Target),
+            PrivilegedHook = ApprovalDisplay.HasPrivilegedHook(request.Target),
         };
     }
 

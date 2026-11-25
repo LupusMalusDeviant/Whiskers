@@ -54,14 +54,34 @@ public static class ApprovalDisplay
     /// configured public address (<paramref name="publicUrl"/>) the text carries the absolute link too, so e-mail and
     /// chat channels open the card.</summary>
     public static string NotificationText(Whiskers.Models.Agent.Approval approval, string? notifiedTarget,
-        Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null)
+        Whiskers.Configuration.WhiskersPublicUrl? publicUrl = null, bool privilegedHook = false)
     {
         ArgumentNullException.ThrowIfNull(approval);
         var target = string.IsNullOrWhiteSpace(notifiedTarget) ? "—" : notifiedTarget;
+        // Contract 0017 A5: the fixed sentence, before the link — it names no service, hook index or command.
+        var hook = privilegedHook ? PrivilegedHookSentence + " " : "";
         return $"\"{Short(approval.Actor)}\" wants to run \"{approval.ToolName}\" — approval required. " +
                $"Approval {approval.Id} · risk {approval.RiskLevel ?? RiskOf(approval.Level)} · target {target} " +
+               hook +
                (publicUrl?.Link(LinkOf(approval.Id)) is { } link ? $"— {link}" : "(Whiskers → Approvals)");
     }
+
+    /// <summary>Contract 0017, amendment 5 (A2b): told to the approver of every run whose resolved target carries a
+    /// privileged compose hook — the known limit of part A2. A fixed text: it names no service, hook index or command.</summary>
+    public const string PrivilegedHookSentence =
+        "Includes a privileged compose hook: decided now only, not checked after the run.";
+
+    /// <summary>Contract 0017 A5: whether the resolved <paramref name="target"/> carries a privileged hook — from its
+    /// exposure identities only (<see cref="Whiskers.Services.Mutations.ComposeExposures.IsPrivilegedHook"/>).</summary>
+    public static bool HasPrivilegedHook(Whiskers.Services.Mutations.MutationTarget? target) =>
+        target?.Exposures.Any(Whiskers.Services.Mutations.ComposeExposures.IsPrivilegedHook) == true;
+
+    /// <summary>Contract 0017 A5 (D-5a): the reason an approval stores — the rule's own, then the fixed sentence when
+    /// the run carries a privileged hook (also when the rule's reason names the hook already).</summary>
+    public static string ReasonWithHook(string reason, bool privilegedHook) =>
+        !privilegedHook ? reason
+        : string.IsNullOrWhiteSpace(reason) ? PrivilegedHookSentence
+        : $"{reason.TrimEnd()} {PrivilegedHookSentence}";
 
     /// <summary>What a notification shows of a value taken from the arguments: an identifier (letters, digits and
     /// <c>. _ - : / @</c>, at most 80 characters) that the secret redactor leaves alone; anything else is withheld.</summary>

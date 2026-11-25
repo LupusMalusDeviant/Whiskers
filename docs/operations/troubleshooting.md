@@ -88,6 +88,10 @@ Both are anonymous and answer only a status word.
   (the reset writes the safe default with the kill switch on). Deleting both files is no reset: it stays fail-closed.
 - **"protected" / needs an Admin approval:** the target is a protected resource or Whiskers' own control plane.
   An Admin decides it under *Approvals* (whether the requester may approve their own request follows the approval rules, PC-D4).
+- **"Includes a privileged compose hook: decided now only, not checked after the run":** the compose run starts a
+  service with a `post_start` or `pre_stop` hook that has `privileged: true`. Such a hook is an exec, not container
+  state: Whiskers decides it when the run is planned, and the check after `up` cannot see it (contract 0017,
+  amendment 5). Approve only if that hook is meant to run with full privileges; the Deploy page's plan marks it.
 - **An audit intent could not be written; operation refused:** the database cannot take the audit row. Check disk
   space and the database connection; Whiskers refuses every mutation until it can record it.
 - **A webhook refuses every delivery:** its secret cannot be read (vault locked or key changed). Regenerate the secret
