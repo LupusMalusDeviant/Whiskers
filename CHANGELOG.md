@@ -16,6 +16,8 @@ All notable changes to Whiskers are documented here. The format follows
   version (`late_end`). A run whose nested operation is still running is failed with `NestedAbandoned`. The page
   *Whiskers itself* lists what still runs, `/metrics` has `whiskers_mutations_abandoned_running`, and `/readyz`
   answers `Degraded` (`mutations`) once one has run past its deadline for over 15 minutes.
+- **No new mutation may ignore its deadline (contract 0023, INV-40).** An architecture test fails on a new gateway
+  action that discards its cancellation token; the 126 existing ones are listed in a baseline that can only shrink.
 - **Mutations are refused while Whiskers stops.** A UI, MCP or agent mutation asked for after the shutdown has begun
   is refused and recorded (`ShuttingDown`); before, it could still start during the up to 45 s of the stop.
 
