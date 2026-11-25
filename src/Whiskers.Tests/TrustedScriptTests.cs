@@ -446,12 +446,19 @@ public sealed class TrustedScriptTests
         Whiskers.Models.Agent.AgentPrincipalKind.WebUser, "admin@x", Whiskers.Models.McpPermissionLevels.Admin, null,
         UserEmail: "admin@x");
 
-    private static async Task<(GuardrailStore Store, string Dir)> StoreAsync(RecordingAudit? audit, bool secondApprover)
+    private static async Task<(GuardrailStore Store, string Dir)> StoreAsync(RecordingAudit? audit, bool secondApprover,
+        TimeSpan? switchOnWait = null, TimeSpan? auditWait = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), "ts-store-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
-        var store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(dir, "guardrails.json"),
-            audit is null ? null : new TestServices(audit));
+        var defaults = new GuardrailStore();
+        var store = new GuardrailStore(filePath: Path.Combine(dir, "guardrails.json"),
+            marker: new InMemoryGuardrailPolicyMarker(), services: audit is null ? null : new TestServices(audit))
+        {
+            // Per store, so a test widens its own margins without touching the others running in parallel.
+            SwitchOnWriteWait = switchOnWait ?? defaults.SwitchOnWriteWait,
+            AuditWriteWait = auditWait ?? defaults.AuditWriteWait,
+        };
         await store.StartAsync();
         var config = store.Config;
         config.Presets[0].Policy.RequireSecondApprover = secondApprover;
@@ -495,7 +502,7 @@ public sealed class TrustedScriptTests
     {
         // Contract 0023 (D8): the audit write under the store lock is bounded.
         var audit = new RecordingAudit { Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
-        var (store, dir) = await StoreAsync(audit, secondApprover: false);
+        var (store, dir) = await StoreAsync(audit, secondApprover: false, auditWait: TimeSpan.FromMilliseconds(200));
         try
         {
             var next = Adding(store);
@@ -514,7 +521,8 @@ public sealed class TrustedScriptTests
     public async Task A_switch_on_while_an_audit_row_holds_the_store_is_enforced_at_once_and_written_after_it()
     {
         var audit = new RecordingAudit();
-        var (store, dir) = await StoreAsync(audit, secondApprover: false);
+        var (store, dir) = await StoreAsync(audit, secondApprover: false,
+            switchOnWait: TimeSpan.FromMilliseconds(50), auditWait: TimeSpan.FromMinutes(2));
         try
         {
             var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -547,7 +555,8 @@ public sealed class TrustedScriptTests
     public async Task Switching_off_while_a_switch_on_waits_for_the_store_releases_it_for_good()
     {
         var audit = new RecordingAudit();
-        var (store, dir) = await StoreAsync(audit, secondApprover: false);
+        var (store, dir) = await StoreAsync(audit, secondApprover: false,
+            switchOnWait: TimeSpan.FromMilliseconds(50), auditWait: TimeSpan.FromMinutes(2));
         try
         {
             var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

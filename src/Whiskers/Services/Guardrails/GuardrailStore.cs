@@ -313,7 +313,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
         try
         {
-            await _marker.EnsureAsync(source, CancellationToken.None);
+            using (var bound = new CancellationTokenSource(MarkerWriteWait))
+                await _marker.EnsureAsync(source, bound.Token).WaitAsync(MarkerWriteWait);
             _markerRecorded = true;
             _markerProblem = null;
         }
@@ -492,8 +493,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             _lock.Release();
         }
 
-        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     public async Task SaveAsync(GuardrailPolicy policy, AgentPrincipal editor, CancellationToken ct = default)
@@ -526,8 +527,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             _lock.Release();
         }
 
-        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     /// <summary>A successful save wrote a policy file (under the store lock).</summary>
@@ -645,10 +646,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     }
 
     /// <summary>How long a switch-on waits for the store lock before its write continues in the background.</summary>
-    internal static TimeSpan SwitchOnWriteWait { get; } = TimeSpan.FromSeconds(2);
+    internal TimeSpan SwitchOnWriteWait { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>How long a save waits for the audit row of a trusted-script change under the store lock.</summary>
-    internal static TimeSpan AuditWriteWait { get; } = TimeSpan.FromSeconds(5);
+    internal TimeSpan AuditWriteWait { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long the record of contract 0010 may take before it counts as not written (retried at the next
+    /// save or start).</summary>
+    internal TimeSpan MarkerWriteWait { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
     public bool KillSwitchNotWritten
@@ -686,8 +691,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             _lock.Release();
         }
 
-        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     /// <summary>R1-11 and contract 0023 (D8): switching on (<see cref="SwitchOnAsync"/>) or off changes only
@@ -755,8 +760,8 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             _lock.Release();
         }
 
-        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
         Changed?.Invoke();
+        await EnsureMarkerAfterSaveAsync();   // outside the store lock: a slow database never holds it
     }
 
     /// <summary>

@@ -205,7 +205,6 @@ public sealed class KillSwitchOnTests : IDisposable
         Assert.Equal(4, store.Current.MaxActionsPerSession);
     }
 
-
     [Fact]
     public async Task A_slow_record_write_after_a_save_does_not_hold_the_store()
     {

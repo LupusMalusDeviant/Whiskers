@@ -325,6 +325,7 @@
         if (!_isAdmin) return;
         // Contract 0023 (D8): the kill-switch alert follows the store (another Admin's switch, a background write of a
         // switch-on); the edit buffer is not reloaded, so unsaved edits stay.
+        if (_disposed) return;   // disposed during the await above: never attach to the singleton store
         GuardrailStore.Changed += OnStoreChanged;
         _servers = ServerConfig.GetServers();
         _newScriptServer = _servers.FirstOrDefault(s => s.IsDefault)?.Id ?? _servers.FirstOrDefault()?.Id ?? "";
@@ -534,9 +535,26 @@
         }
     }
 
-    private void OnStoreChanged() => _ = InvokeAsync(StateHasChanged);
+    private bool _disposed;
 
-    public void Dispose() => GuardrailStore.Changed -= OnStoreChanged;
+    private async void OnStoreChanged()
+    {
+        if (_disposed) return;
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit ended while the store changed: nothing to show.
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        GuardrailStore.Changed -= OnStoreChanged;
+    }
 
     /// <summary>Contract 0023 (D8): shows the stored kill switch of <paramref name="stored"/> and takes its stamp — one
     /// copy, so the stamp belongs to the value shown.</summary>

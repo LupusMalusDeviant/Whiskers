@@ -27,7 +27,7 @@ public sealed class InMemoryGuardrailPolicyMarker : IGuardrailPolicyMarker
         return Task.FromResult(Snapshots);
     }
 
-    /// <summary>While set, a write waits for it (a slow database under the store's lock).</summary>
+    /// <summary>While set, a write waits for it (a slow database).</summary>
     public TaskCompletionSource? HoldWrites { get; set; }
 
     /// <summary>Completed when a write starts waiting for <see cref="HoldWrites"/>.</summary>
