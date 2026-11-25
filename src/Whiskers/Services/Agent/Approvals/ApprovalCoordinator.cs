@@ -96,7 +96,8 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             ToolName: call.Name,
             Level: level,
             ParamsJson: paramsJson,
-            Reason: reason,
+            // Contract 0017 A5: the fixed hook sentence follows the rule's reason.
+            Reason: ApprovalDisplay.ReasonWithHook(reason, decision.PrivilegedHook),
             CorrelationId: call.CorrelationId,
             RiskLevel: ApprovalDisplay.RiskOf(level),
             TargetServer: targetServer,
@@ -125,7 +126,8 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
             await _notify.SendAsync(new NotificationEvent
             {
                 EventType = NotificationEventTypes.AgentApproval,
-                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.NotifiedTarget, _publicUrl),
+                ImageInfo = ApprovalDisplay.NotificationText(approval, decision.NotifiedTarget, _publicUrl,
+                    decision.PrivilegedHook),
                 CorrelationId = call.CorrelationId,
                 ApprovalId = approval.Id,
             });

@@ -8,6 +8,12 @@ All notable changes to Whiskers are documented here. The format follows
 
 ### Changed
 
+- **Approvals name a privileged compose hook (contract 0017, amendment 5, INV-62).** A `post_start` or `pre_stop`
+  hook with `privileged: true` is decided at planning only; the check after the run cannot see it. Every approval of
+  such a run now says so, whatever rule raised it: the card and the notification read "Includes a privileged compose
+  hook: decided now only, not checked after the run." (in the notification before the link; it names no service,
+  hook index or command), and the Deploy page's plan notes it beside the hook. The decision rests on the run's
+  exposures, never on the text of a reason.
 - **The kill switch has its own switch-on (contract 0023, INV-19).** On the *Guardrails* page "Switch kill switch on
   now" turns it on at once (`guardrails.kill_switch_on`, Admin, audited and read back) without saving the page's other
   edits, also while an earlier guardrails save is still running past its deadline. A guardrails save that started

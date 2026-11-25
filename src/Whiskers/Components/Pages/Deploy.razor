@@ -192,7 +192,13 @@
                     <ul class="deploy-plan-exposures">
                         @foreach (var e in _checkedPlan.Exposures())
                         {
-                            <li>@e.Display — @ExposureClasses.Of(e.Kind, e.Key, _checkedPlan.ExposurePrefixes)</li>
+                            <li>@e.Display — @ExposureClasses.Of(e.Kind, e.Key, _checkedPlan.ExposurePrefixes)
+                                @if (e.Kind == ExposureKind.Privileged && ComposeExposures.IsHookKey(e.Key))
+                                {
+                                    @* Contract 0017 A5: a privileged hook is decided at planning only. *@
+                                    <em class="deploy-plan-hook-note"> — @L["Deploy_Plan_HookNote"]</em>
+                                }
+                            </li>
                         }
                     </ul>
                 }

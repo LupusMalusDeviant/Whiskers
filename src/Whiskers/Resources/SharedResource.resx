@@ -4775,6 +4775,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Deploy_Plan_Touches" xml:space="preserve">
     <value>Existing containers it touches:</value>
   </data>
+  <data name="Deploy_Plan_HookNote" xml:space="preserve">
+    <value>decided now only — not checked after the run</value>
+  </data>
   <data name="Deploy_Plan_Exposures" xml:space="preserve">
     <value>Exposures:</value>
   </data>

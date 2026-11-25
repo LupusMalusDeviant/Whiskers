@@ -4775,6 +4775,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Deploy_Plan_Touches" xml:space="preserve">
     <value>Betroffene bestehende Container:</value>
   </data>
+  <data name="Deploy_Plan_HookNote" xml:space="preserve">
+    <value>nur jetzt entschieden — nach dem Lauf nicht geprüft</value>
+  </data>
   <data name="Deploy_Plan_Exposures" xml:space="preserve">
     <value>Freigaben:</value>
   </data>
