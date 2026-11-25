@@ -10,6 +10,7 @@
 @inject ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@implements IDisposable
 @inject IStringLocalizer<SharedResource> L
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfig
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
@@ -322,6 +323,9 @@
     {
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
         if (!_isAdmin) return;
+        // Contract 0023 (D8): the kill-switch alert follows the store (another Admin's switch, a background write of a
+        // switch-on); the edit buffer is not reloaded, so unsaved edits stay.
+        GuardrailStore.Changed += OnStoreChanged;
         _servers = ServerConfig.GetServers();
         _newScriptServer = _servers.FirstOrDefault(s => s.IsDefault)?.Id ?? _servers.FirstOrDefault()?.Id ?? "";
 
@@ -516,7 +520,7 @@
             SyncKillSwitch(stored);
             // Contract 0023 (D8): another Admin may have switched it on again meanwhile; that later switch-on stays.
             if (stored.ActivePolicy().ReadOnlyMode)
-                Snackbar.Add(L["GuardrailsView_KillSwitch_Kept_Snackbar"].Value, Severity.Warning);
+                Snackbar.Add(L["GuardrailsView_KillSwitch_OnAgain_Snackbar"].Value, Severity.Warning);
             else
                 Snackbar.Add(L["GuardrailsView_KillSwitch_Disabled_Snackbar"].Value, Severity.Success);
         }
@@ -529,6 +533,10 @@
             Snackbar.Add(ex.Message, Severity.Error);
         }
     }
+
+    private void OnStoreChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => GuardrailStore.Changed -= OnStoreChanged;
 
     /// <summary>Contract 0023 (D8): shows the stored kill switch of <paramref name="stored"/> and takes its stamp — one
     /// copy, so the stamp belongs to the value shown.</summary>
