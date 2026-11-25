@@ -69,7 +69,7 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-29 | gitdeploy.save, gitdeploy.delete, gitdeploy.deploy |
 | U-30 | logalert.create, logalert.delete, logalert.toggle |
 | U-31 | aitrigger.save |
-| U-32 | guardrails.save, guardrails.kill_switch_off |
+| U-32 | guardrails.save, guardrails.kill_switch_on, guardrails.kill_switch_off |
 | U-33 | — an approval decides another operation; approving and rejecting are the approval store's own records, not catalog capabilities |
 | U-34 | config.save, config.whitelist, config.roles, config.mcp_permissions, config.agent, mcp.key_create, mcp.key_delete, vault.secret_set, vault.secret_delete, registry.save, registry.delete, automation.owner_set |
 | U-35 | account.password_change, account.create, account.password_reset, account.delete, automation.hold |

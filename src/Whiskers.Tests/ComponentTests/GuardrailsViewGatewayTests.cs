@@ -120,6 +120,36 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void Switching_the_kill_switch_on_uses_its_own_capability_and_leaves_the_other_edits_unsaved()
+    {
+        // Contract 0023 (D8): not a whole save — only ReadOnlyMode changes.
+        var before = _store.Current.MaxActionsPerSession;
+        var cut = Render<GuardrailsView>();
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("GuardrailsView_KillSwitch_Enable_Button")).Click();
+
+        cut.WaitForAssertion(() => Assert.True(_store.Current.ReadOnlyMode));
+        Assert.Equal(before, _store.Current.MaxActionsPerSession);
+        Assert.Contains("begin:guardrails.kill_switch_on:", Events());
+        Assert.DoesNotContain(Events(), e => e.StartsWith("begin:guardrails.save:", StringComparison.Ordinal));
+        // With the brake on, the page offers switching it off instead.
+        cut.WaitForAssertion(() =>
+            Assert.Contains(cut.FindAll("button"), b => b.TextContent.Contains("GuardrailsView_KillSwitch_Disable_Button")));
+    }
+
+    [Fact]
+    public void An_operator_cannot_switch_the_kill_switch_on()
+    {
+        var cut = Render<GuardrailsView>();
+        _user.Role = AppRole.Operator;
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("GuardrailsView_KillSwitch_Enable_Button")).Click();
+
+        cut.WaitForAssertion(() => Assert.Contains("denied:Denied", Events()));
+        Assert.False(_store.Current.ReadOnlyMode);
+    }
+
+    [Fact]
     public async Task An_operator_cannot_switch_the_kill_switch_off()
     {
         var config = _store.Config;

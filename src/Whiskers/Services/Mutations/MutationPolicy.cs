@@ -42,6 +42,10 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     /// configuration capability, from a person in the UI only, decided and audited like any other mutation.</summary>
     public const string KillSwitchOff = "guardrails.kill_switch_off";
 
+    /// <summary>Contract 0023 (D8): switching the kill switch on. No exemption here: while it is on, the kill switch
+    /// refuses it like any write (harmless, it is on already).</summary>
+    public const string KillSwitchOn = "guardrails.kill_switch_on";
+
     private readonly IAgentGuardrailEngine? _engine;
     private readonly IGuardrailStore? _store;
 

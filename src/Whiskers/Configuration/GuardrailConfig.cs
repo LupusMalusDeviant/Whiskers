@@ -75,6 +75,13 @@ public class GuardrailConfig
     public string ActivePreset { get; set; } = "Standard";
     public List<GuardrailPreset> Presets { get; set; } = new();
 
+    /// <summary>Contract 0023 (D8): the kill-switch version of the store when this copy was read (stamped by
+    /// <c>GuardrailStore.Config</c>, never persisted). A save of a copy read before the last kill-switch toggle keeps
+    /// the stored <see cref="GuardrailPolicy.ReadOnlyMode"/>: a late or stale save never releases the brake.
+    /// <c>null</c> for a configuration that was not read from the store.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long? KillSwitchVersion { get; set; }
+
     /// <summary>The policy of the active preset. An active preset that does not exist never falls back to another
     /// preset (R1-12): the result is the fail-closed policy. The store refuses such a configuration anyway.</summary>
     public GuardrailPolicy ActivePolicy()
@@ -88,6 +95,7 @@ public class GuardrailConfig
     public GuardrailConfig Clone() => new()
     {
         ActivePreset = ActivePreset,
+        KillSwitchVersion = KillSwitchVersion,
         Presets = Presets?.Select(p => p is null ? null! : new GuardrailPreset { Name = p.Name, Policy = p.Policy?.Clone()! })
             .ToList()!,
     };

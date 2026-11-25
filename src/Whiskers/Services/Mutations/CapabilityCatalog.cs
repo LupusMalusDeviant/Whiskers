@@ -65,7 +65,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
     /// the VPN bring-up.</summary>
     public static IReadOnlySet<string> Singletons { get; } = new[]
     {
-        "guardrails.kill_switch_off", "notifications.mark_read", "notifications.clear", "cve.scan", "autopatch.preview",
+        "guardrails.kill_switch_on", "guardrails.kill_switch_off", "notifications.mark_read", "notifications.clear",
+        "cve.scan", "autopatch.preview",
         "autopatch.run", "vpn.bootstrap", "mtls.shared_client_retire", "selfbackup.prune", "selfbackup.restore",
         "aitrigger.save",
     }.ToFrozenSet(StringComparer.Ordinal);
@@ -383,6 +384,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("mcp.key_create", A, "config", Root, Short);
         yield return Ui("mcp.key_delete", A, "config", Dis, Short);
         yield return Ui("guardrails.save", A, "config", Root, Short);
+        // Contract 0023 (D8): switching the kill switch on changes only ReadOnlyMode (the page no longer needs a whole
+        // save for it); like switching it off, it passes the target guard of an abandoned run.
+        yield return Ui("guardrails.kill_switch_on", A, "config", Root, Short);
         // The one configuration write the kill switch lets through: switching the kill switch itself off.
         yield return Ui("guardrails.kill_switch_off", A, "config", Root, Short);
         yield return Ui("vault.secret_set", A, "config", Root, Short);

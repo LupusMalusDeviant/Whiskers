@@ -36,6 +36,13 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     private readonly SemaphoreSlim _lock = new(1, 1);
     private volatile State _state = new(GuardrailConfig.SafeDefault(), null);
 
+    /// <summary>Contract 0023 (D8): counts the kill-switch toggles (on, off, a reset on the host). A save keeps the
+    /// stored <c>ReadOnlyMode</c> unless it started after the last one (a version compare-and-set).</summary>
+    private long _killSwitchVersion;
+
+    /// <summary>The current kill-switch version (contract 0023, D8).</summary>
+    public long KillSwitchVersion => Interlocked.Read(ref _killSwitchVersion);
+
     // Contract 0010: what phase 1 (the Order-80 load) found, for phase 2 (ReconcileMarkerAsync).
     private volatile bool _undecided;          // neither file: the record decides in phase 2
     private volatile bool _fileAtLoad;         // a policy file (readable or not, or only .bak) was there
@@ -84,10 +91,17 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     {
         get
         {
+            // The version first: a toggle writes the state, then counts up, so a copy is never stamped newer than the
+            // state it was taken from (a too-old stamp only keeps the stored kill switch: the safe side).
+            var version = Interlocked.Read(ref _killSwitchVersion);
             var state = _state;
-            return state.LoadError is null
-                ? state.Config.Clone()
-                : new GuardrailConfig
+            if (state.LoadError is null)
+            {
+                var copy = state.Config.Clone();
+                copy.KillSwitchVersion = version;
+                return copy;
+            }
+            return new GuardrailConfig
                 {
                     ActivePreset = FailClosedPreset,
                     Presets = { new GuardrailPreset { Name = FailClosedPreset, Policy = GuardrailPolicy.FailClosed() } },
@@ -177,6 +191,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             config.Presets.First(p => p.Name == config.ActivePreset).Policy.ReadOnlyMode = true;
             await _store.SaveAsync(config);
             _state = new State(config.Clone(), null);
+            Interlocked.Increment(ref _killSwitchVersion);   // D8: the reset engages the kill switch
             _undecided = false;
             _fileAtLoad = true;
             _loaded = true;
@@ -423,11 +438,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         var next = config.Clone();
         if (next.Problem() is { } problem)
             throw new GuardrailConfigException(problem);
+        // D8: the save started from the copy it edits; one without a stamp starts now.
+        var started = config.KillSwitchVersion ?? KillSwitchVersion;
 
         await _lock.WaitAsync(ct);
         try
         {
             var before = _state;
+            KeepKillSwitchIfStale(next, before, started, editor);
             await GuardTrustedScriptsAsync(next, editor, expectedTrustedAdditions);
             await _store.SaveAsync(next);   // throws → the previous policy stays live
             _state = new State(next, null);
@@ -449,6 +467,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         // Back-compat: replace the active preset's policy — on a copy, made live only after it is persisted.
         RequireAdmin(editor);
         ArgumentNullException.ThrowIfNull(policy);
+        var started = KillSwitchVersion;
         await _lock.WaitAsync(ct);
         try
         {
@@ -463,6 +482,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             active.Policy = policy.Clone();
             if (next.Problem() is { } problem)
                 throw new GuardrailConfigException(problem);
+            KeepKillSwitchIfStale(next, state, started, editor);
             await GuardTrustedScriptsAsync(next, editor, null);
             await _store.SaveAsync(next);
             _state = new State(next, null);
@@ -505,7 +525,16 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
     }
 
-    public async Task DisableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default)
+    public Task DisableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
+        SetKillSwitchAsync(on: false, editor, ct);
+
+    /// <inheritdoc />
+    public Task EnableKillSwitchAsync(AgentPrincipal editor, CancellationToken ct = default) =>
+        SetKillSwitchAsync(on: true, editor, ct);
+
+    /// <summary>R1-11 and contract 0023 (D8): changes only <c>ReadOnlyMode</c> of the active preset and counts the
+    /// toggle, so a save that started before it keeps the value it set.</summary>
+    private async Task SetKillSwitchAsync(bool on, AgentPrincipal editor, CancellationToken ct)
     {
         RequireAdmin(editor);
         await _lock.WaitAsync(ct);
@@ -515,14 +544,16 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 throw new InvalidOperationException("The guardrail configuration could not be loaded; fix it before changing it.");
             var next = _state.Config.Clone();
             var active = next.Presets.FirstOrDefault(p => p.Name == next.ActivePreset);
-            if (active is null || !active.Policy.ReadOnlyMode) return;
-            active.Policy.ReadOnlyMode = false;
+            if (active is null || active.Policy.ReadOnlyMode == on) return;
+            active.Policy.ReadOnlyMode = on;
             var before = _state;
-            await _store.SaveAsync(next);   // throws → the kill switch stays on
+            await _store.SaveAsync(next);   // throws → the kill switch stays as it was
             _state = new State(next, null);
+            Interlocked.Increment(ref _killSwitchVersion);   // after the state: a copy is never stamped too new
             await AfterSavedAsync();
             RecordChange(before, next);
-            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).", Whiskers.Utils.LogSafe.Value(editor.DisplayName), active.Name);
+            _logger?.LogWarning("Kill switch switched {State} by {Editor} (preset {Preset}).", on ? "on" : "off",
+                Whiskers.Utils.LogSafe.Value(editor.DisplayName), active.Name);
         }
         finally
         {
@@ -531,6 +562,21 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
         Changed?.Invoke();
     }
+
+    /// <summary>Contract 0023 (D8): a save that started before the last kill-switch toggle (an abandoned save ending
+    /// late, or an edit of an older copy) keeps the stored <c>ReadOnlyMode</c> — it never releases the brake a toggle
+    /// engaged after it, and never engages one a toggle released.</summary>
+    private void KeepKillSwitchIfStale(GuardrailConfig next, State stored, long started, AgentPrincipal editor)
+    {
+        if (started == KillSwitchVersion) return;
+        var storedOn = stored.LoadError is not null || stored.Config.ActivePolicy().ReadOnlyMode;
+        var policy = next.ActivePolicy();
+        if (policy.ReadOnlyMode == storedOn) return;
+        policy.ReadOnlyMode = storedOn;
+        _logger?.LogWarning("Guardrails save by {Editor} started before the last kill-switch change: the kill switch " +
+                            "stays {State}.", Whiskers.Utils.LogSafe.Value(editor.DisplayName), storedOn ? "on" : "off");
+    }
+
 
     /// <summary>
     /// Contract 0022, amendment 1, under the store's lock before anything is written. A4: the additions this save makes
