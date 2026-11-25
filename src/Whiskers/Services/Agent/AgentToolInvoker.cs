@@ -190,7 +190,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             return null;
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
         var decided = await _gateway.DecideAsync(RequestOf(call, capability, args, context), ct);
-        if (decided is null) return null;
+        return decided is null ? null : DecisionOf(decided, capability);
+    }
+
+    /// <summary>The agent's view of a gateway decision: verdict, the recorded decision, the binding and what the approval
+    /// card and notification may say of the resolved target — contract 0017 A5: whether it carries a privileged hook.</summary>
+    internal static GuardrailDecision DecisionOf(MutationDecisionResult decided, Capability capability)
+    {
         var verdict = decided.Refused is MutationStatus.PendingApproval || decided.Verdict == MutationVerdict.Confirm
             ? GuardrailVerdict.Confirm
             : decided.Refused is not null || decided.Verdict == MutationVerdict.Deny ? GuardrailVerdict.Deny : GuardrailVerdict.Allow;

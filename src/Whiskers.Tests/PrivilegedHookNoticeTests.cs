@@ -147,17 +147,34 @@ public class PrivilegedHookNoticeTests
     [InlineData("https://collector.example.com/collect")]
     public async Task The_sentence_names_neither_the_service_nor_the_hook_index(string service)
     {
-        var (_, text) = await RaiseAsync(GatewaySubject(Target(Hook(service, "post_start", 7))), "Needs a human.");
+        var (approval, text) = await RaiseAsync(GatewaySubject(Target(Hook(service, "post_start", 7))), "Needs a human.");
 
         Assert.Contains(Sentence, text);
         Assert.DoesNotContain(service, text);
         Assert.DoesNotContain("hook:post_start", text);
-        Assert.DoesNotContain(":7", Sentence);
+        Assert.DoesNotContain("post_start:7", text);
+        // What the gate adds to the reason names neither either.
+        Assert.Equal($"Needs a human. {Sentence}", approval.Reason);
     }
 
-    [Fact]
-    public async Task The_agent_path_adds_the_sentence_too()
+    /// <summary>What the gateway answers the agent for <paramref name="target"/>: a confirmation.</summary>
+    private static GuardrailDecision AgentDecision(MutationTarget target) =>
+        AgentToolInvoker.DecisionOf(
+            new MutationDecisionResult("op-1", MutationVerdict.Confirm, "Writes need a human.", [], "dec-1", "Standard", null)
+            {
+                Binding = "binding-agent",
+                Target = target,
+            },
+            new CapabilityCatalog().Find("compose.deploy")!);
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_agent_path_takes_the_flag_from_the_gateways_target_and_adds_the_sentence(bool hook)
     {
+        // AgentToolInvoker → GuardrailDecision → ApprovalCoordinator, as a chat-raised approval runs.
+        var decision = AgentDecision(hook ? Target(Hook("api"), Port("web")) : Target(Port("web")));
+        Assert.Equal(hook, decision.PrivilegedHook);
         var store = new ApprovalStore();
         var notify = new Recorder();
         var coordinator = new ApprovalCoordinator(store, notify, new Policy());
@@ -166,15 +183,38 @@ public class PrivilegedHookNoticeTests
             AgentOrigin.WebUi, GuardrailPolicy.SafeDefault());
         var call = new AgentToolCall("call_0", "compose_deploy", "{}");
 
-        var approval = await coordinator.RaiseAsync(new Session("chat-1"), call, context, "Writes need a human.",
-            new GuardrailDecision(GuardrailVerdict.Confirm, "Writes need a human.", Array.Empty<string>())
-            {
-                PrivilegedHook = ApprovalDisplay.HasPrivilegedHook(Target(Hook("api"))),
-            });
+        var approval = await coordinator.RaiseAsync(new Session("chat-1"), call, context, decision.Reason, decision);
 
-        Assert.Equal($"Writes need a human. {Sentence}", approval.Reason);
         var text = Assert.Single(notify.Sent).ImageInfo!;
-        Assert.True(text.IndexOf(Sentence, StringComparison.Ordinal) < text.IndexOf(Link, StringComparison.Ordinal));
+        if (hook)
+        {
+            Assert.Equal($"Writes need a human. {Sentence}", approval.Reason);
+            Assert.True(text.IndexOf(Sentence, StringComparison.Ordinal) < text.IndexOf(Link, StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.Equal("Writes need a human.", approval.Reason);
+            Assert.DoesNotContain(Sentence, text);
+        }
+    }
+
+    [Fact]
+    public async Task The_stored_reason_is_the_real_rules_text_followed_by_the_sentence()
+    {
+        // The rule's own reason for the hook, as the agent rule set decides it.
+        var exposures = new[] { Hook("api") };
+        var policy = new GuardrailPolicy { MaxAutonomousLevel = McpPermissionLevels.Admin, RequireConfirmationForWrites = false };
+        var request = new GuardrailRequest("deploy_compose", McpPermissionLevels.Admin,
+            new Dictionary<string, JsonElement> { [ExposureChangeRule.ResolvedPrefix + "0"] = JsonSerializer.SerializeToElement(exposures[0]) },
+            new AgentContext("s", new AgentPrincipal(AgentPrincipalKind.McpKey, "key", McpPermissionLevels.Admin, null),
+                AgentOrigin.McpDirect, policy));
+        Assert.Equal(GuardrailVerdict.Confirm, new ExposureChangeRule().Evaluate(request, out var ruleText));
+        Assert.Contains("decided at planning only", ruleText);
+
+        var (approval, _) = await RaiseAsync(GatewaySubject(Target(exposures), [ExposureChangeRule.RuleId]), ruleText,
+            [ExposureChangeRule.RuleId]);
+
+        Assert.Equal($"{ruleText} {Sentence}", approval.Reason);
     }
 
     [Fact]
