@@ -121,5 +121,4 @@ Services/Vault/VaultBackedSettingsSave.cs|RemoveAsync|vault.secret_delete|1
 Services/Vault/VaultBackedSettingsSave.cs|SaveAgentAsync|config.agent|1
 Services/Vault/VaultBackedSettingsSave.cs|SaveAppSettingsAsync|config.save|1
 Services/Vault/VaultBackedSettingsSave.cs|StageAsync|vault.secret_set|1
-Services/Webhooks/WebhookService.cs|RunAsOwnerAsync|compose.deploy|1
 Services/Webhooks/WebhookService.cs|RunAsOwnerAsync|container.restart|1

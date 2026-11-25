@@ -43,6 +43,11 @@ public sealed class DeadlineTokenRatchetTests
         // The scan must see the gateway actions at all, or an empty result would pass.
         Assert.True(sites.Count > 100, $"only {sites.Count} gateway actions found; the scan no longer sees them");
         Assert.DoesNotContain(sites, s => s.File.StartsWith('?'));
+        // An action the scan cannot see (held in a field or handed in from elsewhere) cannot be judged: load it in the
+        // calling method, as a lambda or method group.
+        var unresolved = sites.Where(s => s.Unresolved).Select(s => $"{s.Key} ({s.Entry.Name})").ToList();
+        Assert.True(unresolved.Count == 0,
+            "Gateway calls whose action the token ratchet cannot see (contract 0023): " + string.Join(", ", unresolved));
 
         var actual = DeadlineTokenScan.Discarding(sites);
         var path = BaselinePath();
@@ -76,16 +81,59 @@ public sealed class DeadlineTokenRatchetTests
     [InlineData(nameof(DeadlineTokenFixtures.MethodGroup))]
     [InlineData(nameof(DeadlineTokenFixtures.VirtualMethodGroup))]
     [InlineData(nameof(DeadlineTokenFixtures.IgnoresUnnamed))]
-    public void A_discarding_action_is_found(string method) =>
-        Assert.False(Assert.Single(FixtureSites(method)).PassesToken);
+    [InlineData(nameof(DeadlineTokenFixtures.DiscardsAsync))]
+    [InlineData(nameof(DeadlineTokenFixtures.LocalFunction))]
+    [InlineData(nameof(DeadlineTokenFixtures.DiscardsAtGateway))]
+    [InlineData(nameof(DeadlineTokenFixtures.LogsOnly))]
+    [InlineData(nameof(DeadlineTokenFixtures.ComparesOnly))]
+    public void A_discarding_action_is_found(string method)
+    {
+        var site = Assert.Single(FixtureSites(method));
+        Assert.NotNull(site.Action);
+        Assert.False(site.PassesToken);
+    }
 
     [Theory]
     [InlineData(nameof(DeadlineTokenFixtures.Passes))]
     [InlineData(nameof(DeadlineTokenFixtures.PassesThroughLocal))]
     [InlineData(nameof(DeadlineTokenFixtures.PassesAcrossAwait))]
     [InlineData(nameof(DeadlineTokenFixtures.PassesToGateway))]
+    [InlineData(nameof(DeadlineTokenFixtures.PassesThroughClosure))]
     public void An_action_passing_its_token_on_is_not_found(string method) =>
         Assert.True(Assert.Single(FixtureSites(method)).PassesToken);
+
+    [Fact]
+    public void Every_action_a_call_may_hand_on_is_judged_also_the_branches_of_a_conditional()
+    {
+        var sites = FixtureSites(nameof(DeadlineTokenFixtures.Conditional));
+        Assert.Equal(2, sites.Count);
+        Assert.Single(sites, s => !s.PassesToken);
+        Assert.Single(sites, s => s.PassesToken);
+    }
+
+    [Fact]
+    public void A_call_whose_action_is_not_loaded_in_the_calling_method_is_unresolved()
+    {
+        var site = Assert.Single(FixtureSites(nameof(DeadlineTokenFixtures.HeldInField)));
+        Assert.Null(site.Action);
+        Assert.True(site.Unresolved);
+    }
+
+    [Fact]
+    public void A_runner_called_on_its_class_is_an_entry_point_too()
+    {
+        var implementation = typeof(UiMutationRunner).GetMethods()
+            .First(m => m.Name == nameof(IUiMutationRunner.RunAsync) && m.GetGenericArguments().Length == 2
+                                                                     && m.DeclaringType == typeof(UiMutationRunner));
+        Assert.True(DeadlineTokenScan.IsEntryPoint(implementation));
+    }
+
+    [Fact]
+    public void A_capability_consumed_by_a_helper_does_not_name_a_later_call()
+    {
+        var site = Assert.Single(FixtureSites(nameof(DeadlineTokenFixtures.AfterHelper)));
+        Assert.Equal("*", site.Capability);
+    }
 
     [Fact]
     public void A_site_is_keyed_by_file_enclosing_method_and_capability_never_by_a_generated_name()
@@ -103,7 +151,9 @@ public sealed class DeadlineTokenRatchetTests
             [typeof(DeadlineTokenFixtures)]));
         var second = DeadlineTokenScan.Discarding(DeadlineTokenScan.Sites(typeof(DeadlineTokenFixtures).Assembly,
             [typeof(DeadlineTokenFixturesWithMore)]));
-        Assert.Equal(first.Where(kv => kv.Key.Contains("|Discards|")), second.Where(kv => kv.Key.Contains("|Discards|")));
+        const string key = "Architecture/DeadlineTokenFixtures.cs|Discards|container.restart";
+        Assert.Equal(1, first.GetValueOrDefault(key));
+        Assert.Equal(1, second.GetValueOrDefault(key));
     }
 
     [Theory]

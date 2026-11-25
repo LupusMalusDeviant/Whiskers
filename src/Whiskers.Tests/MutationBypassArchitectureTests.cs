@@ -444,70 +444,26 @@ internal static class MutationCallScanner
     }
 
     /// <summary>
-    /// Lambdas handed to a <see cref="MutationEntryPointAttribute"/> runner: in every method body, a capability id loaded with
-    /// <c>ldstr</c>, then a lambda loaded with <c>ldftn</c>, then the call to <c>RunAsync</c>. Keyed by the lambda's
-    /// body and, for an async lambda, by its state machine type.
+    /// Lambdas handed to a <see cref="MutationEntryPointAttribute"/> runner with a capability id literal at the call, from the
+    /// same IL scan as the token ratchet (<see cref="DeadlineTokenScan"/>, contract 0023). Keyed by the lambda's body
+    /// and, for an async lambda, by its state machine type.
     /// </summary>
     private static Dictionary<object, string> UiRunnerLambdas(Assembly assembly)
     {
         var map = new Dictionary<object, string>();
-        foreach (var type in SafeTypes(assembly))
-            foreach (var method in type.GetMethods(All).Cast<MethodBase>().Concat(type.GetConstructors(All)))
-            {
-                byte[]? il;
-                try { il = method.GetMethodBody()?.GetILAsByteArray(); }
-                catch { continue; }
-                if (il is null) continue;
-
-                var module = method.Module;
-                var typeArgs = method.DeclaringType is { IsGenericType: true } dt ? dt.GetGenericArguments() : null;
-                var methodArgs = method is MethodInfo { IsGenericMethod: true } gm ? gm.GetGenericArguments() : null;
-                string? capability = null;
-                MethodBase? lambda = null;
-                var pos = 0;
-                while (pos < il.Length)
-                {
-                    short value = il[pos++];
-                    if (value == 0xFE && pos < il.Length) value = (short)(0xFE00 | il[pos++]);
-                    if (!OpCodesByValue.TryGetValue(value, out var op)) break;
-
-                    if (op.OperandType == OperandType.InlineString)
-                    {
-                        string? text = null;
-                        try { text = module.ResolveString(BitConverter.ToInt32(il, pos)); } catch { }
-                        if (text is not null && Catalog.Find(text) is not null) capability = text;
-                    }
-                    else if (op == OpCodes.Ldftn)
-                    {
-                        try { lambda = module.ResolveMethod(BitConverter.ToInt32(il, pos), typeArgs, methodArgs); }
-                        catch { lambda = null; }
-                    }
-                    else if (op.OperandType == OperandType.InlineMethod)
-                    {
-                        MethodBase? called = null;
-                        try { called = module.ResolveMethod(BitConverter.ToInt32(il, pos), typeArgs, methodArgs); } catch { }
-                        if (called is not null && IsEntryPoint(called) && capability is not null && lambda is not null)
-                        {
-                            map[Key(lambda)] = capability;
-                            if (lambda.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType is { } machine)
-                                map[machine] = capability;
-                            capability = null;
-                            lambda = null;
-                        }
-                    }
-                    pos += OperandSize(op, il, pos);
-                }
-            }
+        foreach (var site in DeadlineTokenScan.Sites(assembly))
+        {
+            if (site.Action is not { } lambda || site.Capability == "*"
+                || site.Entry.Name == nameof(IMutationGateway.ExecuteAsync))
+                continue;
+            map[Key(lambda)] = site.Capability;
+            if (lambda.GetCustomAttribute<AsyncStateMachineAttribute>()?.StateMachineType is { } machine)
+                map[machine] = site.Capability;
+        }
         return map;
     }
 
     private static object Key(MethodBase method) => (method.Module, method.MetadataToken);
-
-    private static bool IsEntryPoint(MethodBase called)
-    {
-        var definition = called is MethodInfo { IsGenericMethod: true } generic ? generic.GetGenericMethodDefinition() : called;
-        return definition.IsDefined(typeof(MutationEntryPointAttribute), false);
-    }
 
     private static string? UiGatedCapability(Dictionary<object, string> gated, MethodBase method) =>
         gated.GetValueOrDefault(Key(method))

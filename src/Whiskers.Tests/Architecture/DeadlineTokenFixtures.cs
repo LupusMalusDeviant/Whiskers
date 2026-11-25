@@ -62,6 +62,59 @@ internal class DeadlineTokenFixtures(IUiMutationRunner runner, IMutationGateway 
             MutationSurface.Ui, new MutationTarget("container", "c1"), new Dictionary<string, JsonElement>()),
         (context, ct) => Task.Delay(1, ct).ContinueWith(_ => 1, ct));
 
+    public Task DiscardsAsync() => Runner.RunAsync("container.restart", new { },
+        async (ResolvedContainer c, CancellationToken ct) =>
+        {
+            await Task.Yield();
+            await Task.Delay(1, CancellationToken.None);
+        });
+
+    public Task LocalFunction()
+    {
+        return Runner.RunAsync<ResolvedContainer>("container.restart", new { }, Local);
+
+        static Task Local(ResolvedContainer c, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    public Task DiscardsAtGateway() => Gateway.ExecuteAsync(
+        new MutationRequest("container.restart",
+            new MutationPrincipal(MutationPrincipalKind.Human, "user:x", "x", McpPermissionLevels.Admin),
+            MutationSurface.Ui, new MutationTarget("container", "c1"), new Dictionary<string, JsonElement>()),
+        (context, ct) => Task.FromResult(1));
+
+    public Task LogsOnly() => Runner.RunAsync("container.restart", new { },
+        (ResolvedContainer c, CancellationToken ct) =>
+        {
+            Console.WriteLine("{0}", ct);
+            return Task.CompletedTask;
+        });
+
+    public Task ComparesOnly() => Runner.RunAsync("container.restart", new { },
+        (ResolvedContainer c, CancellationToken ct) => ct == CancellationToken.None ? Task.CompletedTask : Task.Delay(1));
+
+    /// <summary>Both branches are actions of the one call: the discarding one first.</summary>
+    public Task Conditional(bool fast) => Runner.RunAsync<ResolvedContainer>("container.restart", new { },
+        fast
+            ? (Func<ResolvedContainer, CancellationToken, Task>)((ResolvedContainer c, CancellationToken _) => Task.CompletedTask)
+            : (ResolvedContainer c, CancellationToken ct) => Task.Delay(1, ct));
+
+    private readonly Func<ResolvedContainer, CancellationToken, Task> _held = (c, ct) => Task.Delay(1, ct);
+
+    /// <summary>An action that is not loaded in the calling body: the ratchet cannot judge it.</summary>
+    public Task HeldInField() => Runner.RunAsync("container.restart", new { }, _held);
+
+    public Task PassesThroughClosure() => Runner.RunAsync("container.restart", new { },
+        (ResolvedContainer c, CancellationToken ct) => Task.Run(() => Task.Delay(1, ct)));
+
+    /// <summary>The literal goes to a helper; the runner's capability is a variable.</summary>
+    public Task AfterHelper(string capabilityId)
+    {
+        Consume("container.restart");
+        return Runner.RunAsync(capabilityId, new { }, (ResolvedContainer c, CancellationToken _) => Task.CompletedTask);
+    }
+
+    private static void Consume(string capabilityId) => GC.KeepAlive(capabilityId);
+
     private static Task StaticAction(ResolvedContainer c, CancellationToken ct) => Task.CompletedTask;
 
     protected virtual Task VirtualAction(ResolvedContainer c, CancellationToken ct) => Task.CompletedTask;
