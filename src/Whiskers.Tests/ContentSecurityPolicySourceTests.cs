@@ -57,52 +57,75 @@ public sealed class ContentSecurityPolicySourceTests
         Assert.True(offenders.Count == 0, "eval interop the CSP blocks in: " + string.Join(", ", offenders));
     }
 
-    /// <summary>The chart options ApexCharts always serializes as a JS function (<c>{"@eval": …}</c>, its
-    /// <c>FunctionStringConverter</c>): the client evaluates each with <c>eval</c>, which the CSP refuses — the chart
-    /// throws and the circuit ends (2026-11-26, the y-axis label formatter on the dashboard).</summary>
-    internal static IReadOnlyDictionary<string, HashSet<string>> ApexEvalOptions() =>
-        typeof(ApexCharts.YAxis).Assembly.GetTypes()
-            .Where(t => t.Namespace == "ApexCharts")
-            .SelectMany(t => t.GetProperties().Select(p => (Type: t.Name, Property: p)))
-            .Where(x => x.Property.GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonConverterAttribute), true)
-                .Cast<System.Text.Json.Serialization.JsonConverterAttribute>()
-                .Any(a => a.ConverterType?.Name == "FunctionStringConverter"))
-            .GroupBy(x => x.Type, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.Property.Name).ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
+    // ---- Charts (2026-11-26): ApexCharts sends every option it holds for a JS function as {"@eval": …}, and the client
+    // evaluates it with eval, which the CSP refuses — the chart throws and the circuit ends (the y-axis label formatter
+    // on the dashboard). The check reads the options as the library serializes them, so every converter and every way
+    // of setting an option is covered.
 
-    // An object initializer of an ApexCharts option type, its own level only: new ApexCharts.YAxisLabels { … }.
-    private static readonly Regex ApexInitializer = new(@"new\s+ApexCharts\.(\w+)\s*\{([^{}]*)\}");
-
-    // A string that contains the word "function": the list converters evaluate such an entry (case-insensitive).
-    private static readonly Regex FunctionText = new(@"""[^""\r\n]*function[^""\r\n]*""", RegexOptions.IgnoreCase);
-
-    internal static IEnumerable<string> ApexEvalUses(string source)
+    /// <summary>The library's own serialization of chart options, the JSON its <c>renderChart</c> receives.</summary>
+    internal static string SerializeChartOptions(object options)
     {
-        var options = ApexEvalOptions();
-        foreach (Match m in ApexInitializer.Matches(source))
-            if (options.TryGetValue(m.Groups[1].Value, out var names))
-                foreach (var name in names)
-                    if (Regex.IsMatch(m.Groups[2].Value, $@"\b{Regex.Escape(name)}\s*=(?!=)"))
-                        yield return $"{m.Groups[1].Value}.{name}";
-        if (source.Contains("ApexCharts", StringComparison.Ordinal))
-            foreach (Match m in FunctionText.Matches(source))
-                yield return m.Value;
+        var serializer = typeof(ApexCharts.YAxis).Assembly.GetType("ApexCharts.Internal.ChartSerializer", throwOnError: true)!;
+        var method = serializer.GetMethod("SerializeOptions",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        return (string)method.Invoke(null, [options])!;
     }
 
-    [Theory]
-    [InlineData("Labels = new ApexCharts.YAxisLabels { Formatter = \"function(v) { return v + '%' }\" }", true)]   // the crash
-    [InlineData("Labels = new ApexCharts.YAxisLabels { Formatter = \"v => v\" }", true)]   // evaluated whatever it says
-    [InlineData("Yaxis = new ApexCharts.YAxis { DecimalsInFloat = 0, Title = new ApexCharts.AxisTitle { Text = \"%\" } }", false)]
-    [InlineData("<MudTextField Label=\"Name\" /> new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = \"HH:mm\" } }", false)]
-    public void The_chart_scan_finds_evaluated_options_only(string source, bool offends)
-        => Assert.Equal(offends, ApexEvalUses(source).Any());
+    /// <summary>Every static method in Whiskers that builds chart options (a page's or widget's <c>CreateChartOptions</c>).</summary>
+    private static IReadOnlyList<System.Reflection.MethodInfo> ChartOptionBuilders() =>
+        typeof(Whiskers.Services.Metrics.MetricPoint).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+                                          | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly))
+            .Where(m => m.ReturnType.IsGenericType
+                        && m.ReturnType.GetGenericTypeDefinition() == typeof(ApexCharts.ApexChartOptions<>))
+            .ToList();
 
     [Fact]
-    public void No_chart_sets_an_option_that_ApexCharts_evaluates_as_JavaScript()
+    public void The_serialized_check_sees_an_evaluated_option()
     {
-        Assert.Contains("Formatter", ApexEvalOptions()["YAxisLabels"]);
-        var offenders = Files("*.razor").Concat(Files("*.cs"))
-            .SelectMany(c => ApexEvalUses(c.Text).Select(hit => $"{c.Path} ({hit})")).ToList();
-        Assert.True(offenders.Count == 0, "chart options the CSP refuses to evaluate in: " + string.Join(", ", offenders));
+        var formatter = new ApexCharts.ApexChartOptions<Whiskers.Services.Metrics.MetricPoint>
+        {
+            Yaxis = [new ApexCharts.YAxis { Labels = new ApexCharts.YAxisLabels { Formatter = "function(v) { return v + '%' }" } }],
+        };
+        Assert.Contains("@eval", SerializeChartOptions(formatter));   // the crash
+        var arrow = new ApexCharts.ApexChartOptions<Whiskers.Services.Metrics.MetricPoint>
+        {
+            DataLabels = new ApexCharts.DataLabels { Formatter = "(v) => { return v + '%' }" },
+        };
+        Assert.Contains("@eval", SerializeChartOptions(arrow));
+        var plain = new ApexCharts.ApexChartOptions<Whiskers.Services.Metrics.MetricPoint>
+        {
+            Yaxis = [new ApexCharts.YAxis { DecimalsInFloat = 0, Title = new ApexCharts.AxisTitle { Text = "%" } }],
+        };
+        Assert.DoesNotContain("@eval", SerializeChartOptions(plain));
+    }
+
+    [Fact]
+    public void No_chart_sends_an_option_that_ApexCharts_evaluates_as_JavaScript()
+    {
+        var builders = ChartOptionBuilders();
+        var offenders = new List<string>();
+        foreach (var builder in builders)
+        {
+            var args = builder.GetParameters().Select(p => p.ParameterType == typeof(string) ? (object)"#2196F3"
+                : throw new InvalidOperationException($"{builder.DeclaringType?.Name}.{builder.Name}: unexpected parameter {p.Name}")).ToArray();
+            if (SerializeChartOptions(builder.Invoke(null, args)!).Contains("@eval", StringComparison.Ordinal))
+                offenders.Add($"{builder.DeclaringType?.Name}.{builder.Name}");
+        }
+        Assert.True(offenders.Count == 0, "chart options the CSP refuses to evaluate: " + string.Join(", ", offenders));
+
+        // Every chart file builds its options in such a method and changes none of them afterwards — otherwise the check
+        // above would not see what the chart sends.
+        var chartFiles = Files("*.razor").Concat(Files("*.cs"))
+            .Where(c => c.Text.Contains("ApexChartOptions<", StringComparison.Ordinal)).ToList();
+        Assert.Equal(chartFiles.Count,
+            builders.Select(b => b.DeclaringType!).Select(t => t.DeclaringType ?? t).Distinct().Count());
+        var initializer = new Regex(@"ApexChartOptions<\w+>\s+(_\w+)\s*=\s*(?<init>[^;]*);");
+        foreach (var (path, text) in chartFiles)
+            foreach (Match m in initializer.Matches(text))
+            {
+                Assert.Matches(@"^Create\w*\(", m.Groups["init"].Value.Trim());
+                Assert.DoesNotMatch($@"\b{Regex.Escape(m.Groups[1].Value)}\s*(\.|\[)[^;]*?(?<![=!<>])=(?!=)", text);
+            }
     }
 }

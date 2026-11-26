@@ -11,8 +11,8 @@ All notable changes to Whiskers are documented here. The format follows
 - **CPU charts no longer end the page's connection.** The dashboard, the container page and the chat widget gave
   their y-axis a JavaScript label formatter, which the chart library evaluates with `eval`; the Content Security
   Policy (`script-src 'self'`) refuses that, so drawing the chart threw and the page lost its connection. The axes now
-  show whole numbers with "%" as their title, and the CSP stays as it is. A source test refuses chart options the
-  library would evaluate.
+  show whole numbers with "%" as their title, and the CSP stays as it is. A test reads every chart's options as the
+  library sends them and refuses one it would evaluate.
 
 ### Changed
 
