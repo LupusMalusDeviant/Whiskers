@@ -131,8 +131,11 @@ public sealed class ContentSecurityPolicySourceTests
     private static readonly Regex BuilderSignature = new(@"static\s+(?:[\w.]+\.)?ApexChartOptions<[\w.]+>\s+Create\w*\(");
     private static readonly Regex BuilderReturn = new(@"return\s+new\s+(?:[\w.]+\.)?ApexChartOptions<");
     private static readonly Regex AnyOptions = new(@"ApexChartOptions<");
-    private static readonly Regex ChartTag = new(@"<(?:ApexCharts\.)?ApexChart\b(?<attrs>[^>]*)>");
-    private static readonly Regex Attribute = new(@"(?<name>@?[\w:]+)\s*=\s*""(?<value>[^""]*)""");
+    // The tag up to its closing '>', quoted values skipped whole (a lambda's "=>" inside a value does not end it).
+    private static readonly Regex ChartTag = new(@"<(?:ApexCharts\.)?ApexChart\b(?<attrs>(?:""[^""]*""|'[^']*'|[^>""'])*)/?>");
+    // An attribute name, read apart from its value (quoted, unquoted or a lambda).
+    private static readonly Regex AttributeName = new(@"(?<=\s)(?<name>@?[\w:.]+)\s*=");
+    private static readonly Regex OptionsValue = new(@"(?<=\s)Options\s*=\s*""(?<value>[^""]*)""");
 
     // The component parameters a chart may set: the others (FormatYAxisLabel, toolbar icons, annotation events) make the
     // component add an evaluated function of its own, which the serialized options do not show.
@@ -150,7 +153,7 @@ public sealed class ContentSecurityPolicySourceTests
         foreach (var field in fields)
         {
             // Set again only from a builder.
-            foreach (Match m in Regex.Matches(text, $@"(?<![\w.]){Regex.Escape(field)}\s*=(?![=>])\s*(?<rhs>[^;\r\n]*)"))
+            foreach (Match m in Regex.Matches(text, $@"(?<![\w.])(?:this\.)?{Regex.Escape(field)}\s*(?:\?\?)?=(?![=>])\s*(?<rhs>[^;\r\n]*)"))
                 if (!Regex.IsMatch(m.Groups["rhs"].Value, @"^Create\w*\("))
                     yield return $"{field} set to something else than a builder";
             // Never changed after it was built (a read, a lambda or a comparison is not a change).
@@ -159,14 +162,20 @@ public sealed class ContentSecurityPolicySourceTests
         }
 
         foreach (Match tag in ChartTag.Matches(text))
-            foreach (Match a in Attribute.Matches(tag.Groups["attrs"].Value))
+        {
+            // Names outside quoted values only: blank the values first.
+            var attrs = tag.Groups["attrs"].Value;
+            var names = Regex.Replace(attrs, @"""[^""]*""|'[^']*'", "\"\"");
+            foreach (Match a in AttributeName.Matches(names))
+                if (!ChartParameters.Contains(a.Groups["name"].Value))
+                    yield return $"chart parameter {a.Groups["name"].Value}";
+            if (AttributeName.Matches(names).Any(a => a.Groups["name"].Value == "Options"))
             {
-                var name = a.Groups["name"].Value;
-                if (!ChartParameters.Contains(name))
-                    yield return $"chart parameter {name}";
-                else if (name == "Options" && !fields.Contains(a.Groups["value"].Value.TrimStart('@')))
-                    yield return $"chart options {a.Groups["value"].Value} not a builder field";
+                var options = OptionsValue.Match(attrs);
+                if (!options.Success || !fields.Contains(options.Groups["value"].Value.TrimStart('@')))
+                    yield return $"chart options {(options.Success ? options.Groups["value"].Value : "(unquoted)")} not a builder field";
             }
+        }
     }
 
     [Theory]
@@ -184,6 +193,14 @@ public sealed class ContentSecurityPolicySourceTests
                 "void Tweak() { _o.Yaxis[0].Labels.Formatter = \"v => v\"; }", true)]   // changed afterwards
     [InlineData("private ApexCharts.ApexChartOptions<MetricPoint> _o = CreateOptions(\"#1\");\n" +
                 "<ApexCharts.ApexChart TItem=\"MetricPoint\" Options=\"@_o\" FormatYAxisLabel=\"@Format\">", true)]   // component adds eval
+    [InlineData("private ApexCharts.ApexChartOptions<MetricPoint> _o = CreateOptions(\"#1\");\n" +
+                "<ApexCharts.ApexChart TItem=\"MetricPoint\" Options=\"@_o\" FormatYAxisLabel=\"@(v => v + \"%\")\">", true)]   // as a lambda
+    [InlineData("private ApexCharts.ApexChartOptions<MetricPoint> _o = CreateOptions(\"#1\");\n" +
+                "<ApexCharts.ApexChart TItem=\"MetricPoint\" Options=\"@_o\" FormatYAxisLabel=@Fmt>", true)]   // unquoted
+    [InlineData("private ApexCharts.ApexChartOptions<MetricPoint> _o = CreateOptions(\"#1\");\n" +
+                "void Swap() { this._o = new() { }; }", true)]   // through this.
+    [InlineData("private ApexCharts.ApexChartOptions<MetricPoint> _o = CreateOptions(\"#1\");\n" +
+                "void Swap() { _o ??= new() { }; }", true)]   // ??=
     public void The_chart_file_rules_find_options_the_serialized_check_does_not_see(string source, bool offends)
         => Assert.Equal(offends, ChartFileViolations(source).Any());
 }
