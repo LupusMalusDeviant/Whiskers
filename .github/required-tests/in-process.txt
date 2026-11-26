@@ -170,7 +170,7 @@
 8 Whiskers.Tests.ConcurrencyCacheAliasingTests
 6 Whiskers.Tests.ContainerEnvToolTests
 46 Whiskers.Tests.ContainerRestoreTests
-11 Whiskers.Tests.ContentSecurityPolicySourceTests
+18 Whiskers.Tests.ContentSecurityPolicySourceTests
 11 Whiskers.Tests.CronValidationTests
 2 Whiskers.Tests.CveAgePruneTests
 7 Whiskers.Tests.CveFindingsStorePruneTests
