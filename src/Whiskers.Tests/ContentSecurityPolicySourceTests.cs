@@ -56,4 +56,53 @@ public sealed class ContentSecurityPolicySourceTests
             .Where(c => eval.IsMatch(c.Text)).Select(c => c.Path).ToList();
         Assert.True(offenders.Count == 0, "eval interop the CSP blocks in: " + string.Join(", ", offenders));
     }
+
+    /// <summary>The chart options ApexCharts always serializes as a JS function (<c>{"@eval": …}</c>, its
+    /// <c>FunctionStringConverter</c>): the client evaluates each with <c>eval</c>, which the CSP refuses — the chart
+    /// throws and the circuit ends (2026-11-26, the y-axis label formatter on the dashboard).</summary>
+    internal static IReadOnlyDictionary<string, HashSet<string>> ApexEvalOptions() =>
+        typeof(ApexCharts.YAxis).Assembly.GetTypes()
+            .Where(t => t.Namespace == "ApexCharts")
+            .SelectMany(t => t.GetProperties().Select(p => (Type: t.Name, Property: p)))
+            .Where(x => x.Property.GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonConverterAttribute), true)
+                .Cast<System.Text.Json.Serialization.JsonConverterAttribute>()
+                .Any(a => a.ConverterType?.Name == "FunctionStringConverter"))
+            .GroupBy(x => x.Type, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Property.Name).ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
+
+    // An object initializer of an ApexCharts option type, its own level only: new ApexCharts.YAxisLabels { … }.
+    private static readonly Regex ApexInitializer = new(@"new\s+ApexCharts\.(\w+)\s*\{([^{}]*)\}");
+
+    // A string that contains the word "function": the list converters evaluate such an entry (case-insensitive).
+    private static readonly Regex FunctionText = new(@"""[^""\r\n]*function[^""\r\n]*""", RegexOptions.IgnoreCase);
+
+    internal static IEnumerable<string> ApexEvalUses(string source)
+    {
+        var options = ApexEvalOptions();
+        foreach (Match m in ApexInitializer.Matches(source))
+            if (options.TryGetValue(m.Groups[1].Value, out var names))
+                foreach (var name in names)
+                    if (Regex.IsMatch(m.Groups[2].Value, $@"\b{Regex.Escape(name)}\s*=(?!=)"))
+                        yield return $"{m.Groups[1].Value}.{name}";
+        if (source.Contains("ApexCharts", StringComparison.Ordinal))
+            foreach (Match m in FunctionText.Matches(source))
+                yield return m.Value;
+    }
+
+    [Theory]
+    [InlineData("Labels = new ApexCharts.YAxisLabels { Formatter = \"function(v) { return v + '%' }\" }", true)]   // the crash
+    [InlineData("Labels = new ApexCharts.YAxisLabels { Formatter = \"v => v\" }", true)]   // evaluated whatever it says
+    [InlineData("Yaxis = new ApexCharts.YAxis { DecimalsInFloat = 0, Title = new ApexCharts.AxisTitle { Text = \"%\" } }", false)]
+    [InlineData("<MudTextField Label=\"Name\" /> new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = \"HH:mm\" } }", false)]
+    public void The_chart_scan_finds_evaluated_options_only(string source, bool offends)
+        => Assert.Equal(offends, ApexEvalUses(source).Any());
+
+    [Fact]
+    public void No_chart_sets_an_option_that_ApexCharts_evaluates_as_JavaScript()
+    {
+        Assert.Contains("Formatter", ApexEvalOptions()["YAxisLabels"]);
+        var offenders = Files("*.razor").Concat(Files("*.cs"))
+            .SelectMany(c => ApexEvalUses(c.Text).Select(hit => $"{c.Path} ({hit})")).ToList();
+        Assert.True(offenders.Count == 0, "chart options the CSP refuses to evaluate in: " + string.Join(", ", offenders));
+    }
 }
