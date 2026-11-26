@@ -932,7 +932,10 @@ else
                 {
                     Min = 0,
                     Max = 100,
-                    Labels = new ApexCharts.YAxisLabels { Formatter = "function(v) { return v.toFixed(0) + '%' }" }
+                    // No JS formatter: ApexCharts evaluates one with eval, which the CSP (script-src 'self') refuses and which ends the
+                    // circuit. Whole numbers, and the unit as the axis title.
+                    DecimalsInFloat = 0,
+                    Title = new ApexCharts.AxisTitle { Text = "%" }
                 }
             },
             Tooltip = new ApexCharts.Tooltip { X = new ApexCharts.TooltipX { Format = "HH:mm:ss" } },
