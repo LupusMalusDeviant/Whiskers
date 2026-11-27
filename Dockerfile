@@ -12,7 +12,7 @@ FROM docker:29.9.3-cli@sha256:4d742ab934c2149b628bf26369ac3ec51cb91e2e28fe6722a0
 
 # The SDK is the exact version of global.json (BuildReproducibilityTests): the SDK adds its own framework packages to
 # packages.lock.json, so a different SDK patch would not restore the lock files in locked mode. Move both together.
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS build
 WORKDIR /src
 # Copy every csproj (with its packages.lock.json) first so `dotnet restore` layer-caches. Whiskers references
 # Whiskers.Data and the two per-provider migration assemblies (ADR-0004), and both migration projects reference
