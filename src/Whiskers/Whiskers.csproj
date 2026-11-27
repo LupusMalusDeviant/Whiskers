@@ -18,7 +18,7 @@
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Docker.DotNet.X509" Version="3.125.15" />
     <PackageReference Include="KubernetesClient" Version="21.0.8" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.15" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.14" />
     <!-- R1-54: SMTP over a socket the outbound guard opened. MimeKit (its dependency) pulls in
          System.Security.Cryptography.Pkcs below the current servicing release (10.0.13 with MimeKit 4.18.2; 10.0.0 carried
