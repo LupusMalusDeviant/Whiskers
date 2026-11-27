@@ -52,7 +52,7 @@ RUN rc=0; grep -rl --include='*.cs' --include='*.razor' "$(printf '\r')" /src ||
 WORKDIR /src/Whiskers
 RUN dotnet publish -c Release --no-restore -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.14@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS runtime
 WORKDIR /app
 
 # Ownership proof for the official MCP Registry: must equal "name" in server.json (ServerJsonManifestTests).
